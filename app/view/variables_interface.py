@@ -1,4 +1,6 @@
-from PySide6.QtWidgets import QAbstractItemView, QTableWidgetItem
+from typing import Optional, Dict, Any
+
+from PySide6.QtWidgets import QAbstractItemView, QTableWidgetItem, QWidget
 from qfluentwidgets import (
     CommandBar,
     FluentIcon,
@@ -9,12 +11,20 @@ from qfluentwidgets import (
     TransparentToolButton,
 )
 
-from app.core.calculator import SymbolicCalculator
+from ..core.calculator import SymbolicCalculator, Result
 
 
 class VariablesView(MessageBoxBase):
-    def __init__(self, symbolic_calculator: SymbolicCalculator, parent=None):
-        """变量列表消息框"""
+    """变量列表对话框，用于查看和管理计算器变量"""
+
+    def __init__(self, symbolic_calculator: SymbolicCalculator, parent: Optional[QWidget] = None) -> None:
+        """
+        初始化变量视图对话框
+        
+        Args:
+            symbolic_calculator: 符号计算器实例
+            parent: 父级组件
+        """
         super().__init__(parent)
         self.calculator = symbolic_calculator  # 保存计算器实例引用
         self.titleLabel = SubtitleLabel("变量列表", self)
@@ -26,9 +36,6 @@ class VariablesView(MessageBoxBase):
         self.table.setHorizontalHeaderLabels(["变量名", "值"])
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.DoubleClicked)
-        
-        # 添加标志位避免递归
-        self.is_updating = False
 
         # 填充表格数据
         self.update_table(symbolic_calculator.list_variables())
@@ -69,10 +76,15 @@ class VariablesView(MessageBoxBase):
         self.cancelButton.hide()
 
         # 用于存储重命名时的原始变量名
-        self.original_var_name = None
+        self.original_var_name: Optional[str] = None
 
-    def update_table(self, variables):
-        """更新表格内容"""
+    def update_table(self, variables: Dict[str, Any]) -> None:
+        """
+        更新表格内容
+        
+        Args:
+            variables: 变量字典
+        """
         self.table.setRowCount(len(variables))
         for i, (name, value) in enumerate(variables.items()):
             # 变量名列
@@ -82,7 +94,7 @@ class VariablesView(MessageBoxBase):
             # 值列
             self.table.setItem(i, 1, QTableWidgetItem(str(value)))
 
-    def add_variable(self):
+    def add_variable(self) -> None:
         """添加新变量"""
         # 生成新的变量名
         new_var_name = self.calculator.generate_var_name()
@@ -106,55 +118,51 @@ class VariablesView(MessageBoxBase):
         # 立即进入编辑状态
         self.table.editItem(value_item)
 
-    def on_cell_changed(self, row, column):
-        """处理单元格内容变化"""
-        # 检查是否已经在更新中，如果是则直接返回避免递归
-        if self.is_updating:
-            return
-            
-        try:
-            self.is_updating = True
-            
-            if column == 1:  # 只处理值列的变化
-                var_name = self.table.item(row, 0).text()
-                new_value = self.table.item(row, column).text()
+    def on_cell_changed(self, row: int, column: int) -> None:
+        """
+        处理单元格内容变化
+        
+        Args:
+            row: 行索引
+            column: 列索引
+        """
+        if column == 1:  # 只处理值列的变化
+            var_name = self.table.item(row, 0).text()
+            new_value = self.table.item(row, column).text()
 
-                # 使用计算器更新变量
-                result = self.calculator.add_variable(var_name, new_value)
-                if result.is_error():
-                    # 显示错误信息
-                    InfoBar.error(
-                        title="错误",
-                        content=str(result),
-                        parent=self,
-                        duration=2000,
-                    )
-                    # 恢复原来的值
-                    self.update_table(self.calculator.list_variables())
-            elif column == 0 and self.original_var_name:  # 处理变量名的变化（重命名）
-                new_var_name = self.table.item(row, 0).text()
-
-                # 使用计算器重命名变量
-                result = self.calculator.rename_variable(
-                    self.original_var_name, new_var_name
+            # 使用计算器更新变量
+            result: Result = self.calculator.add_variable(var_name, new_value)
+            if result.is_error():
+                # 显示错误信息
+                InfoBar.error(
+                    title="错误",
+                    content=str(result.content),
+                    parent=self,
+                    duration=2000,
                 )
-                if result.is_error():
-                    InfoBar.error(
-                        title="错误",
-                        content=str(result),
-                        parent=self,
-                        duration=2000,
-                    )
-                    # 恢复原始变量名
-                    self.table.item(row, 0).setText(self.original_var_name)
-                else:
-                    self.update_table(self.calculator.list_variables())
-                self.original_var_name = None
-        finally:
-            # 无论如何都要重置更新标志
-            self.is_updating = False
+                # 只恢复当前单元格的值，不更新整个表格
+                if hasattr(self, "original_value"):
+                    self.table.item(row, column).setText(self.original_value)
+        elif column == 0 and self.original_var_name:  # 处理变量名的变化（重命名）
+            new_var_name = self.table.item(row, 0).text()
 
-    def rename_variable(self):
+            # 保存原始变量名到临时变量，然后立即重置类变量
+            old_var_name = self.original_var_name
+            self.original_var_name = None  # 立即重置，避免重复触发
+
+            # 使用计算器重命名变量
+            result: Result = self.calculator.rename_variable(old_var_name, new_var_name)
+            if result.is_error():
+                InfoBar.error(
+                    title="错误",
+                    content=str(result.content),
+                    parent=self,
+                    duration=2000,
+                )
+                # 只恢复当前单元格的变量名，不更新整个表格
+                self.table.item(row, 0).setText(old_var_name)
+
+    def rename_variable(self) -> None:
         """重命名选中的变量"""
         current_row = self.table.currentRow()
         if current_row >= 0:
@@ -168,17 +176,21 @@ class VariablesView(MessageBoxBase):
                 title="警告", content="请先选择一个变量", parent=self, duration=2000
             )
 
-    def on_cell_double_clicked(self, row, column):
-        """处理单元格双击事件"""
+    def on_cell_double_clicked(self, row: int, column: int) -> None:
+        """
+        处理单元格双击事件
+        
+        Args:
+            row: 行索引
+            column: 列索引
+        """
         # 如果双击的是变量名列，则进入重命名模式
-        if column == 0:
+        if column == 1:
+            self.original_value = self.table.item(row, 1).text()
+        elif column == 0:
             self.original_var_name = self.table.item(row, 0).text()
-            self.table.editItem(self.table.item(row, column))
-        # 如果双击的是值列，则进入编辑模式
-        elif column == 1:
-            self.table.editItem(self.table.item(row, column))
 
-    def edit_variable(self):
+    def edit_variable(self) -> None:
         """编辑选中的变量"""
         current_row = self.table.currentRow()
         if current_row >= 0:
@@ -190,13 +202,13 @@ class VariablesView(MessageBoxBase):
                 title="警告", content="请先选择一个变量", parent=self, duration=2000
             )
 
-    def delete_variable(self):
+    def delete_variable(self) -> None:
         """删除选中变量"""
         current_row = self.table.currentRow()
         if current_row >= 0:
             var_name = self.table.item(current_row, 0).text()
             # 使用计算器删除变量
-            result = self.calculator.delete_variable(var_name)
+            result: Result = self.calculator.delete_variable(var_name)
             if result.is_error():
                 # 更新本地变量列表和表格
                 InfoBar.error(

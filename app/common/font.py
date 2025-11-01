@@ -1,3 +1,4 @@
+# coding=utf-8
 from PySide6.QtGui import QFont
 
 
@@ -9,7 +10,7 @@ class FontManager:
     SERIF_FAMILIES = ["Times New Roman", "NSimsun", "Courier New", "Serif"]
 
     @staticmethod
-    def create_monospace(size=12, bold=False):
+    def get_monospace(size:int=12, bold:bool=False)->QFont:
         """创建等宽字体"""
         font = QFont()
         font.setFamilies(FontManager.MONOSPACE_FAMILIES)
@@ -20,10 +21,12 @@ class FontManager:
         return font
 
     @staticmethod
-    def create_serif(size=12):
+    def get_serif(size:int=12, bold:bool=False)->QFont:
         """创建衬线字体"""
         font = QFont()
         font.setFamilies(FontManager.SERIF_FAMILIES)
         font.setPointSize(size)
         font.setStyleHint(QFont.StyleHint.Serif)
+        if bold:
+            font.setWeight(QFont.Weight.Bold)
         return font
