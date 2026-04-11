@@ -1,0 +1,26 @@
+/* QFluentPlus MathPlotToolbar - Dark Theme */
+
+MathPlotToolbar {
+    background-color: transparent;
+    border: none;
+}
+
+MathPlotToolbar QToolButton {
+    background-color: transparent;
+    border: none;
+    border-radius: 4px;
+    padding: 4px;
+}
+
+MathPlotToolbar QToolButton:hover {
+    background-color: #3c3c3c;
+}
+
+MathPlotToolbar QToolButton:pressed {
+    background-color: #4c4c4c;
+}
+
+MathPlotToolbar QToolButton:checked {
+    background-color: #0078d4;
+    color: white;
+}

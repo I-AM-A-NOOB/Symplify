@@ -1,226 +1,296 @@
-from typing import Optional, Dict, Any
+# coding: utf-8
+"""Variables management interface for the Symplify application.
 
-from PySide6.QtWidgets import QAbstractItemView, QTableWidgetItem, QWidget
+This module provides the variables interface view for viewing and managing
+calculator variables in a table format.
+
+Example:
+    >>> from app.view.variables_interface import VariablesInterface
+    >>> interface = VariablesInterface()
+    >>> interface.show()
+"""
+from typing import Optional, Dict, Any, List, Tuple
+
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QAbstractItemView,
+    QTableWidgetItem,
+)
 from qfluentwidgets import (
-    CommandBar,
-    FluentIcon,
-    InfoBar,
-    MessageBoxBase,
     SubtitleLabel,
     TableWidget,
+    CommandBar,
     TransparentToolButton,
+    FluentIcon,
+    InfoBar,
 )
 
-from ..core.calculator import SymbolicCalculator, Result
 
+class VariablesInterface(QWidget):
+    """Variables management interface view.
 
-class VariablesView(MessageBoxBase):
-    """变量列表对话框，用于查看和管理计算器变量"""
+    Provides a table-based interface for viewing and managing calculator
+    variables. Follows MVVM pattern - contains only view logic.
 
-    def __init__(self, symbolic_calculator: SymbolicCalculator, parent: Optional[QWidget] = None) -> None:
-        """
-        初始化变量视图对话框
-        
+    Signals:
+        variable_add_requested: Emitted when user wants to add a variable.
+        variable_delete_requested: Emitted when user wants to delete a variable.
+            Args:
+                name (str): Name of the variable to delete.
+        variable_edit_requested: Emitted when user edits a variable.
+            Args:
+                name (str): Variable name.
+                value (str): New value.
+        variable_rename_requested: Emitted when user renames a variable.
+            Args:
+                old_name (str): Original variable name.
+                new_name (str): New variable name.
+
+    Attributes:
+        table: The table widget displaying variables.
+
+    Example:
+        >>> interface = VariablesInterface()
+        >>> interface.variable_add_requested.connect(handle_add)
+    """
+
+    variable_add_requested = Signal()
+    variable_delete_requested = Signal(str)
+    variable_edit_requested = Signal(str, str)
+    variable_rename_requested = Signal(str, str)
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        """Initialize the variables interface.
+
         Args:
-            symbolic_calculator: 符号计算器实例
-            parent: 父级组件
+            parent: The parent widget. Defaults to None.
         """
         super().__init__(parent)
-        self.calculator = symbolic_calculator  # 保存计算器实例引用
-        self.titleLabel = SubtitleLabel("变量列表", self)
-        self.viewLayout.addWidget(self.titleLabel)
+        self._original_var_name: Optional[str] = None
+        self._setup_ui()
+        self._connect_signals()
 
-        # 创建表格显示变量
+    def _setup_ui(self) -> None:
+        """Set up the user interface."""
+        self.setContentsMargins(8, 8, 8, 8)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+        # Main layout
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
+
+        # Title
+        self.title_label = SubtitleLabel(self.tr("Variables"), self)
+        layout.addWidget(self.title_label)
+
+        # Variables table
         self.table = TableWidget(self)
         self.table.setColumnCount(2)
-        self.table.setHorizontalHeaderLabels(["变量名", "值"])
+        self.table.setHorizontalHeaderLabels([
+            self.tr("Name"),
+            self.tr("Value"),
+        ])
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.DoubleClicked)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        layout.addWidget(self.table)
 
-        # 填充表格数据
-        self.update_table(symbolic_calculator.list_variables())
+        # Toolbar
+        self._setup_toolbar()
+        layout.addWidget(self.toolbar)
 
-        self.viewLayout.addWidget(self.table)
+    def _setup_toolbar(self) -> None:
+        """Set up the toolbar with action buttons."""
+        self.toolbar = CommandBar(self)
 
-        # 创建工具栏
-        self.toolbar_layout = CommandBar()
+        # Add button
+        self.add_button = TransparentToolButton(FluentIcon.ADD, self)
+        self.add_button.setToolTip(self.tr("Add variable"))
+        self.toolbar.addWidget(self.add_button)
 
-        self.add_button = TransparentToolButton(FluentIcon.ADD, self)  # 添加变量的按钮
-        self.add_button.clicked.connect(self.add_variable)
+        # Delete button
+        self.delete_button = TransparentToolButton(FluentIcon.REMOVE, self)
+        self.delete_button.setToolTip(self.tr("Delete selected variable"))
+        self.toolbar.addWidget(self.delete_button)
 
-        self.delete_button = TransparentToolButton(
-            FluentIcon.REMOVE, self
-        )  # 删除变量的按钮
-        self.delete_button.clicked.connect(self.delete_variable)
+        # Edit button
+        self.edit_button = TransparentToolButton(FluentIcon.EDIT, self)
+        self.edit_button.setToolTip(self.tr("Edit selected variable"))
+        self.toolbar.addWidget(self.edit_button)
 
-        # 添加编辑按钮
-        self.edit_button = TransparentToolButton(FluentIcon.LABEL, self)
-        self.edit_button.clicked.connect(self.edit_variable)
-
-        # 添加重命名按钮
+        # Rename button
         self.rename_button = TransparentToolButton(FluentIcon.FONT, self)
-        self.rename_button.clicked.connect(self.rename_variable)
+        self.rename_button.setToolTip(self.tr("Rename selected variable"))
+        self.toolbar.addWidget(self.rename_button)
 
-        self.toolbar_layout.addWidget(self.add_button)
-        self.toolbar_layout.addWidget(self.delete_button)
-        self.toolbar_layout.addWidget(self.edit_button)
-        self.toolbar_layout.addWidget(self.rename_button)
-        self.viewLayout.addWidget(self.toolbar_layout)
+    def _connect_signals(self) -> None:
+        """Connect UI signals to slots."""
+        # Toolbar buttons
+        self.add_button.clicked.connect(self.variable_add_requested.emit)
+        self.delete_button.clicked.connect(self._on_delete)
+        self.edit_button.clicked.connect(self._on_edit)
+        self.rename_button.clicked.connect(self._on_rename)
 
-        # 监听表格单元格变化
-        self.table.cellChanged.connect(self.on_cell_changed)
-        # 监听双击事件
-        self.table.cellDoubleClicked.connect(self.on_cell_double_clicked)
+        # Table signals
+        self.table.cellChanged.connect(self._on_cell_changed)
+        self.table.cellDoubleClicked.connect(self._on_cell_double_clicked)
 
-        self.yesButton.setText("确定")
-        self.cancelButton.hide()
-
-        # 用于存储重命名时的原始变量名
-        self.original_var_name: Optional[str] = None
-
-    def update_table(self, variables: Dict[str, Any]) -> None:
-        """
-        更新表格内容
-        
-        Args:
-            variables: 变量字典
-        """
-        self.table.setRowCount(len(variables))
-        for i, (name, value) in enumerate(variables.items()):
-            # 变量名列
-            name_item = QTableWidgetItem(name)
-            self.table.setItem(i, 0, name_item)
-
-            # 值列
-            self.table.setItem(i, 1, QTableWidgetItem(str(value)))
-
-    def add_variable(self) -> None:
-        """添加新变量"""
-        # 生成新的变量名
-        new_var_name = self.calculator.generate_var_name()
-
-        # 直接在表格中添加新行
-        row_count = self.table.rowCount()
-        self.table.setRowCount(row_count + 1)
-
-        # 添加变量名列
-        name_item = QTableWidgetItem(new_var_name)
-
-        self.table.setItem(row_count, 0, name_item)
-
-        # 添加值列
-        value_item = QTableWidgetItem("0")
-        self.table.setItem(row_count, 1, value_item)
-
-        # 选中新添加的行
-        self.table.setCurrentCell(row_count, 1)
-
-        # 立即进入编辑状态
-        self.table.editItem(value_item)
-
-    def on_cell_changed(self, row: int, column: int) -> None:
-        """
-        处理单元格内容变化
-        
-        Args:
-            row: 行索引
-            column: 列索引
-        """
-        if column == 1:  # 只处理值列的变化
-            var_name = self.table.item(row, 0).text()
-            new_value = self.table.item(row, column).text()
-
-            # 使用计算器更新变量
-            result: Result = self.calculator.add_variable(var_name, new_value)
-            if result.is_error():
-                # 显示错误信息
-                InfoBar.error(
-                    title="错误",
-                    content=str(result.content),
-                    parent=self,
-                    duration=2000,
-                )
-                # 只恢复当前单元格的值，不更新整个表格
-                if hasattr(self, "original_value"):
-                    self.table.item(row, column).setText(self.original_value)
-        elif column == 0 and self.original_var_name:  # 处理变量名的变化（重命名）
-            new_var_name = self.table.item(row, 0).text()
-
-            # 保存原始变量名到临时变量，然后立即重置类变量
-            old_var_name = self.original_var_name
-            self.original_var_name = None  # 立即重置，避免重复触发
-
-            # 使用计算器重命名变量
-            result: Result = self.calculator.rename_variable(old_var_name, new_var_name)
-            if result.is_error():
-                InfoBar.error(
-                    title="错误",
-                    content=str(result.content),
-                    parent=self,
-                    duration=2000,
-                )
-                # 只恢复当前单元格的变量名，不更新整个表格
-                self.table.item(row, 0).setText(old_var_name)
-
-    def rename_variable(self) -> None:
-        """重命名选中的变量"""
-        current_row = self.table.currentRow()
-        if current_row >= 0:
-            # 记录原始变量名
-            self.original_var_name = self.table.item(current_row, 0).text()
-            # 允许编辑变量名
-            self.table.setCurrentCell(current_row, 0)  # 选中变量名列
-            self.table.editItem(self.table.item(current_row, 0))  # 进入编辑模式
+    def _on_delete(self) -> None:
+        """Handle delete button click."""
+        row = self.table.currentRow()
+        if row >= 0:
+            name_item = self.table.item(row, 0)
+            if name_item:
+                var_name = name_item.text()
+                self.variable_delete_requested.emit(var_name)
         else:
-            InfoBar.warning(
-                title="警告", content="请先选择一个变量", parent=self, duration=2000
+            self.show_warning(
+                self.tr("Warning"),
+                self.tr("Please select a variable to delete")
             )
 
-    def on_cell_double_clicked(self, row: int, column: int) -> None:
-        """
-        处理单元格双击事件
-        
+    def _on_edit(self) -> None:
+        """Handle edit button click."""
+        row = self.table.currentRow()
+        if row >= 0:
+            self.table.editItem(self.table.item(row, 1))
+        else:
+            self.show_warning(
+                self.tr("Warning"),
+                self.tr("Please select a variable to edit")
+            )
+
+    def _on_rename(self) -> None:
+        """Handle rename button click."""
+        row = self.table.currentRow()
+        if row >= 0:
+            name_item = self.table.item(row, 0)
+            if name_item:
+                self._original_var_name = name_item.text()
+                self.table.editItem(name_item)
+        else:
+            self.show_warning(
+                self.tr("Warning"),
+                self.tr("Please select a variable to rename")
+            )
+
+    def _on_cell_changed(self, row: int, column: int) -> None:
+        """Handle table cell changes.
+
         Args:
-            row: 行索引
-            column: 列索引
+            row: The row index.
+            column: The column index.
         """
-        # 如果双击的是变量名列，则进入重命名模式
-        if column == 1:
-            self.original_value = self.table.item(row, 1).text()
-        elif column == 0:
-            self.original_var_name = self.table.item(row, 0).text()
-
-    def edit_variable(self) -> None:
-        """编辑选中的变量"""
-        current_row = self.table.currentRow()
-        if current_row >= 0:
-            # 直接进入编辑状态
-            self.table.setCurrentCell(current_row, 1)  # 选中值列
-            self.table.editItem(self.table.item(current_row, 1))  # 进入编辑模式
-        else:
-            InfoBar.warning(
-                title="警告", content="请先选择一个变量", parent=self, duration=2000
-            )
-
-    def delete_variable(self) -> None:
-        """删除选中变量"""
-        current_row = self.table.currentRow()
-        if current_row >= 0:
-            var_name = self.table.item(current_row, 0).text()
-            # 使用计算器删除变量
-            result: Result = self.calculator.delete_variable(var_name)
-            if result.is_error():
-                # 更新本地变量列表和表格
-                InfoBar.error(
-                    title="错误",
-                    content=f"删除变量 {var_name} 失败",
-                    parent=self,
-                    duration=2000,
+        if column == 0:  # Name column - rename
+            new_name = self.table.item(row, 0).text()
+            if self._original_var_name and self._original_var_name != new_name:
+                self.variable_rename_requested.emit(
+                    self._original_var_name, new_name
                 )
+                self._original_var_name = None
+        elif column == 1:  # Value column - edit
+            name = self.table.item(row, 0).text()
+            value = self.table.item(row, 1).text()
+            self.variable_edit_requested.emit(name, value)
 
-            else:
-                self.update_table(self.calculator.list_variables())
-        else:
-            InfoBar.warning(
-                title="警告", content="请先选择一个变量", parent=self, duration=2000
-            )
+    def _on_cell_double_clicked(self, row: int, column: int) -> None:
+        """Handle table cell double click.
+
+        Args:
+            row: The row index.
+            column: The column index.
+        """
+        if column == 0:  # Name column
+            name_item = self.table.item(row, 0)
+            if name_item:
+                self._original_var_name = name_item.text()
+
+    # Public API for ViewModel binding
+
+    def set_variables(self, variables: Dict[str, Any]) -> None:
+        """Set the variables to display in the table.
+
+        Args:
+            variables: Dictionary mapping variable names to values.
+        """
+        # Block signals during update
+        self.table.blockSignals(True)
+        try:
+            self.table.setRowCount(len(variables))
+            for i, (name, value) in enumerate(variables.items()):
+                # Name column
+                name_item = QTableWidgetItem(str(name))
+                name_item.setFlags(
+                    name_item.flags() | Qt.ItemFlag.ItemIsEditable
+                )
+                self.table.setItem(i, 0, name_item)
+
+                # Value column
+                value_str = self._format_value(value)
+                value_item = QTableWidgetItem(value_str)
+                value_item.setFlags(
+                    value_item.flags() | Qt.ItemFlag.ItemIsEditable
+                )
+                self.table.setItem(i, 1, value_item)
+        finally:
+            self.table.blockSignals(False)
+
+    def _format_value(self, value: Any) -> str:
+        """Format a variable value for display.
+
+        Args:
+            value: The value to format.
+
+        Returns:
+            Formatted string representation.
+        """
+        try:
+            return str(value)
+        except Exception:
+            return "<unrepresentable>"
+
+    def get_selected_variable(self) -> Optional[str]:
+        """Get the name of the currently selected variable.
+
+        Returns:
+            The variable name, or None if no selection.
+        """
+        row = self.table.currentRow()
+        if row >= 0:
+            name_item = self.table.item(row, 0)
+            if name_item:
+                return name_item.text()
+        return None
+
+    def show_info(self, title: str, content: str, duration: int = 2000) -> None:
+        """Show an info message.
+
+        Args:
+            title: The message title.
+            content: The message content.
+            duration: Display duration in milliseconds. Defaults to 2000.
+        """
+        InfoBar.info(title=title, content=content, parent=self, duration=duration)
+
+    def show_warning(self, title: str, content: str, duration: int = 2000) -> None:
+        """Show a warning message.
+
+        Args:
+            title: The warning title.
+            content: The warning content.
+            duration: Display duration in milliseconds. Defaults to 2000.
+        """
+        InfoBar.warning(title=title, content=content, parent=self, duration=duration)
+
+    def show_error(self, title: str, content: str, duration: int = 2000) -> None:
+        """Show an error message.
+
+        Args:
+            title: The error title.
+            content: The error content.
+            duration: Display duration in milliseconds. Defaults to 2000.
+        """
+        InfoBar.error(title=title, content=content, parent=self, duration=duration)

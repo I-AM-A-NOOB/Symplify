@@ -1,0 +1,12 @@
+/* QFluentPlus MathPlotWidget - Dark Theme */
+
+MathPlotWidget {
+    background-color: transparent;
+    border: 1px solid #3c3c3c;
+    border-radius: 8px;
+}
+
+MathPlotWidget QLabel {
+    color: #cccccc;
+    font-size: 12px;
+}

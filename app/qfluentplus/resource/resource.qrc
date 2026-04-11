@@ -1,0 +1,13 @@
+<!DOCTYPE RCC>
+<RCC>
+  <qresource prefix="/qfluentplus">
+    <file alias="qss/light/splitter.qss">qss/light/splitter.qss</file>
+    <file alias="qss/dark/splitter.qss">qss/dark/splitter.qss</file>
+    <file alias="qss/light/plot_widget.qss">qss/light/plot_widget.qss</file>
+    <file alias="qss/dark/plot_widget.qss">qss/dark/plot_widget.qss</file>
+    <file alias="qss/light/plot_toolbar.qss">qss/light/plot_toolbar.qss</file>
+    <file alias="qss/dark/plot_toolbar.qss">qss/dark/plot_toolbar.qss</file>
+    <file alias="qss/light/latex_label.qss">qss/light/latex_label.qss</file>
+    <file alias="qss/dark/latex_label.qss">qss/dark/latex_label.qss</file>
+  </qresource>
+</RCC>

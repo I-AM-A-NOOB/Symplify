@@ -1,7 +1,16 @@
+# Python related files
 __pycache__
 /.venv
+# IDE related files
 /.idea
 /.vscode
+/.trae
+# Distribution files
 /main.build
 /main.dist
 /build
+# Reference files (For Vibe Coding only)
+/examples
+# Old files
+*.old
+*.old.py

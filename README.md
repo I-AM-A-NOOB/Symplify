@@ -55,11 +55,11 @@ python -m nuitka --msvc=latest --lto=yes --windows-console-mode=disable --standa
 
 ## 开发计划
 
-- [ ] 解耦
-- [ ] UI Refresh
-- [ ] $\LaTeX$渲染支持（基于`mathtext`）
-- [ ] 添加绘图功能（基于`matplotlib`）
-- [ ] 更丰富的结果展示
+- [X] 解耦
+- [X] UI Refresh
+- [X] $\LaTeX$渲染支持（基于 `mathtext`）
+- [X] 添加绘图功能（基于 `matplotlib`）
+- [X] 更丰富的结果展示
 - [ ] 支持导出计算结果
 
 ## 许可证
@@ -70,10 +70,10 @@ python -m nuitka --msvc=latest --lto=yes --windows-console-mode=disable --standa
 
 ### 使用的开源项目
 
-|Project|License|
-|-|-|
-|[PySide6](https://doc.qt.io/qtforpython-6/)|[LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only](https://www.qt.io/licensing/open-source-lgpl-obligations)|
-|[sympy](https://sympy.org)|[BSD License (BSD)](https://github.com/sympy/sympy/blob/master/LICENSE)|
-|[PyQt-Fluent-Widgets](https://qfluentwidgets.com)|[GNU General Public License v3 (GPLv3)](https://github.com/zhiyiYo/PyQt-Fluent-Widgets/blob/PySide6/LICENSE)|
-|[Fluent UI System Icons](https://github.com/microsoft/fluentui-system-icons)|[MIT License](https://github.com/microsoft/fluentui-system-icons/blob/main/LICENSE)|
-|[RainbowBrackets](https://github.com/absop/RainbowBrackets)|[MIT License](https://github.com/absop/RainbowBrackets/blob/master/LICENSE)|
+| Project                                                                   | License                                                                                                   |
+| ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| [PySide6](https://doc.qt.io/qtforpython-6/)                                  | [LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only](https://www.qt.io/licensing/open-source-lgpl-obligations)    |
+| [sympy](https://sympy.org)                                                   | [BSD License (BSD)](https://github.com/sympy/sympy/blob/master/LICENSE)                                      |
+| [PyQt-Fluent-Widgets](https://qfluentwidgets.com)                            | [GNU General Public License v3 (GPLv3)](https://github.com/zhiyiYo/PyQt-Fluent-Widgets/blob/PySide6/LICENSE) |
+| [Fluent UI System Icons](https://github.com/microsoft/fluentui-system-icons) | [MIT License](https://github.com/microsoft/fluentui-system-icons/blob/main/LICENSE)                          |
+| [RainbowBrackets](https://github.com/absop/RainbowBrackets)                  | [MIT License](https://github.com/absop/RainbowBrackets/blob/master/LICENSE)                                  |

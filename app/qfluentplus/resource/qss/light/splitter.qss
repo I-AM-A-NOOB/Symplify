@@ -1,0 +1,13 @@
+/* QFluentPlus Splitter - Light Theme */
+
+QSplitter::handle {
+    background-color: transparent;
+}
+
+QSplitter::handle:horizontal {
+    width: 15px;
+}
+
+QSplitter::handle:vertical {
+    height: 15px;
+}

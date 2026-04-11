@@ -1,0 +1,15 @@
+{
+    "Appearance": {
+        "CustomThemeColor": "#ff009faa",
+        "ThemeColorMode": "default",
+        "ThemeMode": "Auto"
+    },
+    "QFluentWidgets": {
+        "FontFamilies": [
+            "Segoe UI",
+            "Microsoft YaHei",
+            "PingFang SC"
+        ],
+        "ThemeColor": "#ff009faa"
+    }
+}
