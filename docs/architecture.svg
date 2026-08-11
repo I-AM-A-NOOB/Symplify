@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="745" viewBox="0 0 1100 745" font-family="'Segoe UI', 'Microsoft YaHei', Arial, sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <path d="M0,0 L9,3 L0,6 z" fill="#374151"/>
+    </marker>
+    <marker id="arrowModel" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <path d="M0,0 L9,3 L0,6 z" fill="#b45309"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1100" height="745" fill="#ffffff"/>
+
+  <!-- ======================= Title ======================= -->
+  <text x="550" y="26" text-anchor="middle" font-size="20" font-weight="bold" fill="#111827">Symplify Architecture — MVVM</text>
+  <text x="550" y="45" text-anchor="middle" font-size="12.5" fill="#6b7280">Model-focused view: pure-Python core, zero Qt dependency</text>
+
+  <!-- ======================= Band 1: View (QML) ======================= -->
+  <rect x="30" y="62" width="1040" height="100" rx="10" fill="#eff6ff" stroke="#93c5fd"/>
+  <text x="46" y="80" font-size="12" font-weight="bold" fill="#1d4ed8">View — Qt Quick (QML), presentation only</text>
+
+  <rect x="46" y="88" width="300" height="58" rx="6" fill="#dbeafe" stroke="#60a5fa"/>
+  <text x="56" y="109" font-size="12.5" font-weight="bold" fill="#1e3a8a">MainWindow.qml</text>
+  <text x="56" y="127" font-size="10.5" fill="#475569">nav drawer · toolbar · SwipeView</text>
+
+  <rect x="365" y="88" width="360" height="58" rx="6" fill="#dbeafe" stroke="#60a5fa"/>
+  <text x="375" y="109" font-size="12.5" font-weight="bold" fill="#1e3a8a">Pages</text>
+  <text x="375" y="127" font-size="10.5" fill="#475569">Calculator · Variables · History · Log · Settings</text>
+
+  <rect x="744" y="88" width="316" height="58" rx="6" fill="#dbeafe" stroke="#60a5fa"/>
+  <text x="754" y="109" font-size="12.5" font-weight="bold" fill="#1e3a8a">Components</text>
+  <text x="754" y="127" font-size="10.5" fill="#475569">KeyboardPanel · NavItem · EmptyArea</text>
+
+  <!-- View <-> ViewModel flow -->
+  <text x="550" y="171" text-anchor="middle" font-size="10" fill="#6b7280">&#8597; QML context properties · slots · signals</text>
+  <text x="550" y="181" text-anchor="middle" font-size="9.5" fill="#9ca3af">vm · calcVM · varsVM · variablesModel · historyVM · logVM · keyboardTabs</text>
+
+  <!-- ======================= Band 2: ViewModel ======================= -->
+  <rect x="30" y="188" width="1040" height="150" rx="10" fill="#f5f3ff" stroke="#c4b5fd"/>
+  <text x="46" y="206" font-size="12" font-weight="bold" fill="#6d28d9">ViewModel — Qt Bridge (PySide6 QObject), only layer that touches Qt</text>
+
+  <rect x="46" y="214" width="280" height="40" rx="6" fill="#ede9fe" stroke="#a78bfa"/>
+  <text x="56" y="230" font-size="12" font-weight="bold" fill="#4c1d95">MainViewModel</text>
+  <text x="56" y="245" font-size="10.5" fill="#475569">root · clipboard · focus navigation</text>
+
+  <rect x="341" y="214" width="330" height="40" rx="6" fill="#ede9fe" stroke="#a78bfa"/>
+  <text x="351" y="230" font-size="12" font-weight="bold" fill="#4c1d95">CalculatorViewModel</text>
+  <text x="351" y="245" font-size="10.5" fill="#475569">result state · LaTeX SVG data URL</text>
+
+  <rect x="686" y="214" width="374" height="40" rx="6" fill="#ede9fe" stroke="#a78bfa"/>
+  <text x="696" y="230" font-size="12" font-weight="bold" fill="#4c1d95">VariablesViewModel</text>
+  <text x="696" y="245" font-size="10.5" fill="#475569">add / delete / rename / update slots</text>
+
+  <rect x="46" y="262" width="280" height="40" rx="6" fill="#ede9fe" stroke="#a78bfa"/>
+  <text x="56" y="278" font-size="12" font-weight="bold" fill="#4c1d95">VariablesModel</text>
+  <text x="56" y="293" font-size="10.5" fill="#475569">QAbstractTableModel · cache + revision</text>
+
+  <rect x="341" y="262" width="330" height="40" rx="6" fill="#ede9fe" stroke="#a78bfa"/>
+  <text x="351" y="278" font-size="12" font-weight="bold" fill="#4c1d95">HistoryModel</text>
+  <text x="351" y="293" font-size="10.5" fill="#475569">QAbstractTableModel · expr / result / mode</text>
+
+  <rect x="686" y="262" width="374" height="40" rx="6" fill="#ede9fe" stroke="#a78bfa"/>
+  <text x="696" y="278" font-size="12" font-weight="bold" fill="#4c1d95">LogViewModel</text>
+  <text x="696" y="293" font-size="10.5" fill="#475569">incremental formattedLogs string</text>
+
+  <!-- ViewModel -> Model flow -->
+  <text x="550" y="350" text-anchor="middle" font-size="10" fill="#6b7280">&#8595; ViewModels call Model directly — python/model/ imports no Qt</text>
+
+  <!-- ======================= Band 3: Model (FOCUS) ======================= -->
+  <rect x="30" y="358" width="1040" height="218" rx="10" fill="#fffbeb" stroke="#f59e0b" stroke-width="2"/>
+  <text x="46" y="376" font-size="12" font-weight="bold" fill="#b45309">Model — Pure Python, zero Qt dependency &#9733; FOCUS</text>
+
+  <!-- Calculator -->
+  <rect x="46" y="390" width="330" height="168" rx="6" fill="#fef3c7" stroke="#f59e0b"/>
+  <text x="56" y="410" font-size="12.5" font-weight="bold" fill="#78350f">Calculator</text>
+  <text x="56" y="431" font-size="10.5" font-family="Consolas, monospace" fill="#92400e">evaluate(expr, variables)</text>
+  <text x="56" y="447" font-size="10.5" font-family="Consolas, monospace" fill="#92400e">   &#8594; CalculationResult</text>
+  <text x="56" y="468" font-size="10.5" font-family="Consolas, monospace" fill="#92400e">parse_expr(transformations)</text>
+  <text x="76" y="484" font-size="10" fill="#92400e">implicit_multiplication</text>
+  <text x="76" y="498" font-size="10" fill="#92400e">convert_xor</text>
+  <text x="56" y="519" font-size="10.5" font-family="Consolas, monospace" fill="#92400e">latex(parsed) for display</text>
+  <text x="56" y="538" font-size="10" fill="#b45309">file: python/model/calculator.py</text>
+
+  <!-- Calculator -> CalculationResult -->
+  <line x1="376" y1="418" x2="396" y2="418" stroke="#b45309" stroke-width="1.5" marker-end="url(#arrowModel)"/>
+
+  <!-- CalculationResult -->
+  <rect x="396" y="390" width="290" height="82" rx="6" fill="#fef3c7" stroke="#f59e0b"/>
+  <text x="406" y="410" font-size="12.5" font-weight="bold" fill="#78350f">CalculationResult (dataclass)</text>
+  <text x="406" y="430" font-size="10.5" font-family="Consolas, monospace" fill="#92400e">success · result_type · value</text>
+  <text x="406" y="446" font-size="10.5" font-family="Consolas, monospace" fill="#92400e">latex · error · metadata</text>
+  <text x="406" y="465" font-size="10" fill="#b45309">file: python/model/calculator.py</text>
+
+  <!-- ResultType -->
+  <rect x="396" y="482" width="140" height="84" rx="6" fill="#fef3c7" stroke="#f59e0b"/>
+  <text x="406" y="500" font-size="11.5" font-weight="bold" fill="#78350f">ResultType (Enum)</text>
+  <text x="406" y="518" font-size="10" fill="#92400e">EXPRESSION</text>
+  <text x="406" y="532" font-size="10" fill="#92400e">ASSIGNMENT</text>
+  <text x="406" y="546" font-size="10" fill="#92400e">ERROR</text>
+
+  <!-- InputMode -->
+  <rect x="546" y="482" width="140" height="84" rx="6" fill="#fef3c7" stroke="#f59e0b"/>
+  <text x="556" y="500" font-size="11.5" font-weight="bold" fill="#78350f">InputMode (Enum)</text>
+  <text x="556" y="518" font-size="10" fill="#92400e">CODE</text>
+  <text x="556" y="532" font-size="10" fill="#92400e">ASSIGN</text>
+
+  <!-- VariableManager -->
+  <rect x="700" y="390" width="360" height="168" rx="6" fill="#fef3c7" stroke="#f59e0b"/>
+  <text x="710" y="410" font-size="12.5" font-weight="bold" fill="#78350f">VariableManager</text>
+  <text x="710" y="431" font-size="10.5" font-family="Consolas, monospace" fill="#92400e">_variables: Dict[str, Any]  (in-memory)</text>
+  <text x="710" y="447" font-size="10.5" font-family="Consolas, monospace" fill="#92400e">_revision: int  (cache invalidation)</text>
+  <text x="710" y="468" font-size="10.5" font-family="Consolas, monospace" fill="#92400e">validate_name() · is_sympy_builtin()</text>
+  <text x="710" y="484" font-size="10.5" font-family="Consolas, monospace" fill="#92400e">get · set · delete · rename · clear</text>
+  <text x="710" y="500" font-size="10.5" font-family="Consolas, monospace" fill="#92400e">generate_unique_name(base)</text>
+  <text x="710" y="519" font-size="10" fill="#b45309">file: python/model/variable.py</text>
+  <text x="710" y="538" font-size="10" fill="#b45309">+ InputMode: python/model/input_mode.py</text>
+
+  <!-- VariableManager -> SymPy (dashed) -->
+  <path d="M 850 558 L 300 592 L 236 616" fill="none" stroke="#b45309" stroke-width="1.5" stroke-dasharray="5,4" marker-end="url(#arrowModel)"/>
+  <text x="430" y="579" font-size="9.5" fill="#b45309">is_sympy_builtin() &#8594; hasattr(sp, name)</text>
+
+  <!-- Model -> External flow -->
+  <text x="550" y="588" text-anchor="middle" font-size="10" fill="#6b7280">&#8595; consumes</text>
+
+  <!-- ======================= Band 4: External Engines ======================= -->
+  <rect x="30" y="598" width="1040" height="102" rx="10" fill="#f9fafb" stroke="#d1d5db"/>
+  <text x="46" y="616" font-size="12" font-weight="bold" fill="#374151">External Engines</text>
+
+  <rect x="46" y="624" width="230" height="60" rx="6" fill="#e5e7eb" stroke="#9ca3af"/>
+  <text x="56" y="645" font-size="12" font-weight="bold" fill="#111827">SymPy — CAS engine</text>
+  <text x="56" y="663" font-size="10" fill="#4b5563">parse_expr · latex · builtins</text>
+
+  <rect x="296" y="624" width="240" height="60" rx="6" fill="#e5e7eb" stroke="#9ca3af"/>
+  <text x="306" y="645" font-size="12" font-weight="bold" fill="#111827">ziamath</text>
+  <text x="306" y="663" font-size="10" fill="#4b5563">LaTeX &#8594; SVG rendering</text>
+
+  <rect x="556" y="624" width="220" height="60" rx="6" fill="#e5e7eb" stroke="#9ca3af"/>
+  <text x="566" y="645" font-size="12" font-weight="bold" fill="#111827">PyYAML</text>
+  <text x="566" y="663" font-size="10" fill="#4b5563">keyboard_config.yaml layout</text>
+
+  <rect x="796" y="624" width="264" height="60" rx="6" fill="#e5e7eb" stroke="#9ca3af"/>
+  <text x="806" y="645" font-size="12" font-weight="bold" fill="#111827">PySide6 — Qt 6</text>
+  <text x="806" y="663" font-size="10" fill="#4b5563">QML runtime · QAbstractTableModel</text>
+
+  <!-- Calculator -> SymPy -->
+  <line x1="211" y1="558" x2="211" y2="624" stroke="#374151" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- ======================= Footnote ======================= -->
+  <text x="550" y="726" text-anchor="middle" font-size="10.5" fill="#6b7280">
+    Utilities (outside the model): python/latex_render.py &#8594; ziamath  ·  python/keyboard_config.py &#8594; PyYAML
+  </text>
+  <text x="550" y="740" text-anchor="middle" font-size="10.5" fill="#6b7280">
+    Boundary rule: python/model/* never imports Qt — every call crosses a ViewModel first (main.py is the composition root).
+  </text>
+</svg>

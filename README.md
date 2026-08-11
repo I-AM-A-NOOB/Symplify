@@ -1,79 +1,131 @@
-# Symplify - Simplify Sympy calculation
+<p align="center">
+  <h1 align="center">Symplify</h1>
+  <p align="center">A Modern Symbolic Calculator Built with SymPy + PySide6</p>
+</p>
 
-一个基于 SymPy 和 PySide6 的图形化符号计算器，支持代数计算、变量管理、历史记录等功能，使用 100% Vibe Coding 实现。
+---
 
-## 功能特性
+Symplify is a graphical symbolic calculator that wraps SymPy's powerful CAS (Computer Algebra System) in a clean, Fluent-styled desktop UI. The interface is written in **QML (Qt Quick Controls)** using the native `FluentWinUI3` style, with business logic kept in a pure-Python **MVVM** core that has zero Qt dependencies.
 
-- **符号计算**：使用 SymPy 进行符号计算
-- **变量管理**：支持变量管理
-- **可视化界面**：现代化的 GUI 界面，基于 PySide6 和 QFluentWidgets
-- **软键盘**：内置软键盘，支持快速输入数学符号和函数
-- **历史记录**：保存计算历史，支持复制表达式和结果
-- **函数文档**：展示光标位置函数的文档
+> **Status:** QML prototype. The plotting area and settings page are placeholders; see [Roadmap](#roadmap).
 
-## 安装依赖
+## Features
 
-```shell
-pip install -r requirements.txt
-```
+- **Symbolic & Numeric Computation** — Derivatives, integrals, limits, equation solving, matrix algebra, and more via SymPy.
+- **Dual Input Modes** — Toggle between **Code** (evaluate any expression) and **Assign** (variable assignment with dedicated name/operator/value fields, including `+=`, `-=`, `*=`, `/=`).
+- **Variable Management** — Dedicated variables page with add/edit/delete/rename, real-time validation, and warnings when shadowing a SymPy built-in constant (`pi`, `E`, ...).
+- **$\LaTeX$ Rendering** — Results rendered $\LaTeX$ via `ziamath`.
+- **Keyboard Panel** — On-screen math keyboard with smart cursor positioning for Greek letters, operators, and common functions (7 tabs, YAML-configurable).
+- **History & Log** — Calculation history with copy-to-clipboard; scrollable log with info/warning/error levels.
+- **Focus Navigation** — `Ctrl+Tab` / `Ctrl+Shift+Tab` cycle focus through the UI.
 
-## 运行程序
+## Quick Start
 
-```shell
+### Prerequisites
+
+- Python 3.11+
+- [uv](https://docs.astral.sh/uv/) (recommended) or pip
+
+### Installation & Run
+
+```bash
+git clone https://github.com/I-AM-A-NOOB/Symplify.git
+cd Symplify
+
+uv sync          # or: pip install -e .
 python main.py
 ```
 
-## 打包
+## Architecture
 
-### Windows
+Symplify follows **MVVM**. The `python/` package is split into three layers; the model is pure Python with no Qt imports, which keeps it unit-testable and independent of any UI framework.
 
-```shell
-python -m nuitka --msvc=latest --lto=yes --windows-console-mode=disable --standalone --enable-plugin=pyside6 --windows-icon-from-ico=./resource/images/Built_with_Qt.ico ./main.py
+![Architecture diagram, model-focused](docs/architecture.svg)
+
+- **Model** (`python/model/`) — Pure business logic: `Calculator` (SymPy evaluation), `VariableManager` (in-memory variable store with a revision counter for cache invalidation), `InputMode` / `ResultType` enums, and the `CalculationResult` dataclass. Zero Qt dependency.
+- **ViewModel** (`python/viewmodel/`) — Qt bridge layer. `QObject` subclasses expose properties, signals, and slots to QML; `QAbstractTableModel`s back the variables/history tables. Also contains the `latex_render` (ziamath) and `keyboard_config` (YAML) helpers.
+- **View** (`qml/`) — Qt Quick UI only: `MainWindow.qml`, the five pages, and the `KeyboardPanel`. No business logic.
+- **Composition root** (`main.py`) — Builds `MainViewModel`, registers the viewmodels as flat QML context properties (`vm`, `calcVM`, `varsVM`, `historyVM`, `logVM`, `variablesModel`, `keyboardTabs`), and starts the QML engine.
+
+A request flows: **QML event → ViewModel slot → Model → SymPy → result → LaTeX/SVG → QML**. A detailed walkthrough lives in [`docs/architecture.md`](docs/architecture.md).
+
+## Project Structure
+
+```
+main.py                        # Entry point (composition root)
+python/
+  model/                       # Pure business logic, zero Qt
+    calculator.py              #   Calculator, CalculationResult, ResultType
+    variable.py                #   VariableManager
+    input_mode.py              #   InputMode (CODE / ASSIGN)
+  viewmodel/                   # Qt bridge (QObject + QAbstractTableModel)
+    main_viewmodel.py          #   Root VM, aggregates all children
+    calculator_viewmodel.py    #   Result state, LaTeX SVG, calculate slots
+    variables_viewmodel.py     #   CRUD slots + VariablesModel table
+    history_viewmodel.py       #   HistoryModel table
+    log_viewmodel.py           #   LogViewModel
+  latex_render.py              # LaTeX -> SVG via ziamath
+  keyboard_config.py           # Keyboard layout from keyboard_config.yaml
+qml/
+  MainWindow.qml               # Toolbar, SwipeView, navigation drawer
+  components/                  # KeyboardPanel, NavItem, EmptyArea
+  pages/                       # Calculator, Variables, History, Log, Settings
+docs/
+  architecture.svg             # Architecture diagram (model-focused)
+  architecture.md              # Architecture walkthrough
+test_plot.py                   # Experimental SymPy->GLSL GPU plotting prototype
 ```
 
-### macOS/Linux
+## Usage
 
-```shell
-# Coming soooooon...
+### Code Mode
+
+Type any valid SymPy expression and press **Ctrl+Return** (or click **Calculate**):
+
+| Expression | Result |
+|---|---|
+| `diff(x**2, x)` | $2x$ |
+| `integrate(sin(x), x)` | $-\cos(x)$ |
+| `limit(sin(x)/x, x, 0)` | $1$ |
+| `solve(x**2 - 4, x)` | $[-2, 2]$ |
+| `Matrix([[1,2],[3,4]]).det()` | $-2$ |
+
+### Assign Mode
+
+Switch to Assign mode via the mode selector. A two-segment input appears:
+
+```text
+[ variable name ]  [ ▼ = ]  [ expression ]
 ```
 
-## 使用说明
+Type your variable name, then press `=` to jump to the value field. The operator dropdown also supports `+=`, `-=`, `*=`, `/=` for augmented assignments. Press **Ctrl+Return** to assign.
 
-### 基本计算
+Assigning to a SymPy built-in constant (like `pi` or `E`) triggers a friendly warning — you can proceed, but you've been warned.
 
-在输入框中输入有效的 SymPy 表达式，如：
+### Variable Manager
 
-- `2*x + 3*x - 5`
-- `sin(pi/2) + cos(0)`
-- `x**2 + 2*x + 1`
+Use the Variables page (left navigation bar) to view, add, edit, delete, or rename stored variables. Values are parsed as SymPy expressions, so variables can reference each other.
 
-### 变量操作
+### Keyboard Panel
 
-- **赋值**：`x = 5` 或 `y = sin(pi/4)`
-- **增强赋值**：`x += 1` 或 `y *= 2`
-- **变量管理**：点击"变量"按钮查看和管理所有变量
+Click the on-screen keyboard to insert functions, Greek letters, operators, and digits. The cursor auto-positions inside function parentheses (e.g., `sin(|)`). The layout is defined in `python/keyboard_config.yaml`.
 
-## 开发计划
+## Dependencies
 
-- [X] 解耦
-- [X] UI Refresh
-- [X] $\LaTeX$渲染支持（基于 `mathtext`）
-- [X] 添加绘图功能（基于 `matplotlib`）
-- [X] 更丰富的结果展示
-- [ ] 支持导出计算结果
+| Package | Purpose | License |
+|---|---|---|
+| [PySide6](https://doc.qt.io/qtforpython-6/) | Qt 6 for Python (QML runtime, Qt Quick Controls) | LGPLv3 |
+| [SymPy](https://sympy.org) | Symbolic mathematics engine | BSD |
+| [ziamath](https://github.com/vvandijck/ziamath) | LaTeX to SVG math rendering | MIT |
+| [PyYAML](https://pyyaml.org) | Keyboard layout config | MIT |
 
-## 许可证
+## Roadmap
 
-### 本项目
+- Wire the plot area to a real plotting backend (`test_plot.py` is an exploratory SymPy→GLSL GPU prototype).
+- Make the settings page functional (theme, accent color, LaTeX size).
+- Add persistence for variables and history.
+- Add an automated test suite (`pytest`) around `python/model`.
 
-本项目采用 GPLV3 许可证，详情请见 LICENSE 文件。
+## License
 
-### 使用的开源项目
-
-| Project                                                                   | License                                                                                                   |
-| ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| [PySide6](https://doc.qt.io/qtforpython-6/)                                  | [LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only](https://www.qt.io/licensing/open-source-lgpl-obligations)    |
-| [sympy](https://sympy.org)                                                   | [BSD License (BSD)](https://github.com/sympy/sympy/blob/master/LICENSE)                                      |
-| [PyQt-Fluent-Widgets](https://qfluentwidgets.com)                            | [GNU General Public License v3 (GPLv3)](https://github.com/zhiyiYo/PyQt-Fluent-Widgets/blob/PySide6/LICENSE) |
-| [Fluent UI System Icons](https://github.com/microsoft/fluentui-system-icons) | [MIT License](https://github.com/microsoft/fluentui-system-icons/blob/main/LICENSE)                          |
-| [RainbowBrackets](https://github.com/absop/RainbowBrackets)                  | [MIT License](https://github.com/absop/RainbowBrackets/blob/master/LICENSE)                                  |
+Symplify is licensed under [GPLv3](LICENSE).

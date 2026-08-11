@@ -1,6 +1,0 @@
-/* QFluentPlus LaTeXLabel - Dark Theme */
-
-LaTeXLabel {
-    background-color: transparent;
-    border: none;
-}

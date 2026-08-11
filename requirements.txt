@@ -1,6 +1,0 @@
-pyside6
-pyside6-fluent-widgets
-sympy
-pyyaml
-matplotlib
-pycairo
