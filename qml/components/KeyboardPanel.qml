@@ -1,90 +1,97 @@
-import QtQuick
-import QtQuick.Controls
-import QtQuick.Layouts
+import QtQuick 2.15
+import QtQuick.Layouts 2.15
+import RinUI as Rin
+import "." as Cmp  // project-local SelectorBarItem (with focus indicator)
 
-Frame {
+Rectangle {
     id: root
 
     signal keyPressed(string key)
 
     property int currentTabIndex: 0
 
+    color: Rin.Theme.currentTheme.colors.cardColor
+    radius: Rin.Theme.currentTheme.appearance.buttonRadius
+    border.width: Rin.Theme.currentTheme.appearance.borderWidth
+    border.color: Rin.Theme.currentTheme.colors.cardBorderColor
+    implicitHeight: 248
+
     ColumnLayout {
         anchors.fill: parent
+        anchors.margins: 10
         spacing: 8
 
-        // Horizontal scroll area for the tabs: they fill the full width when
-        // space allows, and keep their natural width (with a scrollbar) when
-        // the panel is too narrow to fit them all.
-        ScrollView {
-            id: tabScroll
-            Layout.fillWidth: true
-            ScrollBar.horizontal: ScrollBar { policy: ScrollBar.AsNeeded }
-            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AlwaysOff }
+        // Tab row with horizontal wheel scrolling
+        Flickable {
+            id: tabFlick
 
-            // Flickable doesn't map vertical wheel to horizontal, so scroll
-            // the tab row horizontally (smoothly) on wheel.
-            WheelHandler {
-                onWheel: (event) => {
-                    var max = Math.max(0, tabScroll.contentWidth - tabScroll.width)
-                    var cur = tabScroll.contentItem.contentX
-                    tabScrollAnim.to = Math.max(0, Math.min(max, cur - event.angleDelta.y / 120 * 30))
-                    tabScrollAnim.restart()
+            Layout.fillWidth: true
+            Layout.preferredHeight: 40
+            contentWidth: tabBar.width
+            contentHeight: height
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+
+            MouseArea {
+                anchors.fill: parent
+                acceptedButtons: Qt.NoButton
+                onWheel: (wheel) => {
+                    const max = Math.max(0, tabFlick.contentWidth - tabFlick.width)
+                    tabFlick.contentX = Math.max(0, Math.min(max, tabFlick.contentX - wheel.angleDelta.y / 2))
                 }
             }
-            NumberAnimation {
-                id: tabScrollAnim
-                target: tabScroll.contentItem
-                property: "contentX"
-                duration: 120
-                easing.type: Easing.OutCubic
-            }
 
-            RowLayout {
-                id: tabRow
-                width: Math.max(tabScroll.availableWidth, tabRow.implicitWidth)
-                spacing: 0
+            Rin.SelectorBar {
+                id: tabBar
+
+                onCurrentIndexChanged: root.currentTabIndex = currentIndex
+
                 Repeater {
                     model: keyboardTabs
-                    delegate: TabButton {
-                        required property var modelData
+
+                    delegate: Cmp.SelectorBarItem {
                         required property int index
+                        required property var modelData
+
                         text: modelData.title
-                        checked: index === root.currentTabIndex
                         focusPolicy: Qt.NoFocus
-                        Layout.fillWidth: true
-                        onClicked: root.currentTabIndex = index
                     }
                 }
             }
         }
 
+        // Key grids, one per tab
         StackLayout {
-            id: stack
             Layout.fillWidth: true
             Layout.fillHeight: true
             currentIndex: root.currentTabIndex
+
             Repeater {
                 model: keyboardTabs
-                delegate: Item {
+
+                delegate: GridLayout {
+                    id: keyGrid
+
+                    required property int index
                     required property var modelData
-                    GridLayout {
-                        anchors.fill: parent
-                        columns: modelData.columns
-                        columnSpacing: 4
-                        rowSpacing: 4
-                        Repeater {
-                            model: modelData.keys
-                            delegate: Button {
-                                required property var modelData
-                                Layout.row: modelData.row
-                                Layout.column: modelData.col
-                                Layout.fillWidth: true
-                                Layout.fillHeight: true
-                                text: modelData.text
-                                focusPolicy: Qt.NoFocus
-                                onClicked: root.keyPressed(modelData.text)
-                            }
+
+                    columns: modelData.columns
+                    columnSpacing: 6
+                    rowSpacing: 6
+
+                    Repeater {
+                        model: keyGrid.modelData.keys
+
+                        delegate: Rin.Button {
+                            required property var modelData
+
+                            Layout.row: modelData.row
+                            Layout.column: modelData.col
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            text: modelData.text
+                            focusPolicy: Qt.NoFocus
+                            onClicked: root.keyPressed(modelData.text)
                         }
                     }
                 }

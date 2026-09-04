@@ -17,20 +17,24 @@ _SVG_WIDTH_RE = re.compile(r'width="([\d.]+)"')
 _SVG_HEIGHT_RE = re.compile(r'height="([\d.]+)"')
 
 
-def latex_to_svg(latex: str, size: Optional[float] = None) -> str:
+def latex_to_svg(
+    latex: str, size: Optional[float] = None, color: Optional[str] = None
+) -> str:
     """Render a LaTeX string to an SVG string, or ``''`` if it cannot be parsed.
 
     Args:
         latex: The LaTeX source.
         size: Optional font size in points; the ziamath default (24) is used
             when None. Exposed so a settings option can drive it later.
+        color: Optional text color (any CSS color, e.g. ``'#ffffff'``);
+            ziamath defaults to black when None.
     """
     try:
         from ziamath.zmath import Latex
 
         if size is None:
-            return Latex(latex).svg()
-        return Latex(latex, size=size).svg()
+            return Latex(latex, color=color).svg()
+        return Latex(latex, size=size, color=color).svg()
     except Exception:
         return ""
 

@@ -1,114 +1,119 @@
-import QtQuick
-import QtQuick.Controls
-import QtQuick.Dialogs
-import QtQuick.Layouts
+import QtQuick 2.15
+import QtQuick.Layouts 2.15
+import RinUI
 
-Page {
-    id: root
+Item {
+    id: page
 
-    ScrollView {
+    function themeIndex() {
+        const i = ["Auto", "Light", "Dark"].indexOf(Theme.getTheme())
+        return i >= 0 ? i : 0
+    }
+
+    function backdropIndex() {
+        const values = ["mica", "acrylic", "tabbed", "none"]
+        const i = values.indexOf(Theme.getBackdropEffect())
+        return i >= 0 ? i : 3
+    }
+
+    ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 12
-        clip: true
+        anchors.margins: 24
+        spacing: 14
 
-        ColumnLayout {
-            width: parent.width
-            spacing: 12
+        Text {
+            Layout.fillWidth: true
+            typography: Typography.Title
+            text: qsTr("Settings")
+        }
 
-            Label {
-                text: qsTr("Settings")
-                font.pixelSize: 22
-                font.bold: true
-            }
+        Text {
+            Layout.fillWidth: true
+            typography: Typography.Subtitle
+            text: qsTr("Appearance")
+        }
 
-            // Appearance group (replaces SettingCardGroup)
-            Pane {
-                Layout.fillWidth: true
-                ColumnLayout {
-                    width: parent.width
+        Frame {
+            Layout.fillWidth: true
+
+            ColumnLayout {
+                width: parent.width
+                spacing: 14
+
+                RowLayout {
+                    Layout.fillWidth: true
                     spacing: 12
 
-                    Label {
-                        text: qsTr("Appearance")
-                        font.pixelSize: 16
-                        font.bold: true
+                    Text {
+                        typography: Typography.Body
+                        text: qsTr("Theme mode")
                     }
+                    Item { Layout.fillWidth: true }
+                    ComboBox {
+                        id: themeCombo
 
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 12
-                        Label {
-                            text: qsTr("Application theme")
-                            Layout.fillWidth: true
-                        }
-                        ComboBox {
-                            model: [qsTr("Light"), qsTr("Dark"), qsTr("Use system setting")]
-                        }
-                    }
-
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 12
-                        Label {
-                            text: qsTr("Theme color")
-                            Layout.fillWidth: true
-                        }
-                        RadioButton {
-                            text: qsTr("Default color")
-                            checked: true
-                        }
-                        RadioButton {
-                            text: qsTr("System color")
-                        }
-                        RadioButton {
-                            text: qsTr("Custom color")
-                        }
-                    }
-
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 12
-                        Label {
-                            text: qsTr("Custom color")
-                            Layout.fillWidth: true
-                        }
-                        Button {
-                            text: qsTr("Choose color")
-                            onClicked: colorDialog.open()
-                        }
-                        ColorDialog {
-                            id: colorDialog
-                            title: qsTr("Choose theme color")
-                        }
+                        model: ["Auto", "Light", "Dark"]
+                        currentIndex: page.themeIndex()
+                        onActivated: (index) => Theme.setTheme(model[index])
                     }
                 }
-            }
 
-            // About group
-            Pane {
-                Layout.fillWidth: true
-                ColumnLayout {
-                    width: parent.width
+                RowLayout {
+                    Layout.fillWidth: true
                     spacing: 12
 
-                    Label {
-                        text: qsTr("About")
-                        font.pixelSize: 16
-                        font.bold: true
+                    Text {
+                        typography: Typography.Body
+                        text: qsTr("Backdrop effect")
                     }
+                    Item { Layout.fillWidth: true }
+                    ComboBox {
+                        id: backdropCombo
 
-                    Label {
-                        text: qsTr("© 2026 Symplify. Version 0.1.0")
-                        wrapMode: Text.Wrap
-                        Layout.fillWidth: true
-                    }
-
-                    Button {
-                        text: qsTr("Check update")
-                        onClicked: { /* placeholder */ }
+                        visible: Qt.platform.os === "windows"
+                        enabled: visible
+                        model: ["Mica", "Acrylic", "Tabbed", "None"]
+                        currentIndex: page.backdropIndex()
+                        onActivated: (index) => {
+                            const values = ["mica", "acrylic", "tabbed", "none"]
+                            Theme.setBackdropEffect(values[index])
+                        }
                     }
                 }
             }
         }
+
+        Text {
+            Layout.fillWidth: true
+            typography: Typography.Subtitle
+            text: qsTr("About")
+        }
+
+        Frame {
+            Layout.fillWidth: true
+
+            ColumnLayout {
+                width: parent.width
+                spacing: 8
+
+                Text {
+                    typography: Typography.Body
+                    text: "Symplify 0.1.0"
+                }
+                Text {
+                    typography: Typography.Caption
+                    color: Theme.currentTheme.colors.textSecondaryColor
+                    text: qsTr("A symbolic calculator built with SymPy, PySide6 and RinUI.")
+                }
+                Text {
+                    typography: Typography.Caption
+                    color: Theme.currentTheme.colors.textSecondaryColor
+                    text: (typeof qtRuntimeVersionString !== "undefined"
+                           ? "Qt " + qtRuntimeVersionString + " · " : "") + "RinUI 0.4.4"
+                }
+            }
+        }
+
+        Item { Layout.fillHeight: true }
     }
 }

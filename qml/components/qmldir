@@ -1,0 +1,5 @@
+module Symplify.Components
+
+KeyboardPanel 1.0 KeyboardPanel.qml
+SegmentedItem 1.0 SegmentedItem.qml
+SelectorBarItem 1.0 SelectorBarItem.qml

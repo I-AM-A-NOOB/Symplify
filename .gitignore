@@ -4,13 +4,12 @@ __pycache__
 # IDE related files
 /.idea
 /.vscode
-/.trae
 # Distribution files
 /main.build
 /main.dist
 /build
-# Reference files (For Vibe Coding only)
-/examples
+# RinUI runtime config (theme / backdrop persistence)
+/RinUI
 # Old files
 *.old
 *.old.py

@@ -8,7 +8,7 @@ history as a real multi-column table (expression / result / mode).
 from dataclasses import dataclass
 from typing import List, Optional
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
+from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Slot
 
 
 @dataclass
@@ -40,6 +40,7 @@ class HistoryModel(QAbstractTableModel):
 
     def roleNames(self):
         return {
+            Qt.DisplayRole: b"display",
             self.ExpressionRole: b"expression",
             self.ResultRole: b"result",
             self.ModeRole: b"mode",
@@ -75,8 +76,24 @@ class HistoryModel(QAbstractTableModel):
         self._items.append(HistoryItem(expression, result, mode))
         self.endInsertRows()
 
+    @Slot(int, int, result=str)
+    def cellAt(self, row: int, column: int) -> str:
+        """Cell text for QML tables, addressed by row and column."""
+        if 0 <= row < len(self._items) and 0 <= column < 3:
+            item = self._items[row]
+            return (item.expression, item.result, item.mode)[column]
+        return ""
+
+    @Slot(result=int)
+    def count(self) -> int:
+        """Number of rows, callable from QML."""
+        return len(self._items)
+
+    @Slot()
     def clear(self) -> None:
-        """Clear all history entries."""
-        self.beginResetModel()
+        """Clear all history entries (granular removal, no reset flash)."""
+        if not self._items:
+            return
+        self.beginRemoveRows(QModelIndex(), 0, len(self._items) - 1)
         self._items.clear()
-        self.endResetModel()
+        self.endRemoveRows()

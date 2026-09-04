@@ -1,81 +1,74 @@
 import QtQuick
-import QtQuick.Controls
-import QtQuick.Layouts
+import QtQuick.Layouts 2.15
+import RinUI
 
-Page {
-    id: root
+Item {
+    id: page
+
+    property int rowCount: historyVM.count()
+
+    Connections {
+        target: historyVM
+
+        function onModelReset() { page.rowCount = historyVM.count() }
+        function onRowsInserted() { page.rowCount = historyVM.count() }
+        function onRowsRemoved() { page.rowCount = historyVM.count() }
+    }
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 12
-        spacing: 12
+        anchors.margins: 24
+        spacing: 14
 
-        Label {
-            text: qsTr("Calculation History")
-            font.pixelSize: 22
-            font.bold: true
-        }
-
-        // Table header
         RowLayout {
             Layout.fillWidth: true
-            spacing: 0
-            Label {
-                Layout.fillWidth: true
-                Layout.leftMargin: 8
-                text: qsTr("Expression")
-                font.bold: true
+            spacing: 8
+
+            Text {
+                typography: Typography.Title
+                text: qsTr("History")
             }
-            Label {
-                Layout.fillWidth: true
-                text: qsTr("Result")
-                font.bold: true
-            }
-            Label {
-                Layout.preferredWidth: 110
-                text: qsTr("Mode")
-                font.bold: true
+
+            Item { Layout.fillWidth: true }
+
+            Button {
+                text: qsTr("Clear history")
+                icon.name: "ic_fluent_delete_20_regular"
+                flat: true
+                enabled: page.rowCount > 0
+                onClicked: historyVM.clear()
             }
         }
 
-        TableView {
-            id: table
+        Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
+            color: Theme.currentTheme.colors.cardColor
+            radius: Theme.currentTheme.appearance.buttonRadius
+            border.width: Theme.currentTheme.appearance.borderWidth
+            border.color: Theme.currentTheme.colors.cardBorderColor
             clip: true
-            model: historyVM
-            columnWidthProvider: function(column) {
-                if (column === 0)
-                    return Math.max(120, (table.width - 110) * 0.5)
-                if (column === 1)
-                    return Math.max(120, (table.width - 110) * 0.5)
-                return 110
-            }
-            delegate: Rectangle {
-                required property string expression
-                required property string result
-                required property string mode
-                required property int column
-                required property bool selected
-                implicitHeight: 40
-                color: selected ? palette.accent : "transparent"
-                Label {
-                    text: column === 0 ? expression : column === 1 ? result : mode
-                    anchors.left: parent.left
-                    anchors.leftMargin: 8
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: parent.width - 16
-                    elide: Text.ElideRight
-                    color: selected ? palette.highlightedText : palette.windowText
-                }
-            }
-        }
 
-        RowLayout {
-            Layout.alignment: Qt.AlignRight
-            Button {
-                text: qsTr("Clear History")
-                onClicked: historyVM.clear()
+            TableView {
+                id: historyTable
+
+                anchors.fill: parent
+                anchors.margins: 4
+                model: historyVM
+                columnWidthProvider: (column) => {
+                    if (column === 2)
+                        return 110
+                    return Math.max(140, (historyTable.width - 110) / 2)
+                }
+                rowHeightProvider: () => 40
+            }
+
+            Text {
+                anchors.centerIn: parent
+                visible: page.rowCount === 0
+                typography: Typography.Body
+                color: Theme.currentTheme.colors.textSecondaryColor
+                text: qsTr("No calculations yet. Results will appear here.")
             }
         }
     }

@@ -10,9 +10,11 @@ from typing import Any, Optional
 from urllib.parse import quote
 
 from PySide6.QtCore import Property, QObject, Signal, Slot
+from PySide6.QtGui import QColor
 
 from ..latex_render import latex_to_svg, svg_size
 from ..model.calculator import Calculator, CalculationResult
+from ..model.input_mode import InputMode
 from ..model.variable import VariableManager
 from .history_viewmodel import HistoryModel
 from .log_viewmodel import LogViewModel
@@ -22,12 +24,16 @@ class CalculatorViewModel(QObject):
     """Connects the Calculator model to the QML calculator page.
 
     Signals:
+        inputModeChanged: Emitted when the input mode changes.
         warningOccurred: Emitted when the user assigns to a SymPy built-in.
             Args:
                 title (str): Warning title.
                 content (str): Warning content.
     """
 
+    inputModeChanged = Signal()
+    inputTextChanged = Signal()
+    assignInputChanged = Signal()
     resultChanged = Signal()
     warningOccurred = Signal(str, str)
 
@@ -52,6 +58,11 @@ class CalculatorViewModel(QObject):
         self._history = history
         self._log = log
         self._variables_model = variables_model
+        self._input_mode = InputMode.CODE
+        self._input_text = ""
+        self._assign_name = ""
+        self._assign_operator = "="
+        self._assign_value = ""
         self._result_text = ""
         self._result_latex = ""
         self._is_error = False
@@ -59,6 +70,51 @@ class CalculatorViewModel(QObject):
         self._latex_svg_url = ""
         self._latex_width = 0
         self._latex_height = 0
+        self._latex_color = "#000000"
+
+    def _get_input_mode(self) -> int:
+        """Current input mode as a stable int (InputMode.CODE.value)."""
+        return int(self._input_mode.value)
+
+    def _set_input_mode(self, mode: int) -> None:
+        """Set the input mode from a QML int, notifying on change."""
+        new_mode = InputMode(mode)
+        if new_mode != self._input_mode:
+            self._input_mode = new_mode
+            self.inputModeChanged.emit()
+
+    def _get_input_text(self) -> str:
+        return self._input_text
+
+    def _set_input_text(self, text: str) -> None:
+        """Persist the code-mode expression across page rebuilds."""
+        if text != self._input_text:
+            self._input_text = text
+            self.inputTextChanged.emit()
+
+    def _get_assign_name(self) -> str:
+        return self._assign_name
+
+    def _set_assign_name(self, name: str) -> None:
+        if name != self._assign_name:
+            self._assign_name = name
+            self.assignInputChanged.emit()
+
+    def _get_assign_operator(self) -> str:
+        return self._assign_operator
+
+    def _set_assign_operator(self, operator: str) -> None:
+        if operator != self._assign_operator:
+            self._assign_operator = operator
+            self.assignInputChanged.emit()
+
+    def _get_assign_value(self) -> str:
+        return self._assign_value
+
+    def _set_assign_value(self, value: str) -> None:
+        if value != self._assign_value:
+            self._assign_value = value
+            self.assignInputChanged.emit()
 
     def _get_result_text(self) -> str:
         return self._result_text
@@ -93,7 +149,7 @@ class CalculatorViewModel(QObject):
 
     def _build_latex_url(self, latex: str) -> str:
         """Render LaTeX to an SVG data URL, storing its intrinsic size."""
-        svg = latex_to_svg(latex)
+        svg = latex_to_svg(latex, color=self._latex_color)
         if not svg:
             self._latex_svg_url = ""
             self._latex_width = 0
@@ -103,6 +159,37 @@ class CalculatorViewModel(QObject):
         self._latex_width, self._latex_height = svg_size(svg)
         return self._latex_svg_url
 
+    @Slot(str)
+    def set_latex_color(self, color: str) -> None:
+        """Re-tint the rendered LaTeX (called when the RinUI theme changes).
+
+        Re-renders the current result with the new color; the Image element
+        refreshes automatically because the data URL changes.
+        """
+        qcolor = QColor(color)
+        if not qcolor.isValid():
+            return
+        normalized = qcolor.name()
+        if normalized == self._latex_color:
+            return
+        self._latex_color = normalized
+        if self._result_latex:
+            self._build_latex_url(self._result_latex)
+            self.resultChanged.emit()
+
+    inputMode = Property(
+        int, _get_input_mode, _set_input_mode, notify=inputModeChanged
+    )
+    inputText = Property(str, _get_input_text, _set_input_text, notify=inputTextChanged)
+    assignName = Property(
+        str, _get_assign_name, _set_assign_name, notify=assignInputChanged
+    )
+    assignOperator = Property(
+        str, _get_assign_operator, _set_assign_operator, notify=assignInputChanged
+    )
+    assignValue = Property(
+        str, _get_assign_value, _set_assign_value, notify=assignInputChanged
+    )
     resultText = Property(str, _get_result_text, notify=resultChanged)
     resultLatex = Property(str, _get_result_latex, notify=resultChanged)
     isError = Property(bool, _get_is_error, notify=resultChanged)
@@ -177,6 +264,15 @@ class CalculatorViewModel(QObject):
             else:
                 self._apply_result(result)
                 self._log.add_error(f"Error: {result.error}", "Calculator")
+                if operator == "=" and self._variables_model is not None:
+                    # Keep the raw input in the variables list as an
+                    # invalid (NaN) entry so the user's input survives.
+                    try:
+                        self._variables_model.save_invalid(name, value_str)
+                    except Exception as e:
+                        self._log.add_warning(
+                            f"Failed to store invalid entry: {e}", "Calculator"
+                        )
         except Exception as e:
             self._set_error(str(e))
             self._log.add_error(f"Error: {e}", "Calculator")
@@ -195,9 +291,8 @@ class CalculatorViewModel(QObject):
     def _save_variable(self, name: str, value: Any) -> None:
         """Save an assigned variable, warning about SymPy built-ins."""
         try:
-            self._variable_manager.set(name, value)
             if self._variables_model is not None:
-                self._variables_model.refresh()
+                self._variables_model.save(name, value)
         except Exception as e:
             self._log.add_warning(f"Failed to save variable: {e}", "Calculator")
 

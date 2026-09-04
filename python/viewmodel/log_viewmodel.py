@@ -11,7 +11,7 @@ from datetime import datetime
 from enum import Enum, auto
 from typing import List
 
-from PySide6.QtCore import Property, QObject, Signal
+from PySide6.QtCore import Property, QObject, Signal, Slot
 
 
 class LogLevel(Enum):
@@ -80,6 +80,7 @@ class LogViewModel(QObject):
         """Add an error log entry."""
         self.add_log(message, LogLevel.ERROR, source)
 
+    @Slot()
     def clear(self) -> None:
         """Clear all log entries."""
         self._logs.clear()

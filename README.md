@@ -5,9 +5,9 @@
 
 ---
 
-Symplify is a graphical symbolic calculator that wraps SymPy's powerful CAS (Computer Algebra System) in a clean, Fluent-styled desktop UI. The interface is written in **QML (Qt Quick Controls)** using the native `FluentWinUI3` style, with business logic kept in a pure-Python **MVVM** core that has zero Qt dependencies.
+Symplify is a graphical symbolic calculator that wraps SymPy's powerful CAS (Computer Algebra System) in a clean, Fluent-styled desktop UI. The interface is written in **QML (Qt Quick Controls)** using the [RinUI](https://github.com/RinLit-233-shiroko/Rin-UI) component library, with business logic kept in a pure-Python **MVVM** core that has zero Qt dependencies.
 
-> **Status:** QML prototype. The plotting area and settings page are placeholders; see [Roadmap](#roadmap).
+> **Status:** QML prototype. The plotting area is a placeholder; see [Roadmap](#roadmap).
 
 ## Features
 
@@ -44,8 +44,8 @@ Symplify follows **MVVM**. The `python/` package is split into three layers; the
 
 - **Model** (`python/model/`) — Pure business logic: `Calculator` (SymPy evaluation), `VariableManager` (in-memory variable store with a revision counter for cache invalidation), `InputMode` / `ResultType` enums, and the `CalculationResult` dataclass. Zero Qt dependency.
 - **ViewModel** (`python/viewmodel/`) — Qt bridge layer. `QObject` subclasses expose properties, signals, and slots to QML; `QAbstractTableModel`s back the variables/history tables. Also contains the `latex_render` (ziamath) and `keyboard_config` (YAML) helpers.
-- **View** (`qml/`) — Qt Quick UI only: `MainWindow.qml`, the five pages, and the `KeyboardPanel`. No business logic.
-- **Composition root** (`main.py`) — Builds `MainViewModel`, registers the viewmodels as flat QML context properties (`vm`, `calcVM`, `varsVM`, `historyVM`, `logVM`, `variablesModel`, `keyboardTabs`), and starts the QML engine.
+- **View** (`qml/`) — Qt Quick UI only: a `FluentWindow` with RinUI's `NavigationView`, the five pages, and the `KeyboardPanel`. No business logic.
+- **Composition root** (`main.py`) — Builds `MainViewModel`, registers the viewmodels as flat QML context properties (`vm`, `calcVM`, `varsVM`, `historyVM`, `logVM`, `variablesModel`, `keyboardTabs`), and starts the QML engine via RinUI's `RinUIWindow`.
 
 A request flows: **QML event → ViewModel slot → Model → SymPy → result → LaTeX/SVG → QML**. A detailed walkthrough lives in [`docs/architecture.md`](docs/architecture.md).
 
@@ -67,8 +67,8 @@ python/
   latex_render.py              # LaTeX -> SVG via ziamath
   keyboard_config.py           # Keyboard layout from keyboard_config.yaml
 qml/
-  MainWindow.qml               # Toolbar, SwipeView, navigation drawer
-  components/                  # KeyboardPanel, NavItem, EmptyArea
+  MainWindow.qml               # FluentWindow + RinUI navigation
+  components/                  # KeyboardPanel
   pages/                       # Calculator, Variables, History, Log, Settings
 docs/
   architecture.svg             # Architecture diagram (model-focused)
@@ -115,6 +115,7 @@ Click the on-screen keyboard to insert functions, Greek letters, operators, and 
 | Package | Purpose | License |
 |---|---|---|
 | [PySide6](https://doc.qt.io/qtforpython-6/) | Qt 6 for Python (QML runtime, Qt Quick Controls) | LGPLv3 |
+| [RinUI](https://github.com/RinLit-233-shiroko/Rin-UI) | Fluent Design-like QML component library | MIT |
 | [SymPy](https://sympy.org) | Symbolic mathematics engine | BSD |
 | [ziamath](https://github.com/vvandijck/ziamath) | LaTeX to SVG math rendering | MIT |
 | [PyYAML](https://pyyaml.org) | Keyboard layout config | MIT |
@@ -122,7 +123,7 @@ Click the on-screen keyboard to insert functions, Greek letters, operators, and 
 ## Roadmap
 
 - Wire the plot area to a real plotting backend (`test_plot.py` is an exploratory SymPy→GLSL GPU prototype).
-- Make the settings page functional (theme, accent color, LaTeX size).
+- Extend the settings page (theme mode and Windows backdrop effect are wired; accent color and LaTeX size are not).
 - Add persistence for variables and history.
 - Add an automated test suite (`pytest`) around `python/model`.
 

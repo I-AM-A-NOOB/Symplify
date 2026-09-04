@@ -1,56 +1,47 @@
 # coding: utf-8
-"""Entry point for the QML Symplify app.
+"""Symplify entry point (composition root).
 
-Runs the Fluent WinUI 3-styled QML user interface using native Qt Quick
-Controls only (no qfluentwidgets). Business logic lives in the pure-Python
-``python/`` package, exposed to QML through viewmodels.
-
-Usage:
-    python main.py
+Builds the viewmodels, registers them as flat QML context properties,
+and lets RinUI load the Fluent-styled QML window.
 """
 
-import os
 import sys
 from pathlib import Path
 
-# The Qt Quick Controls style must be selected before QGuiApplication is created.
-os.environ.setdefault("QT_QUICK_CONTROLS_STYLE", "FluentWinUI3")
+from PySide6.QtWidgets import QApplication
+from RinUI import RinUIWindow
 
-from PySide6.QtCore import QUrl  # noqa: E402
-from PySide6.QtGui import QGuiApplication  # noqa: E402
-from PySide6.QtQml import QQmlApplicationEngine  # noqa: E402
+from python.keyboard_config import load_keyboard_tabs
+from python.viewmodel.main_viewmodel import MainViewModel
 
 ROOT = Path(__file__).resolve().parent
-sys.path.insert(0, str(ROOT))
-
-from python.keyboard_config import load_keyboard_tabs  # noqa: E402
-from python.viewmodel.main_viewmodel import MainViewModel  # noqa: E402
 
 
 def main() -> int:
-    """Run the QML prototype."""
-    app = QGuiApplication(sys.argv)
-    app.setApplicationName("Symplify QML")
-    app.setApplicationDisplayName("Symplify (QML prototype)")
+    """Create the app, wire the viewmodels, and start the event loop."""
+    # RinUI prints emoji to stdout; force UTF-8 so GBK consoles don't crash.
+    for stream in (sys.stdout, sys.stderr):
+        if stream is not None and hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
+    app = QApplication(sys.argv)
+
+    # Create the RinUI window shell first (without loading QML) so that the
+    # shared engine's root context can receive the viewmodels before the
+    # QML tree is instantiated.
+    window = RinUIWindow()
 
     vm = MainViewModel()
+    context = window.engine.rootContext()
+    context.setContextProperty("vm", vm)
+    context.setContextProperty("calcVM", vm.calculator)
+    context.setContextProperty("varsVM", vm.variables)
+    context.setContextProperty("variablesModel", vm.variables.model)
+    context.setContextProperty("historyVM", vm.history)
+    context.setContextProperty("logVM", vm.log)
+    context.setContextProperty("keyboardTabs", load_keyboard_tabs())
 
-    engine = QQmlApplicationEngine()
-    # Child viewmodels/models are exposed as flat context properties so pages
-    # never chain through `vm.<child>`, which can transiently fail to resolve
-    # on some platforms during initial SwipeView delegate creation.
-    engine.rootContext().setContextProperty("vm", vm)
-    engine.rootContext().setContextProperty("calcVM", vm.calculator)
-    engine.rootContext().setContextProperty("varsVM", vm.variables)
-    engine.rootContext().setContextProperty("variablesModel", vm.variables.model)
-    engine.rootContext().setContextProperty("historyVM", vm.history)
-    engine.rootContext().setContextProperty("logVM", vm.log)
-    engine.rootContext().setContextProperty("keyboardTabs", load_keyboard_tabs())
-
-    engine.load(QUrl.fromLocalFile(str(ROOT / "qml" / "MainWindow.qml")))
-    if not engine.rootObjects():
-        return 1
-
+    window.load(ROOT / "qml" / "MainWindow.qml")
     return app.exec()
 
 

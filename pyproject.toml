@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "pyside6>=6.11.1",
-    "pyside6-fluentui-qml>=1.6.7",
+    "rinui>=0.4.4.1",
     "pyyaml>=6.0.3",
     "sympy>=1.14.0",
     "ziamath>=0.13",
