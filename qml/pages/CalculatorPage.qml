@@ -99,6 +99,7 @@ Item {
     function setExample(expression) {
         switchToCode()
         calcVM.inputText = expression
+        runCalculation()
     }
 
     ColumnLayout {
@@ -381,7 +382,8 @@ Item {
                         Text {
                             Layout.fillWidth: true
                             typography: Typography.Body
-                            wrapMode: Text.Wrap
+                            wrapMode: Text.NoWrap
+                            elide: Text.ElideRight
                             color: calcVM.isError
                                 ? Theme.currentTheme.colors.systemCriticalColor
                                 : Theme.currentTheme.colors.textColor
@@ -389,11 +391,12 @@ Item {
                         }
 
                         Button {
-                            text: qsTr("Copy expr")
+                            text: calcVM.inputMode === 1
+                                ? qsTr("Copy value") : qsTr("Copy result")
                             icon.name: "ic_fluent_copy_20_regular"
                             flat: true
-                            enabled: calcVM.inputMode === 0 && calcVM.inputText !== ""
-                            onClicked: vm.copyText(calcVM.inputText)
+                            enabled: calcVM.resultText !== ""
+                            onClicked: vm.copyText(calcVM.resultText)
                         }
                         Button {
                             text: qsTr("Copy LaTeX")
@@ -404,112 +407,105 @@ Item {
                         }
                     }
 
-                    // LaTeX result area: rendered at the SVG's natural size
-                    // (crisp, not upscaled), left-aligned; horizontal scroll.
-                    ScrollView {
-                        id: latexScroll
+                    // Result region: the LaTeX area (natural height) and the
+                    // fixed-4:3 plot area scroll vertically when the window
+                    // is too short to show them all.
+                    Flickable {
+                        id: resultScroll
 
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: page.hasLatex
-                            ? Math.max(80, latexImage.height + 24) : 120
-                        ScrollBar.horizontal: ScrollBar { policy: ScrollBar.AsNeeded }
-                        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AlwaysOff }
-
-                        MouseArea {
-                            anchors.fill: parent
-                            acceptedButtons: Qt.NoButton
-                            onWheel: (wheel) => {
-                                const max = Math.max(0, latexScroll.contentWidth - latexScroll.width)
-                                const cur = latexScroll.contentItem.contentX
-                                latexScrollAnim.to = Math.max(0,
-                                    Math.min(max, cur - wheel.angleDelta.y / 120 * 30))
-                                latexScrollAnim.restart()
-                            }
-                        }
-                        NumberAnimation {
-                            id: latexScrollAnim
-
-                            target: latexScroll.contentItem
-                            property: "contentX"
-                            duration: 120
-                            easing.type: Easing.OutCubic
-                        }
-
-                        // implicit sizes drive the ScrollView's content size,
-                        // avoiding an explicit contentWidth binding loop.
-                        Item {
-                            id: latexContent
-
-                            implicitWidth: page.hasLatex ? latexImage.width : 1
-                            implicitHeight: page.hasLatex ? latexImage.height : 120
-                            width: Math.max(latexScroll.availableWidth, implicitWidth)
-                            height: implicitHeight
-
-                            Image {
-                                id: latexImage
-
-                                objectName: "latexImage"
-                                x: 0
-                                y: 0
-                                visible: page.hasLatex
-                                smooth: true
-                                fillMode: Image.PreserveAspectFit
-
-                                // Item stays at the SVG's logical size while the
-                                // render resolution (sourceSize) is scaled by the
-                                // screen DPI, keeping it crisp on high-DPI displays.
-                                width: calcVM.latexWidth
-                                height: calcVM.latexHeight
-                                sourceSize: Qt.size(
-                                    calcVM.latexWidth * Screen.devicePixelRatio,
-                                    calcVM.latexHeight * Screen.devicePixelRatio)
-                                source: page.hasLatex ? calcVM.latexSvgUrl : ""
-                            }
-
-                            Text {
-                                anchors.fill: parent
-                                visible: !page.hasLatex
-                                horizontalAlignment: Text.AlignHCenter
-                                verticalAlignment: Text.AlignVCenter
-                                wrapMode: Text.WrapAnywhere
-                                typography: calcVM.isError ? Typography.Body : Typography.Subtitle
-                                color: calcVM.isError
-                                    ? Theme.currentTheme.colors.systemCriticalColor
-                                    : calcVM.resultText === ""
-                                      ? Theme.currentTheme.colors.textSecondaryColor
-                                      : Theme.currentTheme.colors.textColor
-                                text: calcVM.isError
-                                    ? calcVM.errorMessage
-                                    : calcVM.resultText !== ""
-                                      ? calcVM.resultText
-                                      : qsTr("Enter an expression, then press Ctrl+Return to calculate.")
-                            }
-                        }
-                    }
-
-                    // Plot area (empty placeholder)
-                    Rectangle {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        color: Theme.currentTheme.colors.cardColor
-                        radius: Theme.currentTheme.appearance.buttonRadius
-                        border.width: Theme.currentTheme.appearance.borderWidth
-                        border.color: Theme.currentTheme.colors.cardBorderColor
+                        clip: true
+                        contentHeight: resultColumn.implicitHeight
 
-                        Row {
-                            anchors.centerIn: parent
-                            spacing: 10
+                        ScrollBar.vertical: ScrollBar { }
 
-                            Icon {
-                                name: "ic_fluent_math_formula_20_regular"
-                                size: 20
-                                color: Theme.currentTheme.colors.textSecondaryColor
+                        ColumnLayout {
+                            id: resultColumn
+
+                            width: resultScroll.width
+                            spacing: 12
+
+                            // LaTeX result area: rendered at the SVG's natural
+                            // height (crisp, not upscaled), left-aligned; the
+                            // vertical wheel pans horizontally and a scrollbar
+                            // appears when needed.
+                            HScrollView {
+                                id: latexScroll
+
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: page.hasLatex
+                                    ? Math.max(60, latexImage.height + 16) : 120
+                                contentWidth: Math.max(latexScroll.width, latexImage.width)
+
+                                // implicit sizes drive the content size,
+                                // avoiding an explicit contentWidth binding loop.
+                                Item {
+                                    id: latexContent
+
+                                    implicitWidth: page.hasLatex ? latexImage.width : 1
+                                    implicitHeight: page.hasLatex ? latexImage.height : 120
+                                    width: Math.max(latexScroll.width, implicitWidth)
+                                    height: implicitHeight
+
+                                    LatexImage {
+                                        id: latexImage
+
+                                        objectName: "latexImage"
+                                        visible: page.hasLatex
+                                        x: 0
+                                        y: (parent.height - height) / 2
+                                        naturalWidth: calcVM.latexWidth
+                                        naturalHeight: calcVM.latexHeight
+                                        source: page.hasLatex ? calcVM.latexSvgUrl : ""
+                                    }
+
+                                    Text {
+                                        anchors.fill: parent
+                                        visible: !page.hasLatex
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                        wrapMode: Text.WrapAnywhere
+                                        typography: calcVM.isError ? Typography.Body : Typography.Subtitle
+                                        color: calcVM.isError
+                                            ? Theme.currentTheme.colors.systemCriticalColor
+                                            : calcVM.resultText === ""
+                                              ? Theme.currentTheme.colors.textSecondaryColor
+                                              : Theme.currentTheme.colors.textColor
+                                        text: calcVM.isError
+                                            ? calcVM.errorMessage
+                                            : calcVM.resultText !== ""
+                                              ? calcVM.resultText
+                                              : qsTr("Enter an expression, then press Ctrl+Return to calculate.")
+                                    }
+                                }
                             }
-                            Text {
-                                typography: Typography.Body
-                                color: Theme.currentTheme.colors.textSecondaryColor
-                                text: qsTr("Plotting is on the roadmap.")
-                                anchors.verticalCenter: parent.verticalCenter
+
+                            // Function/plot area with a fixed 4:3 aspect ratio.
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: width * 0.75
+                                color: Theme.currentTheme.colors.cardColor
+                                radius: Theme.currentTheme.appearance.buttonRadius
+                                border.width: Theme.currentTheme.appearance.borderWidth
+                                border.color: Theme.currentTheme.colors.cardBorderColor
+
+                                Row {
+                                    anchors.centerIn: parent
+                                    spacing: 10
+
+                                    Icon {
+                                        name: "ic_fluent_math_formula_20_regular"
+                                        size: 20
+                                        color: Theme.currentTheme.colors.textSecondaryColor
+                                    }
+                                    Text {
+                                        typography: Typography.Body
+                                        color: Theme.currentTheme.colors.textSecondaryColor
+                                        text: qsTr("Plotting is on the roadmap.")
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
+                                }
                             }
                         }
                     }

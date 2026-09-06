@@ -56,4 +56,27 @@ FluentWindow {
         sequences: ["Ctrl+Shift+Tab"]
         onActivated: vm.focusPrev()
     }
+
+    // History "send to input": restore an entry in the calculator and
+    // navigate back to it. Qt.resolvedUrl is required -- safePush's
+    // createComponent resolves relative paths against NavigationView.qml.
+    Connections {
+        target: vm
+
+        function onSendToCode(expression) {
+            calcVM.inputText = expression
+            calcVM.inputMode = 0
+            calcVM.clear_result()
+            navigationView.push(Qt.resolvedUrl("pages/CalculatorPage.qml"))
+        }
+
+        function onSendToAssign(name, op, expr) {
+            calcVM.assignName = name
+            calcVM.assignOperator = op
+            calcVM.assignValue = expr
+            calcVM.inputMode = 1
+            calcVM.clear_result()
+            navigationView.push(Qt.resolvedUrl("pages/CalculatorPage.qml"))
+        }
+    }
 }

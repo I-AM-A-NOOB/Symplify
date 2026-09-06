@@ -5,7 +5,15 @@ Aggregates the sub-viewmodels and is exposed to QML as the ``vm``
 context property.
 """
 
-from PySide6.QtCore import Property, QCoreApplication, QEvent, QObject, Qt, Slot
+from PySide6.QtCore import (
+    Property,
+    QCoreApplication,
+    QEvent,
+    QObject,
+    Qt,
+    Signal,
+    Slot,
+)
 from PySide6.QtGui import QGuiApplication, QKeyEvent
 
 from ..model.calculator import Calculator
@@ -17,7 +25,18 @@ from .variables_viewmodel import VariablesViewModel
 
 
 class MainViewModel(QObject):
-    """Holds the shared models and exposes all sub-viewmodels to QML."""
+    """Holds the shared models and exposes all sub-viewmodels to QML.
+
+    Signals:
+        sendToCode: Requested by the history page to restore a code entry
+            in the calculator's Code input. Args: expression (str).
+        sendToAssign: Requested by the history page to restore an assign
+            entry in the calculator's Assign input. Args:
+            name (str), operator (str), expression (str).
+    """
+
+    sendToCode = Signal(str)
+    sendToAssign = Signal(str, str, str)
 
     def __init__(self, parent=None):
         """Initialize all models and viewmodels."""

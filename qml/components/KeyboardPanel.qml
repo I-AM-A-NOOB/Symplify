@@ -21,25 +21,14 @@ Rectangle {
         anchors.margins: 10
         spacing: 8
 
-        // Tab row with horizontal wheel scrolling
-        Flickable {
+        // Tab row with horizontal wheel scrolling (shared HScrollView)
+        Cmp.HScrollView {
             id: tabFlick
 
             Layout.fillWidth: true
             Layout.preferredHeight: 40
             contentWidth: tabBar.width
-            contentHeight: height
             clip: true
-            boundsBehavior: Flickable.StopAtBounds
-
-            MouseArea {
-                anchors.fill: parent
-                acceptedButtons: Qt.NoButton
-                onWheel: (wheel) => {
-                    const max = Math.max(0, tabFlick.contentWidth - tabFlick.width)
-                    tabFlick.contentX = Math.max(0, Math.min(max, tabFlick.contentX - wheel.angleDelta.y / 2))
-                }
-            }
 
             Rin.SelectorBar {
                 id: tabBar

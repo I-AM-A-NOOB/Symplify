@@ -199,6 +199,18 @@ class CalculatorViewModel(QObject):
     latexWidth = Property(int, _get_latex_width, notify=resultChanged)
     latexHeight = Property(int, _get_latex_height, notify=resultChanged)
 
+    @Slot()
+    def clear_result(self) -> None:
+        """Clear the result display area."""
+        self._result_text = ""
+        self._result_latex = ""
+        self._is_error = False
+        self._error_message = ""
+        self._latex_svg_url = ""
+        self._latex_width = 0
+        self._latex_height = 0
+        self.resultChanged.emit()
+
     def _apply_result(self, result: CalculationResult) -> None:
         """Apply a calculation result to the exposed properties."""
         if result.success:
@@ -226,7 +238,9 @@ class CalculatorViewModel(QObject):
         )
         if result.success:
             self._apply_result(result)
-            self._history.add_item(expression, self._result_text, "Code")
+            self._history.add_item(
+                expression, self._result_text, "Code", latex=result.latex
+            )
             self._log.add_info(f"= {result.value}", "Calculator")
         else:
             self._apply_result(result)
@@ -257,7 +271,12 @@ class CalculatorViewModel(QObject):
             if result.success:
                 self._apply_result(result)
                 self._history.add_item(
-                    f"{name} {operator} {value_str}", self._result_text, "Assign"
+                    value_str,
+                    self._result_text,
+                    "Assign",
+                    latex=result.latex,
+                    name=name,
+                    op=operator,
                 )
                 self._save_variable(name, result.value)
                 self._log.add_info(f"= {result.value}", "Calculator")
