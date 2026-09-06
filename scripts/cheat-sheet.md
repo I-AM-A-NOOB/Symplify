@@ -39,7 +39,19 @@ uv run python scripts/release.py minor --tag    # 升版 + 自动 commit + tag v
 ```
 
 - 权威版本在 `pyproject.toml`；`python/version.py` 是运行时副本（About 页显示），脚本自动同步两者
-- tag `vX.Y.Z` 会触发 GitHub Action 打包；发布流程：`release.py ... --tag` → `git push origin main --tags`
+- tag `vX.Y.Z` 会触发 GitHub Action：打包 + 自动创建 Release（见下）
+
+## CI / Release
+
+```bash
+uv run python scripts/release.py minor --tag   # 升版并打 tag v0.2.0
+git push origin main --tags                    # 推送后 CI 自动构建
+```
+
+- **tag 触发**：推 `v*` → GitHub Actions（windows-latest）构建 `build/main.dist` → 自动打成 `symplify-vX.Y.Z.zip` → **自动创建 Release**（附 zip、release notes 自动生成）。完成后在仓库 Releases 页可见，可再编辑标题/正文
+- **手动触发**（不发 Release）：仓库 Actions → *Windows build (Nuitka)* → *Run workflow* → 完成后在该次运行的 **Artifacts** 下载
+- Release 由默认 `GITHUB_TOKEN` 创建（workflow 已声明 `contents: write`），无需额外配置
+- 本地构建 = 同一脚本：`uv run python scripts/build_windows.py`
 
 ## Git
 
@@ -50,6 +62,11 @@ git push origin main               # 推送（远端分支 v1/v2/v3 见下）
 ```
 
 分支路线：`main`（RinUI+PySide6/QML，当前）；`v3-fluentwinui3-qml`（第三版 FluentWinUI3）；`v1-/v2-qfluentwidget`（早期 QWidget 版，历史参考）。
+
+## 给 Agent 的文档
+
+- `.Agent/DEVELOPER_GUIDE.md` — 源码结构、架构不变量、RinUI/Qt 坑、构建与版本说明（**Agent 重大改动后须同步更新**）
+- `AGENTS.md`（根目录）— 指向上面的指南与维护条款
 
 ## 快速自检
 
