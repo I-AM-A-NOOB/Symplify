@@ -13,6 +13,7 @@ from RinUI import RinUIWindow
 
 from python.keyboard_config import load_keyboard_tabs
 from python.viewmodel.main_viewmodel import MainViewModel
+from python.version import __version__
 
 # Under Nuitka the entry module is the compiled binary, so resolve the
 # project root relative to the executable instead of __file__.
@@ -39,6 +40,7 @@ def main() -> int:
     vm = MainViewModel()
     context = window.engine.rootContext()
     context.setContextProperty("vm", vm)
+    context.setContextProperty("appVersion", __version__)
     context.setContextProperty("calcVM", vm.calculator)
     context.setContextProperty("varsVM", vm.variables)
     context.setContextProperty("variablesModel", vm.variables.model)

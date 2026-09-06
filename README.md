@@ -48,6 +48,20 @@ uv run python scripts/build_windows.py   # -> build/main.dist/symplify.exe
 A GitHub Actions workflow (`.github/workflows/build-windows.yml`) produces the
 same artifact on `windows-latest` — trigger it manually or on a `v*` tag push.
 
+### Releases & versioning
+
+Symplify follows [SemVer](https://semver.org). The version lives in
+`pyproject.toml` (canonical) with a runtime copy in `python/version.py`; the
+About page reads it via the `appVersion` context property. Bump and tag with:
+
+```bash
+uv run python scripts/release.py minor          # 0.1.0 -> 0.2.0
+uv run python scripts/release.py minor --tag    # also commit + tag v0.2.0
+```
+
+Tags named `vX.Y.Z` trigger the Windows packaging workflow, so the release
+flow is: bump → tag → CI builds and uploads `symplify.exe`.
+
 ## Architecture
 
 Symplify follows **MVVM**. The `python/` package is split into layers; the model is pure Python with no Qt imports, which keeps it unit-testable and independent of any UI framework.

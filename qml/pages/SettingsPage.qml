@@ -98,7 +98,7 @@ Item {
 
                 Text {
                     typography: Typography.Body
-                    text: "Symplify 0.1.0"
+                    text: "Symplify " + appVersion
                 }
                 Text {
                     typography: Typography.Caption
