@@ -8,14 +8,14 @@ See [`architecture.svg`](architecture.svg) for the model-focused diagram. This p
 flowchart TB
     subgraph VIEW["View — QML (qml/) · presentation only"]
         MW["MainWindow.qml"] --> PAGES["Calculator / Variables / History / Log / Settings"]
-        MW --> COMP["KeyboardPanel / NavItem / EmptyArea"]
+        MW --> COMP["KeyboardPanel / HScrollView / LatexImage / SegmentedItem / SelectorBarItem"]
     end
 
     subgraph VM["ViewModel — Qt Bridge (python/viewmodel/) · the only layer that touches Qt"]
         MVM["MainViewModel (composition of all VMs)"]
         CVM["CalculatorViewModel"]
-        VVM["VariablesViewModel"] --> VModel["VariablesModel (QAbstractTableModel)"]
-        HModel["HistoryModel (QAbstractTableModel)"]
+        VVM["VariablesViewModel"] --> VModel["VariablesModel (3-column table)"]
+        HModel["HistoryModel (QAbstractListModel, cards)"]
         LOG["LogViewModel"]
     end
 
@@ -74,13 +74,14 @@ The single carrier between Model and ViewModel:
 
 ### `VariableManager` — `python/model/variable.py`
 
-The in-memory variable store:
+The in-memory variable store keeps **snapshot entries** (`VariableEntry`):
 
-- `_variables: Dict[str, Any]` holds name → SymPy value.
-- `_revision: int` is a monotonic counter bumped on every mutation. The `VariablesModel` caches the flat `(name, value_str)` rows and only rebuilds when `revision` changes, giving O(1) table reads.
+- `_variables: Dict[str, VariableEntry]` holds name → entry, where each entry carries the sympy object, its display expression string, a coarse type label, and a validity flag. `save(name, value)` stores a valid snapshot; `save_invalid(name, raw)` keeps failed input as an `NaN` entry instead of dropping it.
+- `list_all()` returns only the valid variables (as name → sympy value) for evaluation.
 - `validate_name(name)` enforces identifier rules (first char alpha/underscore, alnum/underscore after, no Python keywords).
 - `is_sympy_builtin(name)` checks against known constants (`pi`, `E`, `I`, `oo`, ...) plus a generic `hasattr(sympy, name)` probe, so assigning a variable that shadows a SymPy name raises a UI warning.
-- CRUD: `get` / `set` / `delete` / `rename` / `clear` / `exists` / `list_all`, plus `generate_unique_name(base)` for auto-naming.
+- `classify_type(value)` maps sympy objects to coarse labels (`Integer`, `Expression`, `Matrix`, ...) with a raw class-name fallback.
+- CRUD: `save` / `save_invalid` / `delete` / `rename` / `clear` / `exists` / `list_all`, plus `generate_unique_name(base)` for auto-naming.
 
 ### Enums
 

@@ -21,7 +21,7 @@
 
   <rect x="46" y="88" width="300" height="58" rx="6" fill="#dbeafe" stroke="#60a5fa"/>
   <text x="56" y="109" font-size="12.5" font-weight="bold" fill="#1e3a8a">MainWindow.qml</text>
-  <text x="56" y="127" font-size="10.5" fill="#475569">nav drawer · toolbar · SwipeView</text>
+  <text x="56" y="127" font-size="10.5" fill="#475569">RinUI NavigationView shell</text>
 
   <rect x="365" y="88" width="360" height="58" rx="6" fill="#dbeafe" stroke="#60a5fa"/>
   <text x="375" y="109" font-size="12.5" font-weight="bold" fill="#1e3a8a">Pages</text>
@@ -29,7 +29,8 @@
 
   <rect x="744" y="88" width="316" height="58" rx="6" fill="#dbeafe" stroke="#60a5fa"/>
   <text x="754" y="109" font-size="12.5" font-weight="bold" fill="#1e3a8a">Components</text>
-  <text x="754" y="127" font-size="10.5" fill="#475569">KeyboardPanel · NavItem · EmptyArea</text>
+  <text x="754" y="127" font-size="10.5" fill="#475569">KeyboardPanel · HScrollView · LatexImage</text>
+  <text x="754" y="142" font-size="10.5" fill="#475569">SegmentedItem · SelectorBarItem</text>
 
   <!-- View <-> ViewModel flow -->
   <text x="550" y="171" text-anchor="middle" font-size="10" fill="#6b7280">&#8597; QML context properties · slots · signals</text>
@@ -53,11 +54,11 @@
 
   <rect x="46" y="262" width="280" height="40" rx="6" fill="#ede9fe" stroke="#a78bfa"/>
   <text x="56" y="278" font-size="12" font-weight="bold" fill="#4c1d95">VariablesModel</text>
-  <text x="56" y="293" font-size="10.5" fill="#475569">QAbstractTableModel · cache + revision</text>
+  <text x="56" y="293" font-size="10.5" fill="#475569">3-col table · granular signals · setData</text>
 
   <rect x="341" y="262" width="330" height="40" rx="6" fill="#ede9fe" stroke="#a78bfa"/>
   <text x="351" y="278" font-size="12" font-weight="bold" fill="#4c1d95">HistoryModel</text>
-  <text x="351" y="293" font-size="10.5" fill="#475569">QAbstractTableModel · expr / result / mode</text>
+  <text x="351" y="293" font-size="10.5" fill="#475569">QAbstractListModel · cards · lazy LaTeX</text>
 
   <rect x="686" y="262" width="374" height="40" rx="6" fill="#ede9fe" stroke="#a78bfa"/>
   <text x="696" y="278" font-size="12" font-weight="bold" fill="#4c1d95">LogViewModel</text>
@@ -107,11 +108,11 @@
   <!-- VariableManager -->
   <rect x="700" y="390" width="360" height="168" rx="6" fill="#fef3c7" stroke="#f59e0b"/>
   <text x="710" y="410" font-size="12.5" font-weight="bold" fill="#78350f">VariableManager</text>
-  <text x="710" y="431" font-size="10.5" font-family="Consolas, monospace" fill="#92400e">_variables: Dict[str, Any]  (in-memory)</text>
-  <text x="710" y="447" font-size="10.5" font-family="Consolas, monospace" fill="#92400e">_revision: int  (cache invalidation)</text>
+  <text x="710" y="431" font-size="10.5" font-family="Consolas, monospace" fill="#92400e">_variables: Dict[str, VariableEntry]</text>
+  <text x="710" y="447" font-size="10.5" font-family="Consolas, monospace" fill="#92400e">save() / save_invalid()  (NaN rows)</text>
   <text x="710" y="468" font-size="10.5" font-family="Consolas, monospace" fill="#92400e">validate_name() · is_sympy_builtin()</text>
-  <text x="710" y="484" font-size="10.5" font-family="Consolas, monospace" fill="#92400e">get · set · delete · rename · clear</text>
-  <text x="710" y="500" font-size="10.5" font-family="Consolas, monospace" fill="#92400e">generate_unique_name(base)</text>
+  <text x="710" y="484" font-size="10.5" font-family="Consolas, monospace" fill="#92400e">list_all() · delete · rename · clear</text>
+  <text x="710" y="500" font-size="10.5" font-family="Consolas, monospace" fill="#92400e">classify_type() · generate_unique_name()</text>
   <text x="710" y="519" font-size="10" fill="#b45309">file: python/model/variable.py</text>
   <text x="710" y="538" font-size="10" fill="#b45309">+ InputMode: python/model/input_mode.py</text>
 
