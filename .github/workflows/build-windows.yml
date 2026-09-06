@@ -5,6 +5,9 @@ on:
   push:
     tags: ["v*"]
 
+permissions:
+  contents: write
+
 jobs:
   build-windows:
     runs-on: windows-latest
@@ -31,3 +34,15 @@ jobs:
           name: symplify-windows-${{ github.ref_name }}
           path: build/main.dist
           if-no-files-found: error
+
+      # Tagged runs (vX.Y.Z) additionally publish a GitHub Release.
+      - name: Package zip
+        if: startsWith(github.ref, 'refs/tags/')
+        run: powershell Compress-Archive -Path build/main.dist -DestinationPath symplify-${{ github.ref_name }}.zip
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: symplify-${{ github.ref_name }}.zip
+          generate_release_notes: true
