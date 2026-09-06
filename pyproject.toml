@@ -11,3 +11,12 @@ dependencies = [
     "sympy>=1.14.0",
     "ziamath>=0.13",
 ]
+
+[dependency-groups]
+dev = [
+    "nuitka>=4.2.1",
+]
+
+[[tool.uv.index]]
+url = "https://pypi.org/simple"
+default = true

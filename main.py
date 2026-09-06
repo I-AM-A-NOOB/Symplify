@@ -14,7 +14,12 @@ from RinUI import RinUIWindow
 from python.keyboard_config import load_keyboard_tabs
 from python.viewmodel.main_viewmodel import MainViewModel
 
-ROOT = Path(__file__).resolve().parent
+# Under Nuitka the entry module is the compiled binary, so resolve the
+# project root relative to the executable instead of __file__.
+if "__compiled__" in globals():
+    ROOT = Path(sys.executable).resolve().parent
+else:
+    ROOT = Path(__file__).resolve().parent
 
 
 def main() -> int:

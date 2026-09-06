@@ -36,6 +36,18 @@ uv sync          # or: pip install -e .
 python main.py
 ```
 
+### Windows packaging (Nuitka)
+
+Build a standalone directory with MSVC (needs Visual Studio Build Tools):
+
+```bash
+uv sync
+uv run python scripts/build_windows.py   # -> build/main.dist/symplify.exe
+```
+
+A GitHub Actions workflow (`.github/workflows/build-windows.yml`) produces the
+same artifact on `windows-latest` — trigger it manually or on a `v*` tag push.
+
 ## Architecture
 
 Symplify follows **MVVM**. The `python/` package is split into layers; the model is pure Python with no Qt imports, which keeps it unit-testable and independent of any UI framework.
