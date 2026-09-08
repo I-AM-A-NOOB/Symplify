@@ -18,6 +18,7 @@ CMD = [
     "--output-dir=build",
     "--output-filename=symplify",
     "--enable-plugin=pyside6",
+    "--include-qt-plugins=qml",
     "--msvc=latest",
     "--lto=yes",
     "--windows-console-mode=disable",
