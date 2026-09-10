@@ -43,6 +43,10 @@ qml/
   components/                   # Reusable pieces (+ qmldir):
                                 #   HScrollView, LatexImage, KeyboardPanel,
                                 #   SegmentedItem/SelectorBarItem (focus-indicator shadows)
+docs/
+  architecture.md               # Model-first walkthrough: the calculation Model's data
+                                # flow (sources in, sinks out), and who reads each
+                                # CalculationResult field; architecture.svg = layer map
 scripts/
   build_windows.py              # Nuitka standalone build
   release.py                    # SemVer bump (pyproject + python/version.py), optional tag
