@@ -1,7 +1,9 @@
 import QtQuick
 import QtQuick as QQ
 import QtQuick.Layouts 2.15
+import QtQuick.Controls.Basic 2.15 as QQC2
 import RinUI
+import RinUI as Rin
 import "../components"
 
 Item {
@@ -43,18 +45,20 @@ Item {
             }
         }
 
-        ListView {
+        // RinUI's native ListView adds add/remove/displaced transitions and
+        // an AsNeeded scrollbar. focusPolicy stays NoFocus so Ctrl+Tab lands
+        // on the current card (focus: ListView.isCurrentItem), not the view.
+        // Arrow keys navigate via the card's own Keys handlers below.
+        Rin.ListView {
             id: historyList
 
             Layout.fillWidth: true
             Layout.fillHeight: true
-            clip: true
             spacing: 10
             model: historyVM
+            focusPolicy: Qt.NoFocus
 
-            ScrollBar.vertical: ScrollBar { }
-
-            delegate: Item {
+            delegate: QQC2.ItemDelegate {
                 id: card
 
                 required property int index
@@ -69,34 +73,47 @@ Item {
                 required property int naturalHeight
                 required property string time
 
-                // Keyboard focus lands on the current card; Enter/Space then
-                // opens its menu at the default position.
-                focus: ListView.isCurrentItem
+                // Selection = the current item; drives the background tint
+                // and the accent bar (mirrors ListViewDelegate.highlighted).
+                highlighted: ListView.isCurrentItem
+
+                // The current card holds keyboard focus so Enter/Space/
+                // Shift+F10 open its menu; arrow keys navigate the list
+                // (Keys.onUpPressed/onDownPressed). forceActiveFocus grants
+                // real active focus (a plain `focus:` binding does not), so
+                // the Keys handlers actually fire.
                 activeFocusOnTab: true
-
-                width: ListView.view ? ListView.view.width : 200
-                height: cardBody.implicitHeight + 20
-
-                Rectangle {
-                    id: cardBg
-
-                    anchors.fill: parent
-                    anchors.margins: 2
-                    radius: Theme.currentTheme.appearance.buttonRadius
-                    color: cardHover.hovered || card.activeFocus
-                        ? Theme.currentTheme.colors.subtleSecondaryColor
-                        : "transparent"
-
-                    Behavior on color {
-                        ColorAnimation { duration: 120 }
-                    }
+                onHighlightedChanged: {
+                    if (highlighted)
+                        forceActiveFocus()
                 }
 
-                ColumnLayout {
-                    id: cardBody
+                // Keyboard focus *is* the selection (Fluent list semantics):
+                // Tab/Backtab or a click makes the focused card current, so the
+                // accent bar and the focus ring always sit on the same card.
+                onActiveFocusChanged: {
+                    if (activeFocus)
+                        historyList.currentIndex = index
+                }
 
-                    anchors.fill: parent
-                    anchors.margins: 10
+                // Keyboard-navigation flag: set on arrow keys, cleared on any
+                // click. Drives the FocusIndicator so it stays while selecting
+                // with Up/Down (mirrors ListViewDelegate.keyboardNavigation).
+                readonly property bool keyboardNavigation:
+                    historyList.keyboardNavigation && highlighted
+
+                width: ListView.view ? historyList.width : 200
+                height: cardBody.implicitHeight + 20
+
+                // 10px content inset via padding (Control lays out the
+                // contentItem inside it); the background is drawn separately.
+                leftPadding: 10
+                rightPadding: 10
+                topPadding: 10
+                bottomPadding: 10
+
+                contentItem: ColumnLayout {
+                    id: cardBody
                     spacing: 6
 
                     // Input line + send-to-input button (pinned top-right).
@@ -183,16 +200,14 @@ Item {
                         }
 
                         // The scroll strip is a Flickable, so it owns left
-                        // presses; forward simple clicks (no drag = no scroll)
-                        // to the card's menu. DragThreshold keeps real pans
-                        // from opening the menu.
+                        // presses and the delegate's onClicked doesn't fire
+                        // here; forward simple clicks (no drag = no scroll).
+                        // Right clicks pass through to the card's own handler.
                         TapHandler {
-                            acceptedButtons: Qt.LeftButton | Qt.RightButton
+                            acceptedButtons: Qt.LeftButton
                             onTapped: {
-                                const p = card.mapFromItem(
-                                    latexScroll, point.position.x,
-                                    point.position.y)
-                                entryMenu.popup(p)
+                                historyList.keyboardNavigation = false
+                                historyList.currentIndex = index
                             }
                         }
                     }
@@ -205,32 +220,118 @@ Item {
                     }
                 }
 
+                background: Rectangle {
+                    id: cardBg
+
+                    anchors.fill: parent
+                    anchors.margins: 2
+                    radius: Theme.currentTheme.appearance.buttonRadius
+                    color: (card.highlighted || cardHover.hovered)
+                        ? Theme.currentTheme.colors.subtleSecondaryColor
+                        : "transparent"
+
+                    Behavior on color {
+                        ColorAnimation { duration: 120 }
+                    }
+
+                    // Fluent keyboard-focus ring. control is a Control
+                    // (ItemDelegate), so visualFocus/focusReason resolve; the
+                    // ring shows for keyboard navigation (arrow keys) and
+                    // Tab/Backtab focus, never on a mouse click.
+                    FocusIndicator {
+                        control: card
+                        keyboardFocus: card.keyboardNavigation
+                    }
+                }
+
+                // Selected-item accent bar. Cards are tall and variable
+                // height, so it tracks the card with a fixed 20px inset. The
+                // enter animation follows RinUI's Indicator (opacity + height
+                // + y expansion).
+                Rectangle {
+                    id: selectBar
+
+                    visible: card.highlighted
+                    x: 2
+                    width: 3
+                    radius: 2
+                    color: Theme.currentTheme.colors.primaryColor
+                    y: 20
+                    height: card.height - 40
+
+                    onVisibleChanged: {
+                        if (visible)
+                            enterAnimation.restart()
+                    }
+
+                    ParallelAnimation {
+                        id: enterAnimation
+
+                        PropertyAnimation {
+                            target: selectBar
+                            property: "opacity"
+                            from: 0.0
+                            to: 1.0
+                            duration: Utils.animationSpeed
+                            easing.type: Easing.OutQuad
+                        }
+                        ParallelAnimation {
+                            PropertyAnimation {
+                                target: selectBar
+                                property: "height"
+                                from: 0
+                                to: card.height - 40
+                                duration: Utils.animationSpeedMiddle
+                                easing.type: Easing.OutQuint
+                            }
+                            PropertyAnimation {
+                                target: selectBar
+                                property: "y"
+                                from: card.height / 2
+                                to: 20
+                                duration: Utils.animationSpeedMiddle
+                                easing.type: Easing.OutQuint
+                            }
+                        }
+                    }
+                }
+
                 HoverHandler { id: cardHover }
 
-                // Mouse (left or right click): menu at the pointer. Clicks on
-                // the send button are excluded -- it handles itself.
+                // Left click (card body) selects the card.
+                onClicked: {
+                    historyList.keyboardNavigation = false
+                    historyList.currentIndex = index
+                }
+
+                // Right click selects the card and opens its menu at the
+                // pointer. No exclusion checks: right clicks over the send
+                // button or the scroll strip pass through to this handler.
                 TapHandler {
                     id: cardTap
 
-                    acceptedButtons: Qt.LeftButton | Qt.RightButton
-                    onTapped: {
-                        const lp = sendBtn.mapFromItem(
-                            card, cardTap.point.position.x,
-                            cardTap.point.position.y)
-                        if (sendBtn.visible
-                                && lp.x >= 0 && lp.y >= 0
-                                && lp.x <= sendBtn.width && lp.y <= sendBtn.height)
-                            return   // the send button handles its own clicks
-                        const lq = latexScroll.mapFromItem(
-                            card, cardTap.point.position.x,
-                            cardTap.point.position.y)
-                        if (latexScroll.visible
-                                && lq.x >= 0 && lq.y >= 0
-                                && lq.x <= latexScroll.width
-                                && lq.y <= latexScroll.height)
-                            return   // the scroll strip handles its own clicks
-                        entryMenu.popup(cardTap.point.position)
+                    acceptedButtons: Qt.RightButton
+                    onTapped: (eventPoint) => {
+                        historyList.keyboardNavigation = false
+                        historyList.currentIndex = index
+                        entryMenu.popup(eventPoint.position)
                     }
+                }
+
+                // Arrow keys move the selection and keep it in view. ListView
+                // has no moveCurrentIndex*() -- those methods belong to
+                // GridView; a ListView moves with increment/decrement.
+                Keys.onUpPressed: {
+                    historyList.keyboardNavigation = true
+                    historyList.decrementCurrentIndex()
+                    historyList.positionViewAtIndex(historyList.currentIndex,
+                                                    ListView.Contain)
+                }
+                Keys.onDownPressed: {
+                    historyList.keyboardNavigation = true
+                    historyList.incrementCurrentIndex()
+                    historyList.positionViewAtIndex(historyList.currentIndex,
+                                                    ListView.Contain)
                 }
 
                 // Keyboard: menu at the default position (not the pointer).

@@ -72,9 +72,33 @@ scripts/
 
 - Import **unversioned** `QtQuick` (`import QtQuick`) where you need current API — `import QtQuick 2.15`
   version-gates newer members (e.g. `currentRow`, `itemAtCell` revisions).
-- RinUI's experimental `TableView` sets `acceptedButtons: Qt.NoButton`, which kills its built-in
+- RinUI's `TableView` sets `acceptedButtons: Qt.NoButton`, which kills its built-in
   edit triggers; the Variables page overrides it back to `Qt.LeftButton` and wires real editing
   (`flags()` `ItemIsEditable` + `model.setData`). Its `itemAtCell(a, b)` is `(column, row)`.
+- RinUI's `Indicator` (selected-item accent bar) lives in the `components/` dir, but the URI
+  `RinUI.AdvancedComponents` **is not importable** (module URIs resolve by directory name here, so
+  app code needs `import RinUI.components`; the root `RinUI` module does not export `Indicator`).
+  Its geometry is hardcoded for ~38px rows (`currentItemHeight - 23`, centered). The History page
+  therefore inlines its own bar for tall/variable cards (`height: card.height - 40`, 20px inset)
+  and uses `FocusIndicator` (root module) for the keyboard-focus ring. Reusing `Indicator` is
+  possible but re-derives the bar from RinUI's constant (a `height - 23` bar ≈ 11.5px inset), i.e.
+  it gives up the tuned 20px inset.
+- `Item.visualFocus` / `Item.focusReason` **do not exist on plain `Item`** in Qt 6 (they live on
+  `Control`). `FocusIndicator.control` MUST therefore be a Control (`ItemDelegate`, `Button`, …),
+  not a plain `Item` — otherwise its `visible` binding throws `ReferenceError` and falls back to
+  the default `visible: true`, so the focus ring shows **always**. The History page's card is an
+  `ItemDelegate` (`import QtQuick.Controls.Basic 2.15 as QQC2`), with `highlighted:
+  ListView.isCurrentItem`, `onActiveFocusChanged` → `historyList.currentIndex = index` (keyboard
+  focus selects the card), and `FocusIndicator { control: card }`. Its list is `Rin.ListView`
+  with `focusPolicy: Qt.NoFocus` so Ctrl+Tab lands on the cards (`activeFocusOnTab`), not the view.
+- **A `ListView` has no `moveCurrentIndexUp/Down()`** — those methods belong to `GridView`; calling
+  them on a ListView throws `TypeError: Property 'moveCurrentIndexDown' ... is not a function`. A
+  ListView moves with `incrementCurrentIndex()` / `decrementCurrentIndex()`, which **clamp** at the
+  ends (they do not wrap) and do **not** scroll, so the History page follows each move with
+  `positionViewAtIndex(..., ListView.Contain)`. Selection and keyboard focus are deliberately one
+  thing: `onActiveFocusChanged` makes the focused card current (Tab/click) and `onHighlightedChanged`
+  → `forceActiveFocus()` makes the current card focused (arrows), so exactly one card carries both
+  the accent bar and the focus ring.
 - RinUI caps Top/Bottom nav sections at 20% height → keep main items unpositioned (middle) and at
   most pin a few to `Position.Bottom`.
 - RinUI's `ToolTip`, `Menu`, `Dialog` are QQC2 subclasses used as **child elements** (not attached

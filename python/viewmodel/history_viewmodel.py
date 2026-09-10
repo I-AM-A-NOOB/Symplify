@@ -8,7 +8,7 @@ rendered SVG data URL is produced lazily per visible row and re-tinted
 when the theme color changes.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Optional
 from urllib.parse import quote
@@ -31,6 +31,9 @@ class HistoryItem:
         op: Assignment operator ("=", "+=", ...; "=" for code entries).
         latex: LaTeX source of the result (for rendering and copying).
         svg_url: Cached rendered SVG data URL; rendered lazily.
+        created: Wall-clock time of the entry. Must be a ``default_factory``:
+            a plain ``= datetime.now()`` default is evaluated once at class
+            definition, which stamped every entry with the import time.
     """
 
     expression: str
@@ -42,7 +45,7 @@ class HistoryItem:
     svg_url: Optional[str] = None
     natural_w: int = 0
     natural_h: int = 0
-    created: datetime = datetime.now()
+    created: datetime = field(default_factory=datetime.now)
 
 
 class HistoryModel(QAbstractListModel):
