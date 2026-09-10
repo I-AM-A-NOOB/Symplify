@@ -59,8 +59,8 @@ scripts/
    initializes from the VM in `Component.onCompleted` and only writes back from user
    clicks (`onClicked`) — never from `onCurrentIndexChanged` during page init (that resets
    the mode). This has regressed twice; keep the pattern.
-3. **Context properties** (registered in `main.py`): `vm`, `appVersion`, `calcVM`, `varsVM`,
-   `variablesModel`, `historyVM`, `logVM`, `keyboardTabs`.
+3. **Context properties** (registered in `main.py`): `vm`, `appVersion`, `rinuiVersion`, `qtVersion`,
+   `calcVM`, `varsVM`, `variablesModel`, `historyVM`, `logVM`, `keyboardTabs`.
 4. **Keyboard panel keys & its SelectorBar tabs use `focusPolicy: Qt.NoFocus`** so typing stays
    in the focused input. Everywhere else leave focus policy at defaults (focus ring + Ctrl+Tab).
 5. **LaTeX is theme-aware**: render with `latex_to_svg(..., color=...)`; when the RinUI theme
@@ -133,6 +133,13 @@ Data-file pitfalls for frozen builds (update this list when you add data-reading
 
 - **SemVer**; canonical value in `pyproject.toml`, runtime copy `python/version.py`, shown in About
   via the `appVersion` context property.
+- `python/version.py` is **rewritten wholesale** by `scripts/release.py` — never add code to it, the
+  next release bump would erase it.
+- Third-party versions in About must never be hardcoded: RinUI comes from the `rinuiVersion` context
+  property (`RinUI.__version__`) and Qt from `qtVersion` (`PySide6.QtCore.qVersion()`), both
+  registered in `main.py`. Do **not** reach for `importlib.metadata` (a frozen build ships no
+  `.dist-info`, so it raises) or for Qt's QML global `qtRuntimeVersionString` — that global does not
+  exist under PySide6, so a `typeof` guard around it silently drops the Qt version forever.
 - Change it with `scripts/release.py` (patch|minor|major|explicit [+ `--tag`]) — it syncs both files
   and, with `--tag`, commits and tags `vX.Y.Z`.
 - Pushing a `vX.Y.Z` tag runs the Windows packaging workflow and uploads the `.dist` artifact.

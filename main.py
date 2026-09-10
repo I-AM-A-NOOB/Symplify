@@ -8,8 +8,9 @@ and lets RinUI load the Fluent-styled QML window.
 import sys
 from pathlib import Path
 
+from PySide6.QtCore import qVersion
 from PySide6.QtWidgets import QApplication
-from RinUI import RinUIWindow
+from RinUI import RinUIWindow, __version__ as RINUI_VERSION
 
 from python.keyboard_config import load_keyboard_tabs
 from python.viewmodel.main_viewmodel import MainViewModel
@@ -41,6 +42,12 @@ def main() -> int:
     context = window.engine.rootContext()
     context.setContextProperty("vm", vm)
     context.setContextProperty("appVersion", __version__)
+    # RinUI's own __version__ (not importlib.metadata: a frozen build has no
+    # .dist-info, so metadata lookups would raise).
+    context.setContextProperty("rinuiVersion", RINUI_VERSION)
+    # Qt's QML global qtRuntimeVersionString does not exist under PySide6, so
+    # the About page would silently lose the Qt version; pass qVersion() down.
+    context.setContextProperty("qtVersion", qVersion())
     context.setContextProperty("calcVM", vm.calculator)
     context.setContextProperty("varsVM", vm.variables)
     context.setContextProperty("variablesModel", vm.variables.model)

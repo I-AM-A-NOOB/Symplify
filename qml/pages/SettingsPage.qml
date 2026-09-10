@@ -108,8 +108,7 @@ Item {
                 Text {
                     typography: Typography.Caption
                     color: Theme.currentTheme.colors.textSecondaryColor
-                    text: (typeof qtRuntimeVersionString !== "undefined"
-                           ? "Qt " + qtRuntimeVersionString + " · " : "") + "RinUI 0.4.4"
+                    text: "Qt " + qtVersion + " · RinUI " + rinuiVersion
                 }
             }
         }
