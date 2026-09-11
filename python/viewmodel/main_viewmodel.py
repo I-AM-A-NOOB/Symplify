@@ -15,12 +15,16 @@ from PySide6.QtCore import (
     Slot,
 )
 from PySide6.QtGui import QGuiApplication, QKeyEvent
+from typing import Optional
 
 from ..model.calculator import Calculator
 from ..model.variable import VariableManager
+from ..settings import SettingsStore
 from .calculator_viewmodel import CalculatorViewModel
 from .history_viewmodel import HistoryModel
 from .log_viewmodel import LogViewModel
+from .search import HistoryFilterModel, VariablesFilterModel
+from .settings_viewmodel import SettingsViewModel
 from .variables_viewmodel import VariablesViewModel
 
 
@@ -38,8 +42,19 @@ class MainViewModel(QObject):
     sendToCode = Signal(str)
     sendToAssign = Signal(str, str, str)
 
-    def __init__(self, parent=None):
-        """Initialize all models and viewmodels."""
+    def __init__(
+        self,
+        settings: SettingsStore,
+        theme_manager: Optional[QObject] = None,
+        parent: Optional[QObject] = None,
+    ):
+        """Initialize all models and viewmodels.
+
+        Args:
+            settings: The loaded settings store (single source of truth).
+            theme_manager: RinUI's ``ThemeManager``, so the settings viewmodel can
+                apply appearance changes; None in headless tests.
+        """
         super().__init__(parent)
         self._calculator = Calculator()
         self._variable_manager = VariableManager()
@@ -47,7 +62,7 @@ class MainViewModel(QObject):
         self._history = HistoryModel(parent=self)
         self._log = LogViewModel(parent=self)
         self._variables_vm = VariablesViewModel(
-            self._variable_manager, self._log, parent=self
+            self._variable_manager, self._log, self._calculator, parent=self
         )
         self._calculator_vm = CalculatorViewModel(
             self._calculator,
@@ -57,6 +72,23 @@ class MainViewModel(QObject):
             variables_model=self._variables_vm.model,
             parent=self,
         )
+
+        # Search-filtered views: the pages bind their views to these, so the
+        # source models keep every entry regardless of an active query.
+        self._variables_filter = VariablesFilterModel(parent=self)
+        self._variables_filter.setSourceModel(self._variables_vm.model)
+        self._history_filter = HistoryFilterModel(parent=self)
+        self._history_filter.setSourceModel(self._history)
+
+        self._settings = SettingsViewModel(settings, theme_manager, parent=self)
+        self._settings.latexSizeChanged.connect(self._apply_latex_size)
+        self._apply_latex_size()      # apply the persisted rendering settings now
+
+    def _apply_latex_size(self) -> None:
+        """Push the configured result font size to everything that renders LaTeX."""
+        size = self._settings.latexSize
+        self._calculator_vm.set_latex_size(size)
+        self._history.set_latex_size(size)
 
     @Property(QObject, constant=True)
     def calculator(self) -> CalculatorViewModel:
@@ -77,6 +109,21 @@ class MainViewModel(QObject):
     def log(self) -> LogViewModel:
         """The log viewmodel."""
         return self._log
+
+    @Property(QObject, constant=True)
+    def variablesFilter(self) -> VariablesFilterModel:
+        """Search-filtered view of the variables table."""
+        return self._variables_filter
+
+    @Property(QObject, constant=True)
+    def historyFilter(self) -> HistoryFilterModel:
+        """Search-filtered view of the history cards."""
+        return self._history_filter
+
+    @Property(QObject, constant=True)
+    def settings(self) -> SettingsViewModel:
+        """The settings viewmodel (appearance, rendering, window, config path)."""
+        return self._settings
 
     @Slot(str)
     def copyText(self, text: str) -> None:

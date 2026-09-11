@@ -20,7 +20,14 @@ from PySide6.QtCore import (
     Slot,
 )
 
-from ..model.calculator import Calculator
+from ..model.calculator import (
+    Assignment,
+    Calculator,
+    ErrorKind,
+    Failure,
+    Result,
+    Success,
+)
 from ..model.variable import VariableManager
 from .log_viewmodel import LogViewModel
 
@@ -30,26 +37,29 @@ class VariablesModel(QAbstractTableModel):
 
     Columns: name / expression / type. The expression column shows the
     canonical sympy string for valid entries and the raw user input for
-    invalid ones (whose value is NaN). The ``invalid`` role lets the view
-    render invalid entries distinctly.
+    invalid ones (whose value is NaN, which the type column labels "Invalid").
+    Every write goes through the shared ``Calculator``, so no route can create
+    a variable while skipping name validation.
     """
-
-    InvalidRole = Qt.UserRole + 1
 
     warningOccurred = Signal(str, str)
 
-    def __init__(self, manager: VariableManager, log: Optional[LogViewModel] = None, parent=None):
+    def __init__(
+        self,
+        manager: VariableManager,
+        log: Optional[LogViewModel] = None,
+        calculator: Optional[Calculator] = None,
+        parent=None,
+    ):
         """Initialize the variables model."""
         super().__init__(parent)
         self._manager = manager
         self._log = log
+        self._calculator = calculator if calculator is not None else Calculator()
         self._keys: list = []  # insertion-ordered variable names
 
     def roleNames(self):
-        return {
-            Qt.DisplayRole: b"display",
-            self.InvalidRole: b"invalid",
-        }
+        return {Qt.DisplayRole: b"display"}
 
     def flags(self, index: QModelIndex):
         """Name and expression columns are editable (Qt edit protocol)."""
@@ -89,22 +99,23 @@ class VariablesModel(QAbstractTableModel):
                 return False
 
         try:
-            parsed = self._parse(text)
+            result = self._parse(text)
         except Exception as parse_err:
             self.save_invalid(name, text)
             self._log_warn(f"Variable '{name}' kept as invalid: {parse_err}")
             return True
-        self.save(name, parsed)
-        self._log_info(f"Variable updated: {name} = {parsed}")
+        if isinstance(result, Failure):
+            self.save_invalid(name, text)
+            self._log_warn(f"Variable '{name}' kept as invalid: {result.message}")
+            return True
+        self.save(name, result.value)
+        self._log_info(f"Variable updated: {name} = {result.value}")
         self._warn_builtin(name)
         return True
 
-    def _parse(self, value_str: str) -> Any:
-        """Parse an expression with the current variable snapshot."""
-        result = Calculator().evaluate(value_str, self._manager.list_all())
-        if not result.success:
-            raise ValueError(f"Failed to parse value: {result.error}")
-        return result.value
+    def _parse(self, value_str: str) -> Result:
+        """Evaluate an expression with the current variable snapshot."""
+        return self._calculator.evaluate(value_str, self._manager.list_all())
 
     def _log_info(self, message: str) -> None:
         if self._log is not None:
@@ -145,8 +156,6 @@ class VariablesModel(QAbstractTableModel):
             return None
         if role == Qt.DisplayRole:
             return (entry.name, entry.expr_str, entry.type_label)[index.column()]
-        if role == self.InvalidRole:
-            return not entry.valid
         return None
 
     def _after_mutation(self, name: str, is_new: bool) -> None:
@@ -237,13 +246,17 @@ class VariablesViewModel(QObject):
         self,
         variable_manager: VariableManager,
         log: LogViewModel,
+        calculator: Optional[Calculator] = None,
         parent: Optional[QObject] = None,
     ):
         """Initialize the variables viewmodel."""
         super().__init__(parent)
         self._variable_manager = variable_manager
         self._log = log
-        self._model = VariablesModel(variable_manager, log, parent=self)
+        self._calculator = calculator if calculator is not None else Calculator()
+        self._model = VariablesModel(
+            variable_manager, log, self._calculator, parent=self
+        )
         self._model.warningOccurred.connect(self.warningOccurred)
 
     def _get_model(self) -> VariablesModel:
@@ -251,18 +264,25 @@ class VariablesViewModel(QObject):
 
     model = Property(QObject, _get_model, constant=True)
 
+    def _assign(self, name: str, value_str: str) -> Result:
+        """Evaluate a write through the model, so the target is checked first."""
+        return self._calculator.assign(
+            Assignment(name, "=", value_str), self._variable_manager.list_all()
+        )
+
     @Slot(str, str, result=bool)
     def addVariable(self, name: str, value_str: str) -> bool:
-        """Add a variable, parsing the value expression."""
-        try:
-            parsed = self._parse_value(value_str)
-            self._model.save(name, parsed)
-            self._log.add_info(f"Variable added: {name} = {parsed}", "Variables")
-            self._warn_if_builtin(name)
-            return True
-        except Exception as e:
-            self._log.add_error(f"Failed to add variable: {e}", "Variables")
+        """Add a variable, validating the name and parsing the value."""
+        result = self._assign(name, value_str)
+        if isinstance(result, Failure):
+            self._log.add_error(
+                f"Failed to add variable: {result.message}", "Variables"
+            )
             return False
+        self._model.save(name, result.value)
+        self._log.add_info(f"Variable added: {name} = {result.value}", "Variables")
+        self._warn_if_builtin(name)
+        return True
 
     @Slot(str, result=bool)
     def deleteVariable(self, name: str) -> bool:
@@ -291,28 +311,28 @@ class VariablesViewModel(QObject):
     def updateVariable(self, name: str, value_str: str) -> bool:
         """Update a variable's value.
 
-        An invalid expression is kept in the list as an invalid (NaN)
-        entry so the user's input is never lost.
+        An invalid expression is kept in the list as an invalid (NaN) entry so
+        the user's input is never lost.
         """
-        try:
-            if not self._variable_manager.exists(name):
-                self._log.add_error(f"Variable '{name}' does not exist", "Variables")
-                return False
-            try:
-                parsed = self._parse_value(value_str)
-            except Exception as parse_err:
-                self._model.save_invalid(name, value_str)
-                self._log.add_warning(
-                    f"Variable '{name}' kept as invalid: {parse_err}", "Variables"
-                )
-                return True
-            self._model.save(name, parsed)
-            self._log.add_info(f"Variable updated: {name} = {parsed}", "Variables")
-            self._warn_if_builtin(name)
-            return True
-        except Exception as e:
-            self._log.add_error(f"Failed to update variable: {e}", "Variables")
+        if not self._variable_manager.exists(name):
+            self._log.add_error(f"Variable '{name}' does not exist", "Variables")
             return False
+        result = self._assign(name, value_str)
+        if isinstance(result, Failure):
+            if result.kind is ErrorKind.INVALID_NAME:
+                self._log.add_error(
+                    f"Failed to update variable: {result.message}", "Variables"
+                )
+                return False
+            self._model.save_invalid(name, value_str)
+            self._log.add_warning(
+                f"Variable '{name}' kept as invalid: {result.message}", "Variables"
+            )
+            return True
+        self._model.save(name, result.value)
+        self._log.add_info(f"Variable updated: {name} = {result.value}", "Variables")
+        self._warn_if_builtin(name)
+        return True
 
     @Slot(result=str)
     def generateUniqueName(self) -> str:
@@ -325,13 +345,3 @@ class VariablesViewModel(QObject):
             self.warningOccurred.emit(
                 name, f"{name} is a SymPy built-in. You asked for it."
             )
-
-    def _parse_value(self, value_str: str) -> Any:
-        """Parse a value string through the Calculator."""
-        if isinstance(value_str, str):
-            calc = Calculator()
-            result = calc.evaluate(value_str, self._variable_manager.list_all())
-            if not result.success:
-                raise ValueError(f"Failed to parse value: {result.error}")
-            return result.value
-        return value_str

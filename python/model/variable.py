@@ -11,7 +11,61 @@ behavior), and invalid input is kept as an invalid (NaN) entry.
 
 import keyword
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any, Dict, List, Optional
+
+#: Names sympy already defines, which a variable would shadow. User input is
+#: resolved against sympy's namespace, so these are exactly the names that can
+#: silently change what an expression means.
+SYMPY_CONSTANTS = frozenset({
+    "pi",
+    "E",
+    "I",
+    "oo",
+    "zoo",
+    "nan",
+    "GoldenRatio",
+    "EulerGamma",
+    "Catalan",
+})
+
+
+@lru_cache(maxsize=1)
+def sympy_callables() -> frozenset:
+    """Public callable names in sympy's namespace (cached; built on first use)."""
+    import sympy as sp
+
+    return frozenset(
+        name for name in dir(sp)
+        if not name.startswith("_") and callable(getattr(sp, name, None))
+    )
+
+
+def is_sympy_name(name: str) -> bool:
+    """True when ``name`` is a sympy constant or callable the parser resolves."""
+    return name in SYMPY_CONSTANTS or name in sympy_callables()
+
+
+def validate_name(name: str) -> bool:
+    """Check if a variable name is legal (the single source of truth).
+
+    Identifier rules: first char alpha/underscore, then alnum/underscore, and
+    not a Python keyword. Both the variable store and the assignment path use
+    this function, so UI and model can never disagree.
+
+    Returns:
+        True if the name is valid, False otherwise.
+    """
+    if not name or not isinstance(name, str):
+        return False
+
+    if not (name[0].isalpha() or name[0] == "_"):
+        return False
+
+    if not all(c.isalnum() or c == "_" for c in name[1:]):
+        return False
+
+    return not keyword.iskeyword(name)
 
 
 def classify_type(value: Any) -> str:
@@ -81,62 +135,20 @@ class VariableManager:
     def __init__(self):
         """Initialize the variable manager."""
         self._variables: Dict[str, VariableEntry] = {}
-        self._revision: int = 0
-
-    @property
-    def revision(self) -> int:
-        """Monotonic counter bumped on every mutation (for cache invalidation)."""
-        return self._revision
-
-    def _touch(self) -> None:
-        """Mark the manager as changed."""
-        self._revision += 1
 
     def validate_name(self, name: str) -> bool:
-        """Check if a variable name is legal.
-
-        Returns:
-            True if the name is valid, False otherwise.
-        """
-        if not name or not isinstance(name, str):
-            return False
-
-        if not (name[0].isalpha() or name[0] == "_"):
-            return False
-
-        if not all(c.isalnum() or c == "_" for c in name[1:]):
-            return False
-
-        if keyword.iskeyword(name):
-            return False
-
-        return True
+        """Check whether ``name`` is legal (delegates to the module function)."""
+        return validate_name(name)
 
     @staticmethod
     def is_sympy_builtin(name: str) -> bool:
-        """Check if a variable name is a SymPy built-in constant.
+        """Check whether ``name`` shadows a sympy constant or function.
 
         Returns:
-            True if the name is a SymPy built-in constant.
+            True when sympy already defines the name. Assigning it is still
+            allowed, but every expression using that name changes meaning.
         """
-        import sympy as sp
-
-        builtin_constants = {
-            "pi",
-            "E",
-            "I",
-            "oo",
-            "zoo",
-            "nan",
-            "GoldenRatio",
-            "EulerGamma",
-            "Catalan",
-        }
-
-        if name in builtin_constants:
-            return True
-
-        return hasattr(sp, name) and not name.startswith("_")
+        return is_sympy_name(name)
 
     def entry(self, name: str) -> Optional[VariableEntry]:
         """Get the full entry for ``name``, or None if not found."""
@@ -170,7 +182,6 @@ class VariableManager:
             type_label=classify_type(value),
             valid=True,
         )
-        self._touch()
 
     def save_invalid(self, name: str, raw_expr: str) -> None:
         """Store an invalid assignment: keep the raw input, value is NaN.
@@ -187,7 +198,6 @@ class VariableManager:
             type_label="Invalid",
             valid=False,
         )
-        self._touch()
 
     def delete(self, name: str) -> bool:
         """Delete a variable.
@@ -197,7 +207,6 @@ class VariableManager:
         """
         if name in self._variables:
             del self._variables[name]
-            self._touch()
             return True
         return False
 
@@ -224,16 +233,20 @@ class VariableManager:
         if new_name in self._variables and new_name != old_name:
             raise ValueError(f"Variable '{new_name}' already exists")
 
-        entry = self._variables.pop(old_name)
+        entry = self._variables[old_name]
         entry.name = new_name
-        self._variables[new_name] = entry
-        self._touch()
+        # Rebuild in order so a rename keeps the entry's position: the table
+        # renames its row without reordering it, and the two orders must not
+        # disagree.
+        self._variables = {
+            (new_name if key == old_name else key): value
+            for key, value in self._variables.items()
+        }
         return True
 
     def clear(self) -> None:
         """Clear all variables."""
         self._variables.clear()
-        self._touch()
 
     def generate_unique_name(self, base: str = "var") -> str:
         """Generate a unique variable name based on ``base``."""

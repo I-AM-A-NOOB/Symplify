@@ -3,9 +3,11 @@
 
 A QAbstractListModel of calculation entries rendered as cards by the
 history page. Each entry stores its input (name/operator/expression for
-assignments), the sympy-format result, and the result's LaTeX source; the
-rendered SVG data URL is produced lazily per visible row and re-tinted
-when the theme color changes.
+assignments), and then either the sympy-format result with the result's
+LaTeX source, or — when the request failed — the failure text. Failed
+entries are kept on purpose: they carry the input back, so a typo can be
+sent to the input area and fixed. The rendered SVG data URL is produced
+lazily per visible row and re-tinted when the theme color changes.
 """
 
 from dataclasses import dataclass, field
@@ -25,7 +27,9 @@ class HistoryItem:
 
     Attributes:
         expression: The evaluated expression (value part for assignments).
-        result: The sympy-format result string.
+        result: The sympy-format result string ("" for a failed entry).
+        error: Failure text (message plus hint) for a failed entry, "" otherwise.
+            A non-empty value is what makes the card render as an error card.
         mode: "Code" or "Assign".
         name: Assignment target variable ("" for code entries).
         op: Assignment operator ("=", "+=", ...; "=" for code entries).
@@ -38,6 +42,7 @@ class HistoryItem:
 
     expression: str
     result: str
+    error: str = ""
     mode: str = "Code"
     name: str = ""
     op: str = "="
@@ -51,9 +56,10 @@ class HistoryItem:
 class HistoryModel(QAbstractListModel):
     """List model of calculation history entries.
 
-    Roles: mode / name / op / expression / result / latexUrl / latex.
-    The ``latexUrl`` role renders (and caches) the entry's result SVG with
-    the current theme color on first access.
+    Roles: mode / name / op / expression / result / error / latexUrl / latex /
+    time. The ``latexUrl`` role renders (and caches) the entry's result SVG with
+    the current theme color on first access; ``error`` is non-empty exactly for
+    the entries whose request failed.
     """
 
     ModeRole = Qt.UserRole + 1
@@ -66,12 +72,14 @@ class HistoryModel(QAbstractListModel):
     NaturalWidthRole = Qt.UserRole + 8
     NaturalHeightRole = Qt.UserRole + 9
     TimeRole = Qt.UserRole + 10
+    ErrorRole = Qt.UserRole + 11
 
     def __init__(self, parent=None):
         """Initialize the history model."""
         super().__init__(parent)
         self._items: List[HistoryItem] = []
         self._latex_color: str = "#000000"
+        self._latex_size: int = 24
 
     def roleNames(self):
         return {
@@ -80,6 +88,7 @@ class HistoryModel(QAbstractListModel):
             self.OpRole: b"op",
             self.ExpressionRole: b"expression",
             self.ResultRole: b"result",
+            self.ErrorRole: b"error",
             self.LatexUrlRole: b"latexUrl",
             self.LatexRole: b"latex",
             self.NaturalWidthRole: b"naturalWidth",
@@ -106,6 +115,8 @@ class HistoryModel(QAbstractListModel):
             return item.expression
         if role == self.ResultRole:
             return item.result
+        if role == self.ErrorRole:
+            return item.error
         if role == self.LatexUrlRole:
             return self._svg_url(index.row())
         if role == self.LatexRole:
@@ -124,7 +135,7 @@ class HistoryModel(QAbstractListModel):
         """Render (once) and return the entry's SVG data URL."""
         item = self._items[row]
         if item.svg_url is None:
-            svg = latex_to_svg(item.latex, color=self._latex_color)
+            svg = latex_to_svg(item.latex, size=self._latex_size, color=self._latex_color)
             item.svg_url = (
                 "data:image/svg+xml;charset=utf-8," + quote(svg, safe="")
                 if svg else ""
@@ -153,12 +164,46 @@ class HistoryModel(QAbstractListModel):
                 [self.LatexUrlRole, self.NaturalWidthRole, self.NaturalHeightRole],
             )
 
+    @Slot(int)
+    def set_latex_size(self, size: int) -> None:
+        """Re-render every entry at a new font size (settings page).
+
+        Mirrors :meth:`set_latex_color`: cached SVGs are dropped so each entry is
+        rendered again on demand with the new size.
+        """
+        size = int(size)
+        if size == self._latex_size:
+            return
+        self._latex_size = size
+        if self._items:
+            for item in self._items:
+                item.svg_url = None
+            self.dataChanged.emit(
+                self.index(0, 0),
+                self.index(len(self._items) - 1, 0),
+                [self.LatexUrlRole, self.NaturalWidthRole, self.NaturalHeightRole],
+            )
+
     def add_item(self, expression: str, result: str, mode: str = "Code",
-                 latex: str = "", name: str = "", op: str = "=") -> None:
-        """Insert a history entry at the TOP of the list."""
+                 latex: str = "", name: str = "", op: str = "=",
+                 error: str = "") -> None:
+        """Insert a history entry at the TOP of the list.
+
+        ``error`` marks a failed request: the card then shows the failure text
+        instead of a result, and the input is still there to be sent back.
+        """
         self.beginInsertRows(QModelIndex(), 0, 0)
         self._items.insert(
-            0, HistoryItem(expression, result, mode, name, op, latex)
+            0,
+            HistoryItem(
+                expression=expression,
+                result=result,
+                error=error,
+                mode=mode,
+                name=name,
+                op=op,
+                latex=latex,
+            ),
         )
         self.endInsertRows()
 

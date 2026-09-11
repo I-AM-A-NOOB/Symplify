@@ -13,10 +13,10 @@ from PySide6.QtCore import Property, QObject, Signal, Slot
 from PySide6.QtGui import QColor
 
 from ..latex_render import latex_to_svg, svg_size
-from ..model.calculator import Calculator, CalculationResult
-from ..model.input_mode import InputMode
+from ..model.calculator import Assignment, Calculator, ErrorKind, Failure, Result, Success
 from ..model.variable import VariableManager
 from .history_viewmodel import HistoryModel
+from .input_mode import InputMode
 from .log_viewmodel import LogViewModel
 
 
@@ -71,6 +71,7 @@ class CalculatorViewModel(QObject):
         self._latex_width = 0
         self._latex_height = 0
         self._latex_color = "#000000"
+        self._latex_size = 24
 
     def _get_input_mode(self) -> int:
         """Current input mode as a stable int (InputMode.CODE.value)."""
@@ -128,15 +129,6 @@ class CalculatorViewModel(QObject):
     def _get_error_message(self) -> str:
         return self._error_message
 
-    def _get_display_text(self) -> str:
-        """Combined text for the result area: error message or LaTeX.
-
-        Exposes one property instead of the caller reading ``isError``,
-        ``errorMessage`` and ``resultLatex`` separately, cutting QML->Python
-        round-trips during binding re-evaluation.
-        """
-        return self._error_message if self._is_error else self._result_latex
-
     def _get_latex_svg_url(self) -> str:
         """Data URL of the rendered LaTeX SVG, or '' if unavailable."""
         return self._latex_svg_url
@@ -149,7 +141,7 @@ class CalculatorViewModel(QObject):
 
     def _build_latex_url(self, latex: str) -> str:
         """Render LaTeX to an SVG data URL, storing its intrinsic size."""
-        svg = latex_to_svg(latex, color=self._latex_color)
+        svg = latex_to_svg(latex, size=self._latex_size, color=self._latex_color)
         if not svg:
             self._latex_svg_url = ""
             self._latex_width = 0
@@ -177,6 +169,21 @@ class CalculatorViewModel(QObject):
             self._build_latex_url(self._result_latex)
             self.resultChanged.emit()
 
+    @Slot(int)
+    def set_latex_size(self, size: int) -> None:
+        """Re-render the current result at a new font size (settings page).
+
+        Mirrors :meth:`set_latex_color`: the value comes from the settings store
+        and only the rendering changes, so the data URL is rebuilt in place.
+        """
+        size = int(size)
+        if size == self._latex_size:
+            return
+        self._latex_size = size
+        if self._result_latex:
+            self._build_latex_url(self._result_latex)
+            self.resultChanged.emit()
+
     inputMode = Property(
         int, _get_input_mode, _set_input_mode, notify=inputModeChanged
     )
@@ -194,7 +201,6 @@ class CalculatorViewModel(QObject):
     resultLatex = Property(str, _get_result_latex, notify=resultChanged)
     isError = Property(bool, _get_is_error, notify=resultChanged)
     errorMessage = Property(str, _get_error_message, notify=resultChanged)
-    displayText = Property(str, _get_display_text, notify=resultChanged)
     latexSvgUrl = Property(str, _get_latex_svg_url, notify=resultChanged)
     latexWidth = Property(int, _get_latex_width, notify=resultChanged)
     latexHeight = Property(int, _get_latex_height, notify=resultChanged)
@@ -211,9 +217,9 @@ class CalculatorViewModel(QObject):
         self._latex_height = 0
         self.resultChanged.emit()
 
-    def _apply_result(self, result: CalculationResult) -> None:
-        """Apply a calculation result to the exposed properties."""
-        if result.success:
+    def _apply_result(self, result: Result) -> None:
+        """Apply a request's outcome to the exposed display properties."""
+        if isinstance(result, Success):
             self._result_text = str(result.value)
             self._result_latex = result.latex
             self._is_error = False
@@ -223,11 +229,18 @@ class CalculatorViewModel(QObject):
             self._result_text = ""
             self._result_latex = ""
             self._is_error = True
-            self._error_message = result.error
+            self._error_message = self._format_failure(result)
             self._latex_svg_url = ""
             self._latex_width = 0
             self._latex_height = 0
         self.resultChanged.emit()
+
+    @staticmethod
+    def _format_failure(failure: Failure) -> str:
+        """User-facing error text: the message plus its hint, when there is one."""
+        if failure.hint:
+            return f"{failure.message} — {failure.hint}"
+        return failure.message
 
     @Slot(str)
     def calculate(self, expression: str) -> None:
@@ -236,76 +249,67 @@ class CalculatorViewModel(QObject):
         result = self._calculator.evaluate(
             expression, self._variable_manager.list_all()
         )
-        if result.success:
-            self._apply_result(result)
+        self._apply_result(result)
+        if isinstance(result, Success):
             self._history.add_item(
                 expression, self._result_text, "Code", latex=result.latex
             )
             self._log.add_info(f"= {result.value}", "Calculator")
         else:
-            self._apply_result(result)
-            self._log.add_error(f"Error: {result.error}", "Calculator")
+            # Failures are part of the history too: keeping the input and the
+            # failure text is what lets a typo be sent back and fixed.
+            self._history.add_item(
+                expression, "", "Code", error=self._format_failure(result)
+            )
+            self._log.add_error(f"Error: {result.message}", "Calculator")
 
     @Slot(str, str, str)
     def calculateAssign(self, name: str, operator: str, value_str: str) -> None:
-        """Evaluate an assignment in assign mode.
+        """Answer an assignment in assign mode.
 
-        Handles augmented assignments (``+=``, ``-=``, ``*=``, ``/=``)
-        by expanding them into standard assignments first.
+        The model validates the target before evaluating anything, so a rejected
+        write never reaches the history, the "= value" log line or the variable
+        store. An unparsable value is still kept as an invalid (NaN) entry, so
+        the user's input survives.
         """
         self._log.add_info(f"> {name} {operator} {value_str}", "Calculator")
-        try:
-            if operator == "=":
-                expr_str = value_str
-            elif operator in ("+=", "-=", "*=", "/=", "%="):
-                expr_str = f"{name} {operator[0]} ({value_str})"
-            else:
-                message = f"Unsupported operator: {operator}"
-                self._set_error(message)
-                self._log.add_error(message, "Calculator")
-                return
+        result = self._calculator.assign(
+            Assignment(name, operator, value_str),
+            self._variable_manager.list_all(),
+        )
+        self._apply_result(result)
 
-            result = self._calculator.evaluate(
-                expr_str, self._variable_manager.list_all()
+        if isinstance(result, Success):
+            self._history.add_item(
+                value_str,
+                self._result_text,
+                "Assign",
+                latex=result.latex,
+                name=name,
+                op=operator,
             )
-            if result.success:
-                self._apply_result(result)
-                self._history.add_item(
-                    value_str,
-                    self._result_text,
-                    "Assign",
-                    latex=result.latex,
-                    name=name,
-                    op=operator,
-                )
-                self._save_variable(name, result.value)
-                self._log.add_info(f"= {result.value}", "Calculator")
-            else:
-                self._apply_result(result)
-                self._log.add_error(f"Error: {result.error}", "Calculator")
-                if operator == "=" and self._variables_model is not None:
-                    # Keep the raw input in the variables list as an
-                    # invalid (NaN) entry so the user's input survives.
-                    try:
-                        self._variables_model.save_invalid(name, value_str)
-                    except Exception as e:
-                        self._log.add_warning(
-                            f"Failed to store invalid entry: {e}", "Calculator"
-                        )
-        except Exception as e:
-            self._set_error(str(e))
-            self._log.add_error(f"Error: {e}", "Calculator")
+            self._save_variable(name, result.value)
+            self._log.add_info(f"= {result.value}", "Calculator")
+            return
 
-    def _set_error(self, message: str) -> None:
-        """Set the error state directly."""
-        self._result_text = ""
-        self._result_latex = ""
-        self._is_error = True
-        self._error_message = message
-        self._latex_svg_url = ""
-        self._latex_width = 0
-        self._latex_height = 0
-        self.resultChanged.emit()
+        self._history.add_item(
+            value_str,
+            "",
+            "Assign",
+            name=name,
+            op=operator,
+            error=self._format_failure(result),
+        )
+        self._log.add_error(f"Error: {result.message}", "Calculator")
+        if result.kind is ErrorKind.INVALID_NAME:
+            return
+        if operator == "=" and self._variables_model is not None:
+            try:
+                self._variables_model.save_invalid(name, value_str)
+            except Exception as e:
+                self._log.add_warning(
+                    f"Failed to store invalid entry: {e}", "Calculator"
+                )
 
     def _save_variable(self, name: str, value: Any) -> None:
         """Save an assigned variable, warning about SymPy built-ins."""

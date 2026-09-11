@@ -10,8 +10,10 @@ from pathlib import Path
 
 from PySide6.QtCore import qVersion
 from PySide6.QtWidgets import QApplication
-from RinUI import RinUIWindow, __version__ as RINUI_VERSION
 
+# The bootstrap owns the RinUI import (and takes RinUI's own config directory
+# over, see python/rinui_bootstrap.py). Never import RinUI above this line.
+from python.rinui_bootstrap import prepare
 from python.keyboard_config import load_keyboard_tabs
 from python.viewmodel.main_viewmodel import MainViewModel
 from python.version import __version__
@@ -31,28 +33,33 @@ def main() -> int:
         if stream is not None and hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace")
 
+    runtime = prepare(ROOT)
+
     app = QApplication(sys.argv)
 
     # Create the RinUI window shell first (without loading QML) so that the
     # shared engine's root context can receive the viewmodels before the
     # QML tree is instantiated.
-    window = RinUIWindow()
+    window = runtime.window_class()
 
-    vm = MainViewModel()
+    vm = MainViewModel(runtime.settings, window.theme_manager)
     context = window.engine.rootContext()
     context.setContextProperty("vm", vm)
     context.setContextProperty("appVersion", __version__)
     # RinUI's own __version__ (not importlib.metadata: a frozen build has no
     # .dist-info, so metadata lookups would raise).
-    context.setContextProperty("rinuiVersion", RINUI_VERSION)
+    context.setContextProperty("rinuiVersion", runtime.rinui_version)
     # Qt's QML global qtRuntimeVersionString does not exist under PySide6, so
     # the About page would silently lose the Qt version; pass qVersion() down.
     context.setContextProperty("qtVersion", qVersion())
     context.setContextProperty("calcVM", vm.calculator)
     context.setContextProperty("varsVM", vm.variables)
     context.setContextProperty("variablesModel", vm.variables.model)
+    context.setContextProperty("variablesFilter", vm.variablesFilter)
     context.setContextProperty("historyVM", vm.history)
+    context.setContextProperty("historyFilter", vm.historyFilter)
     context.setContextProperty("logVM", vm.log)
+    context.setContextProperty("settingsVM", vm.settings)
     context.setContextProperty("keyboardTabs", load_keyboard_tabs())
 
     window.load(ROOT / "qml" / "MainWindow.qml")
