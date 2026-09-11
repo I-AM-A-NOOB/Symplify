@@ -36,11 +36,24 @@ Item {
 
             Item { Layout.fillWidth: true }
 
+            SearchBar {
+                id: searchBar
+
+                Layout.alignment: Qt.AlignVCenter
+                modeLabels: [qsTr("Fuzzy"), qsTr("Expression"), qsTr("Result")]
+                onSearchRequested: (text, mode) => {
+                    historyFilter.searchText = text
+                    historyFilter.searchMode = mode
+                }
+            }
+
             Button {
                 text: qsTr("Clear history")
                 icon.name: "ic_fluent_delete_20_regular"
                 flat: true
-                enabled: historyList.count > 0
+                // The source count on purpose: an active search must not disable
+                // clearing the history.
+                enabled: historyVM.count() > 0
                 onClicked: historyVM.clear()
             }
         }
@@ -49,13 +62,14 @@ Item {
         // an AsNeeded scrollbar. focusPolicy stays NoFocus so Ctrl+Tab lands
         // on the current card (focus: ListView.isCurrentItem), not the view.
         // Arrow keys navigate via the card's own Keys handlers below.
+        // The model is the *filtered* view; historyVM keeps every entry.
         Rin.ListView {
             id: historyList
 
             Layout.fillWidth: true
             Layout.fillHeight: true
             spacing: 10
-            model: historyVM
+            model: historyFilter
             focusPolicy: Qt.NoFocus
 
             delegate: QQC2.ItemDelegate {
@@ -401,7 +415,9 @@ Item {
                 visible: historyList.count === 0
                 typography: Typography.Body
                 color: Theme.currentTheme.colors.textSecondaryColor
-                text: qsTr("No calculations yet. Results will appear here.")
+                text: historyFilter.searchText !== "" && historyVM.count() > 0
+                    ? qsTr("No calculations match this search.")
+                    : qsTr("No calculations yet. Results will appear here.")
             }
         }
     }

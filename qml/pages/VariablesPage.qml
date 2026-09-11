@@ -1,19 +1,24 @@
 import QtQuick
 import QtQuick.Layouts 2.15
 import RinUI
+import "../components"
 
 Item {
     id: page
 
-    property int rowCount: variablesModel.count()
+    // The table is bound to the search-filtered view, so every row index below
+    // (selection, edit, delete) must come from `variablesFilter`, not the source
+    // model. `variablesModel.count()` is only used to tell the two empty cases
+    // apart: nothing added yet vs nothing matching the query.
+    property int rowCount: variablesFilter.rowCount()
 
     Connections {
-        target: variablesModel
+        target: variablesFilter
 
-        function onModelReset() { page.rowCount = variablesModel.count() }
-        function onRowsInserted() { page.rowCount = variablesModel.count() }
-        function onRowsRemoved() { page.rowCount = variablesModel.count() }
-        function onDataChanged() { page.rowCount = variablesModel.count() }
+        function onModelReset() { page.rowCount = variablesFilter.rowCount() }
+        function onRowsInserted() { page.rowCount = variablesFilter.rowCount() }
+        function onRowsRemoved() { page.rowCount = variablesFilter.rowCount() }
+        function onDataChanged() { page.rowCount = variablesFilter.rowCount() }
     }
 
     readonly property int selectedRow:
@@ -21,14 +26,16 @@ Item {
 
     function addVariable() {
         const name = varsVM.generateUniqueName()
-        if (varsVM.addVariable(name, "0"))
-            varTable.selectRow(variablesModel.count() - 1)
+        if (varsVM.addVariable(name, "0")) {
+            searchBar.clear()  // a filter would hide the row we are about to select
+            varTable.selectRow(variablesFilter.rowCount() - 1)
+        }
     }
 
     function deleteVariable() {
         if (page.selectedRow < 0)
             return
-        varsVM.deleteVariable(variablesModel.nameAt(page.selectedRow))
+        varsVM.deleteVariable(variablesFilter.nameAt(page.selectedRow))
         varTable.selectionModel.clearSelection()
     }
 
@@ -36,7 +43,7 @@ Item {
     function beginEdit(column) {
         if (page.selectedRow < 0)
             return
-        varTable.edit(variablesModel.modelIndex(page.selectedRow, column))
+        varTable.edit(variablesFilter.modelIndex(page.selectedRow, column))
     }
 
     ColumnLayout {
@@ -54,6 +61,18 @@ Item {
             }
 
             Item { Layout.fillWidth: true }
+
+            SearchBar {
+                id: searchBar
+
+                Layout.alignment: Qt.AlignVCenter
+                modeLabels: [qsTr("Fuzzy"), qsTr("Name"), qsTr("Value"),
+                             qsTr("Type")]
+                onSearchRequested: (text, mode) => {
+                    variablesFilter.searchText = text
+                    variablesFilter.searchMode = mode
+                }
+            }
 
             ToolButton {
                 icon.name: "ic_fluent_add_20_regular"
@@ -114,7 +133,7 @@ Item {
 
                 anchors.fill: parent
                 anchors.margins: 4
-                model: variablesModel
+                model: variablesFilter
                 // RinUI's experimental table disables mouse handling on the
                 // view (acceptedButtons: NoButton), which also kills the
                 // built-in edit triggers; restore standard handling.
@@ -122,7 +141,7 @@ Item {
                 editTriggers: TableView.DoubleTapped | TableView.EditKeyPressed
                 selectionBehavior: TableView.SelectRows
                 selectionMode: TableView.SingleSelection
-                selectionModel: ItemSelectionModel { model: variablesModel }
+                selectionModel: ItemSelectionModel { model: variablesFilter }
                 columnWidthProvider: (column) => {
                     if (column === 0)
                         return 220
@@ -136,7 +155,7 @@ Item {
                 delegate: TableViewDelegate {
                     onClicked: {
                         varTable.selectionModel.select(
-                            variablesModel.modelIndex(row, 0),
+                            variablesFilter.modelIndex(row, 0),
                             ItemSelectionModel.ClearAndSelect | ItemSelectionModel.Current)
                     }
                 }
@@ -147,7 +166,9 @@ Item {
                 visible: page.rowCount === 0
                 typography: Typography.Body
                 color: Theme.currentTheme.colors.textSecondaryColor
-                text: qsTr("No variables yet. Add one with the + button above.")
+                text: variablesModel.count() === 0
+                    ? qsTr("No variables yet. Add one with the + button above.")
+                    : qsTr("No variables match this search.")
             }
         }
     }
