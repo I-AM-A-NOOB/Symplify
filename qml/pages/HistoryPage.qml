@@ -67,11 +67,18 @@ Item {
                 required property string op
                 required property string expression
                 required property string result
+                required property string error
                 required property string latexUrl
                 required property string latex
                 required property int naturalWidth
                 required property int naturalHeight
                 required property string time
+
+                // An error card keeps its input plus the failure text instead
+                // of a result, so the input can be sent back and fixed.
+                readonly property bool isError: card.error !== ""
+                readonly property color errorColor:
+                    Theme.currentTheme.colors.systemCriticalColor
 
                 // Selection = the current item; drives the background tint
                 // and the accent bar (mirrors ListViewDelegate.highlighted).
@@ -168,16 +175,25 @@ Item {
                     }
 
                     // Result line: the '=' is aligned with the assignment
-                    // operator (leading spaces = name length + 1).
+                    // operator (leading spaces = name length + 1). A failed
+                    // entry shows its failure text here instead -- in the
+                    // critical color and wrapped, since eliding it would hide
+                    // the very thing the card is for. Everything else on an
+                    // error card (input line, background) stays normal.
                     QQ.Text {
                         Layout.fillWidth: true
                         font.family: "Consolas"
                         font.pixelSize: 13
-                        color: Theme.currentTheme.colors.textSecondaryColor
-                        elide: QQ.Text.ElideRight
-                        text: card.mode === "Assign"
-                            ? " ".repeat(card.name.length + 1) + "= " + card.result
-                            : "= " + card.result
+                        color: card.isError
+                            ? card.errorColor
+                            : Theme.currentTheme.colors.textSecondaryColor
+                        wrapMode: card.isError ? QQ.Text.WordWrap : QQ.Text.NoWrap
+                        elide: card.isError ? QQ.Text.ElideNone : QQ.Text.ElideRight
+                        text: card.isError
+                            ? card.error
+                            : card.mode === "Assign"
+                              ? " ".repeat(card.name.length + 1) + "= " + card.result
+                              : "= " + card.result
                     }
 
                     // Rendered result, horizontally scrollable.
@@ -364,13 +380,17 @@ Item {
 
                     MenuSeparator {}
 
+                    // A failed entry has no result and no LaTeX to copy, so the
+                    // copy items are disabled rather than silently copying "".
                     MenuItem {
                         text: card.mode === "Assign"
                             ? qsTr("Copy value") : qsTr("Copy result")
+                        enabled: !card.isError
                         onTriggered: vm.copyText(card.result)
                     }
                     MenuItem {
                         text: qsTr("Copy LaTeX")
+                        enabled: !card.isError
                         onTriggered: vm.copyText(card.latex)
                     }
                 }
