@@ -1,17 +1,22 @@
 # Symplify Architecture — the calculation Model and its data flow
 
 This page is **Model-first**: it documents the pure-Python calculation core
-(`python/model/`), where its inputs come from, and who reads each field of what
-it hands back. The static layer/type map lives in [`architecture.svg`](architecture.svg);
-this page is about how data actually moves.
+(`python/model/`), the two requests it answers, where those requests come from,
+and who reads what comes back. The static layer/type map lives in
+[`architecture.svg`](architecture.svg); this page is about how data actually moves.
 
 ## The Model in one sentence
 
-`Calculator.evaluate(expression, variables) -> CalculationResult` — **one entry
-point, zero Qt, never raises**. Everything else in `python/model/` exists either
-to feed it (`VariableManager`) or to describe what came back
-(`CalculationResult`). Any change to the calculation behaviour belongs there,
-and only there.
+Two requests, one parser, no Qt:
+
+```python
+Calculator.evaluate(expression, scope)      -> Success | Failure   # read
+Calculator.assign(Assignment(target, op, expression), scope) -> Success | Failure   # write
+```
+
+`Calculator` owns what an input *means* — which syntax is accepted, which names
+resolve, what counts as a failure. Nothing above it may re-implement that, and
+the Model decides nothing about display.
 
 ## 1. Data flow: sources in, sinks out
 
@@ -26,18 +31,18 @@ flowchart TB
     end
 
     subgraph VML["② ViewModel 入口（Qt 边界）"]
-        B1["CalculatorViewModel.calculate<br/>calculator_viewmodel.py:233"]
-        B2["calculateAssign<br/>:250"]
-        B3["VariablesViewModel._parse_value<br/>variables_viewmodel.py:329"]
-        B4["VariablesModel._parse<br/>:102"]
+        B1["CalculatorViewModel.calculate"]
+        B2["calculateAssign<br/>构造 Assignment(name, op, 原文)"]
+        B3["VariablesViewModel._assign<br/>Assignment(name, '=', 原文)"]
+        B4["VariablesModel.setData → _parse"]
     end
 
     subgraph MOD["③ Model（纯 Python · 零 Qt）"]
-        C1["Calculator.evaluate(expression, variables)<br/>calculator.py:73"]
-        C2["parse_expr<br/>standard + implicit_multiplication + convert_xor<br/>local_dict = variables"]
-        C3["sympy 表达式对象"]
-        C4["sympy.latex(value)"]
-        C5["CalculationResult"]
+        C1["Calculator.evaluate / Calculator.assign<br/>两个请求，共用一个解析器"]
+        C2["unknown_calls 审计<br/>未知调用 → UNKNOWN_NAME<br/>否则 parse_expr（隐式乘法 + convert_xor）"]
+        C3["sympy 值"]
+        C4["render_latex(value)"]
+        C5["Success | Failure"]
         C6["VariableManager<br/>快照字典 name → VariableEntry"]
     end
 
@@ -47,7 +52,7 @@ flowchart TB
         D3["HistoryModel.add_item → 历史卡片"]
         D4["LogViewModel → LogPage"]
         D5["VariablesModel.save → 变量表"]
-        D6["warningOccurred → 内置名警告 Dialog"]
+        D6["warningOccurred → 遮蔽 sympy 名字的警告 Dialog"]
     end
 
     A5 -.->|"恢复 VM 字段后由用户触发"| A1
@@ -58,124 +63,166 @@ flowchart TB
     A4 --> B4
 
     B1 --> C1
-    B2 -->|"增强赋值先展开成 name op (value)"| C1
-    B3 -->|"各自 new Calculator()"| C1
-    B4 -->|"各自 new Calculator()"| C1
-
+    B2 --> C1
+    B3 --> C1
+    B4 -->|"只读求值"| C1
     C1 --> C2
     C2 --> C3
     C3 --> C4
     C4 --> C5
-    C1 -.->|"解析/求值抛异常"| C5
+    C2 -.->|"语法 / 域错误"| C5
 
-    C3 -->|"赋值：result.value"| C6
-    C6 -.->|"list_all() 作为 variables 入参"| C1
+    C3 -->|"赋值：写回"| C6
+    C6 -.->|"list_all() 作为 scope"| C1
     C6 -.->|"is_sympy_builtin(name)"| D6
 
     C5 -->|"返回给调用它的 VM"| R["ViewModel 分发"]
     R --> D1
     R --> D2
-    R --> D3
+    R -->|"结果，或失败原因"| D3
     R --> D4
-    R -->|"assign：_save_variable"| D5
+    R -->|"仅 Success，且目标已过校验"| D5
 ```
 
 What the diagram is saying:
 
-- **Four entry points converge on one function.** Code mode
-  (`CalculatorViewModel.calculate`), Assign mode (`calculateAssign`, which first
-  expands `+= -= *= /= %=` into the expression `name <op> (value)`), the
-  Variables-page toolbar, and the Variables table's inline edit all end at
-  `Calculator.evaluate`. The first two use the shared `Calculator` instance from
-  `MainViewModel`; the two Variables paths build a throwaway `Calculator()` each.
-- **`variables` is the second input channel.** `VariableManager.list_all()`
-  (valid entries only) becomes `parse_expr`'s `local_dict`, so saved variables
-  resolve as symbols; expressions that reference unknown names stay symbolic.
-- **`result.value` is the only output that flows back in.** Assign mode stores
-  the sympy object as a `VariableEntry`, and the next evaluation reads it back
-  through `list_all()` — the closed loop in the middle of the diagram. History,
-  log and the result area are terminal consumers.
+- **Four UI routes, two model requests.** Code mode, Assign mode, the Variables
+  toolbar and the table's inline edit all end in `evaluate` (read) or `assign`
+  (write); no route assembles an expression string of its own any more.
+- **`scope` is the second input channel.** `VariableManager.list_all()` (valid
+  entries only) is handed to `parse_expr` as `local_dict`, so saved variables
+  resolve as symbols; names that resolve to nothing stay symbolic.
+- **The write path is validated before anything happens.** `assign` rejects a bad
+  target or a missing augmented-assignment target *before* evaluating, so a
+  rejected write cannot leave a variable or a success log line behind. What it
+  *does* leave is an error card in the history — marked as an error, never as a
+  result — because the input is what the user needs in order to fix it.
+- **`Success.value` is the only output that flows back in.** Assign mode stores
+  the sympy object as a `VariableEntry`, and the next request reads it back
+  through `list_all()` — the closed loop in the middle of the diagram.
 - **Text and LaTeX are terminal.** `str(value)` feeds the result line and the
-  clipboard; the LaTeX source feeds the rendered result image and the history
-  entry (which re-renders lazily on its own).
+  clipboard; the LaTeX source feeds the rendered image and the history entry
+  (which re-renders lazily on its own).
+- **Failures are history too.** A failed request is recorded with its input
+  (name/op/expression for assignments) and the failure text, so the card can
+  show the reason and *Send to input* can put the expression back to be fixed.
+  The `error` role is what makes a card render as an error card.
 
-## 2. `CalculationResult`: every field, and who reads it
+## 2. What comes back: `Success` or `Failure`
 
 ```mermaid
 flowchart LR
-    CR["CalculationResult<br/>calculator.py:34"]
+    R["Success | Failure<br/>frozen dataclasses"]
 
-    CR -->|"success：唯一被分支判断的字段<br/>读点 4 处"| S["calculate:239 · calculateAssign:271<br/>VariablesModel._parse:105<br/>VariablesViewModel._parse_value:334"]
+    R -->|"Success.value"| V["sympy 对象"]
+    V --> V1["str(value) → resultText<br/>结果区文字 + Copy result"]
+    V --> V2["_save_variable → VariableManager.save<br/>VariableEntry.obj → list_all() → 下一轮 scope"]
+    V --> V3["变量表第 2/3 列<br/>expr_str / classify_type"]
 
-    CR -->|value| V["sympy 对象"]
-    V --> V1["str(value) → _result_text → resultText<br/>结果区右上文字 + Copy result"]
-    V --> V2["_save_variable → VariableManager.save<br/>VariableEntry.obj → list_all() → 下一轮 local_dict"]
-    V --> V3["_parse / _parse_value 的返回值<br/>→ VariablesModel.save"]
-
-    CR -->|latex| L["LaTeX 源串"]
+    R -->|"Success.latex"| L["LaTeX 源串<br/>由 render_latex 生成"]
     L --> L1["_build_latex_url → latexSvgUrl / latexWidth / latexHeight<br/>→ LatexImage 结果区大图"]
-    L --> L2["history.add_item(latex=) → LatexRole / LatexUrlRole<br/>→ 历史卡片 LaTeX + Copy LaTeX"]
+    L --> L2["history.add_item(latex=) → 历史卡片 + Copy LaTeX"]
 
-    CR -->|error| E["错误串"]
-    E --> E1["_error_message → errorMessage → 结果区文字"]
+    R -->|"Failure.message / .hint"| E["错误文本"]
+    E --> E1["_format_failure → errorMessage → 结果区"]
     E --> E2["LogViewModel.add_error → LogPage"]
 
-    CR -.->|"从未被读取"| X["result_type<br/>metadata<br/>__str__"]
+    R -.->|"Failure.kind"| K["ErrorKind<br/>决定 VM 是继续写历史/变量表还是停下"]
 ```
 
-| Field | Written at | Read at | Reaches the UI as |
-|---|---|---|---|
-| `success` | `calculator.py:91` / `:98` | 4 call sites (both VMs) | the branch that decides result vs. error |
-| `value` | `calculator.py:93` | `calculator_viewmodel.py:217`, `:244`, `:281`; `variables_viewmodel.py:107`, `:336` | `resultText`, the variables table, the next evaluation |
-| `latex` | `calculator.py:94` | `calculator_viewmodel.py:218`, `:221`, `:242`, `:277` | the rendered result image, `Copy LaTeX`, the history card |
-| `error` | `calculator.py:98` | `calculator_viewmodel.py:226`, `:247`, `:285`; `variables_viewmodel.py:106`, `:335` | the error text in the result area, the log |
-| `result_type` | `calculator.py:92` / `:98` | **nothing** | — (`ResultType.ASSIGNMENT` is never even produced) |
-| `metadata` | never | **nothing** | — |
+| Shape | Fields | Read by |
+|---|---|---|
+| `Success` | `expression`, `value`, `latex` | `value` → the result line, the variable store, the next evaluation; `latex` → the result image and the history card; `expression` → provenance |
+| `Failure` | `expression`, `kind`, `message`, `hint` | `message` + `hint` → the result area, the log and the history card; `kind` → which follow-up writes are allowed |
 
-Two more members of the same family, outside this dataclass:
+Both are frozen dataclasses, so a caller cannot half-fill a result. The old
+`CalculationResult` flag-and-payload struct is gone, and with it the members
+nothing ever read (`result_type`, `metadata`, `__str__`, the `displayText`
+property, `VariableManager.revision`, `VariablesModel.InvalidRole`).
 
-- `CalculationResult.__str__` (`calculator.py:54`) — no callers; both VMs use
-  `str(result.value)`.
-- `CalculatorViewModel.displayText` (`calculator_viewmodel.py:197`) — declared to
-  "cut QML→Python round-trips" by merging error/LaTeX, but no QML binds it; the
-  result area reads `isError` + `errorMessage` + `resultText` instead.
+### Error kinds
 
-## 3. `VariableManager` — a snapshot store, not a dependency graph
+| Kind | Meaning |
+|---|---|
+| `SYNTAX` | the text is not parseable as an expression |
+| `UNKNOWN_NAME` | a name used as a call that resolves to no function, or an augmented assignment whose target does not exist |
+| `INVALID_NAME` | an assignment target that is not a legal variable name |
+| `UNSUPPORTED` | a well-formed request the model does not implement (e.g. `**=`) |
+| `INTERNAL` | sympy raised a domain error — never the user's typo |
+
+Every kind is produced somewhere; none is declared speculatively.
+
+## 3. The language rules the Model enforces
+
+**Unknown calls are reported, not rewritten.** `implicit_multiplication` cannot
+tell a call from juxtaposition, so it silently turns `bar(2)` into `2*bar`.
+`Calculator.unknown_calls` audits the text first and returns `UNKNOWN_NAME` with
+a `difflib` suggestion (`sovle(…)` → "did you mean 'solve'?"). Names that *are*
+in `scope` are exempt: `f(x)` with `f` a value stays multiplication, which is the
+documented meaning of juxtaposition.
+
+**Permissions are otherwise deliberately indulged** (and locked by tests):
+unknown *symbols* stay symbolic, `2x` and `x^2` work, `Matrix(...)` is reachable,
+and a variable may shadow a sympy name — `sin = 5` makes `sin(x)` mean `5*x`.
+That last one is a choice, not an accident; `is_sympy_builtin` warns about it
+instead of refusing it.
+
+**Names have one definition.** `validate_name` and `is_sympy_name` are module
+functions in `variable.py` used by both the store and the request layer, so the
+UI and the Model cannot disagree about what a legal or reserved name is.
+
+## 4. `Assignment`: the only write path
+
+```python
+Assignment(target="y", op="+=", expression="2y")
+```
+
+- `expression` stays **text**, so the expression language is parsed by exactly
+  one parser. The previous implementation rebuilt the write as the string
+  `f"{name} {op[0]} ({value})"`, which turned `x += 1` on an undefined `x` into
+  the self-referential binding `x = x + 1`.
+- Augmented operators (`+= -= *= /= %=`) require the target to exist
+  (`UNKNOWN_NAME` otherwise) and combine the stored value with the parsed
+  right-hand side — node to node, never text to text.
+- The target is validated *first*, which is why an invalid name now produces
+  nothing at all instead of "success in the history, absent in the table".
+
+## 5. `VariableManager` — a snapshot store, not a dependency graph
 
 - Entries are **snapshots**: an assignment stores the sympy object it evaluated
   to at that moment. Nothing is re-evaluated when the sources of an expression
   change, and there is no dependency tracking.
-- A failed assignment (`=` in Assign mode, or an unparsable inline edit) is kept
-  as an **invalid (NaN) entry** (`save_invalid`) so the user's raw input — and
-  its row — survives; `list_all()` excludes those entries from evaluation.
-- `validate_name` enforces identifier rules (leading letter/underscore, then
-  alnum/underscore, not a Python keyword). It runs **late** — inside
-  `save`/`save_invalid`, not in the UI or the ViewModel — so an illegal name like
-  `1x` still evaluates, still lands in history, and only fails to be stored
-  (logged as a warning by `_save_variable`).
-- `is_sympy_builtin` (known constants plus a generic `hasattr(sympy, name)`
-  probe) drives the "… is a SymPy built-in. You asked for it." warning dialog; it
-  is checked by both the calculator and the variables ViewModels.
-- `classify_type` maps a sympy object to the coarse type label shown in the
-  table's third column; `VariableEntry.expr_str` (the canonical `str(obj)`, or
-  the raw input when invalid) is the second column.
-- `revision` / `_touch` exist for cache invalidation but **have no readers**, and
-  `VariablesModel.InvalidRole` (exposed to QML as `invalid`) is unused as well —
-  invalid rows are recognisable in the UI only through their `Invalid` type label.
+- A failed *value* is kept as an **invalid (NaN) entry** (`save_invalid`) so the
+  user's raw input — and its row — survives; `list_all()` excludes those entries.
+  A failed *name* is not stored at all.
+- `classify_type` gives the table's third column (`Integer`, `Matrix`,
+  `Invalid`, …); `VariableEntry.expr_str` gives the second.
+- `rename` rebuilds the store in order, so a rename keeps the entry's position
+  and the table's row order never disagrees with the store's.
 
-## 4. Boundary rule
+## 6. Boundary rule and how to check it
 
 **`python/model/*` never imports Qt.** Every call from the UI crosses a
-ViewModel first, and every result comes back as plain data
-(`CalculationResult` / `VariableEntry`). `main.py` is the composition root: it
-builds `MainViewModel`, wires the shared `Calculator` and `VariableManager` into
-the ViewModels, and registers them as flat QML context properties.
+ViewModel first, and every result comes back as plain data. `main.py` is the
+composition root: it builds `MainViewModel`, wires the shared `Calculator` and
+`VariableManager` into the ViewModels, and registers them as flat QML context
+properties.
 
-The Model also decides **nothing about display**: rendering (`latex_render.py`),
-theme colouring, clipboard and focus navigation all live in the ViewModel or
-above. That is why the Model can be exercised headless:
+The behaviour contract is locked by tests (no framework needed):
 
 ```bash
-uv run python -c "from python.viewmodel.main_viewmodel import MainViewModel; \
-vm=MainViewModel(); vm.calculator.calculate('diff(x**2, x)'); print(vm.calculator._result_text)"
+uv run python -m tests.test_model      # 39 assertions, ~3s
 ```
+
+They cover the expression language, the error kinds, the assignment rules, the
+name tables and the ViewModel invariants (a rejected write leaves nothing
+behind). Run them before and after touching the parser or the write path.
+
+## Where settings live (outside the Model)
+
+The Model never sees a settings file. Appearance, rendering and window geometry are
+owned by `python/settings.py` (location + YAML + validation) and
+`SettingsViewModel`, and RinUI's own theme/backdrop persistence is taken over by
+`python/rinui_bootstrap.py` — see "Settings & config" in the developer guide. The
+only setting the Model touches is the LaTeX font size, which the viewmodels pass to
+`latex_to_svg(size=...)` when they render.
