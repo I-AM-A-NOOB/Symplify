@@ -8,8 +8,9 @@ __pycache__
 /main.build
 /main.dist
 /build
-# RinUI runtime config (theme / backdrop persistence)
-/RinUI
+# Portable-mode marker: its presence makes the app read/write Data/config.yaml
+# instead of the system config directory (see python/settings.py)
+/Data
 # Old files
 *.old
 *.old.py

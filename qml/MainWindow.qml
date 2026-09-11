@@ -7,12 +7,20 @@ FluentWindow {
 
     visible: true
     title: qsTr("Symplify")
-    width: 1180
-    height: 760
+    // Size comes from the settings, read once at creation: assigning the size
+    // later (from the viewmodel) and then maximizing leaves the window drawn at
+    // the old size with a white border around it on Windows. Setting it here
+    // means there is no resize at all -- the window is simply created correct.
+    width: settingsVM.startupWidth
+    height: settingsVM.startupHeight
     minimumWidth: 860
     minimumHeight: 560
 
     navigationView.navExpandWidth: 230
+
+    // Settings own the window geometry (settingsVM remembers it when enabled).
+    // Called before the window is shown, so the restore is invisible.
+    Component.onCompleted: settingsVM.attachWindow(window)
 
     // Top section stays empty (RinUI caps it at 20% of the nav height,
     // which squeezed items into a scrollbar on short windows):
