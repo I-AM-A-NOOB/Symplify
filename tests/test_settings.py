@@ -20,6 +20,8 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from PySide6.QtCore import QObject, Qt, Signal  # noqa: E402
+
 from python.settings import (  # noqa: E402
     CONFIG_FILENAME,
     DEFAULTS,
@@ -231,6 +233,61 @@ def test_startup_size_ignores_a_remembered_geometry_when_not_remembering():
     vm = SettingsViewModel(store)
     assert vm.startupWidth == DEFAULTS["window"]["width"]
     assert vm.startupHeight == DEFAULTS["window"]["height"]
+
+
+# --------------------------------------------------------------------------
+# What the window does with the remembered geometry — position only, since the
+# size is declarative (see _restore_geometry)
+# --------------------------------------------------------------------------
+
+class FakeWindow(QObject):
+    """Just enough of a QQuickWindow for the geometry logic, with no Qt app."""
+
+    widthChanged = Signal()
+    heightChanged = Signal()
+    xChanged = Signal()
+    yChanged = Signal()
+    visibleChanged = Signal()
+    closing = Signal()
+
+    def __init__(self):
+        super().__init__()
+        self._props = {"visible": True, "width": 1180, "height": 760, "x": 0, "y": 0}
+        self.maximized = False
+
+    def setProperty(self, name, value):
+        self._props[name] = value
+
+    def property(self, name):
+        return self._props.get(name)
+
+    def showMaximized(self):
+        self.maximized = True
+
+    def windowState(self):
+        return Qt.WindowState.WindowNoState
+
+
+def window_with(store_values):
+    from python.viewmodel.settings_viewmodel import SettingsViewModel
+
+    store = store_at(temp_dir() / CONFIG_FILENAME)
+    store.update({"window.remember": True, **store_values})
+    window = FakeWindow()
+    SettingsViewModel(store).attachWindow(window)
+    return window
+
+
+def test_windowed_restore_applies_the_remembered_position():
+    window = window_with({"window.maximized": False, "window.x": 250, "window.y": 180})
+    assert (window.property("x"), window.property("y")) == (250, 180)
+    assert window.maximized is False
+
+
+def test_maximized_restore_leaves_the_position_to_the_platform():
+    """Such a window must not jump to an old spot when dragged out of fullscreen."""
+    window = window_with({"window.maximized": True, "window.x": 250, "window.y": 180})
+    assert (window.property("x"), window.property("y")) == (0, 0)   # untouched
 
 
 # --------------------------------------------------------------------------

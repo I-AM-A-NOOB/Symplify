@@ -221,9 +221,11 @@ scripts/
   `set_latex_color`), applied by `MainViewModel` at startup.
 - Window geometry is remembered when `window.remember` is on: the **size** is supplied declaratively
   by `MainWindow.qml` (`settingsVM.startupWidth`/`startupHeight`, clamped to the primary screen), the
-  **position** is applied by the viewmodel only if it still falls on a connected screen, and the
-  **maximized** state is applied once the window is shown. Changes are debounced (500 ms) and flushed
-  on close. Never resize the window from the viewmodel at startup — see the trap list.
+  **position** is applied by the viewmodel only if it still falls on a connected screen — and not at
+  all when the remembered state is maximized, where the platform places the window so that dragging
+  it out of fullscreen lands where the system put it — and the **maximized** state is applied once the
+  window is shown. Changes are debounced (500 ms) and flushed on close. Never resize the window from
+  the viewmodel at startup — see the trap list.
 
 ## Building (Windows, Nuitka)
 

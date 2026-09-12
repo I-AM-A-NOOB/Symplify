@@ -147,7 +147,7 @@ class SettingsViewModel(QObject):
         self._geometry_timer.start()
 
     def _restore_geometry(self) -> None:
-        """Move the window to its remembered position.
+        """Move the window to its remembered position, unless it starts maximized.
 
         The *size* is not set here on purpose: it comes from
         ``MainWindow.qml``'s ``width``/``height`` bindings (see
@@ -156,19 +156,27 @@ class SettingsViewModel(QObject):
         stale on Windows: the window fills the screen and Qt reports the right
         sizes, but what is drawn stays in the old rectangle with a white border,
         and later resizes do not repair it. Verified against RinUI 0.4.4.1.
+
+        When the remembered state is maximized the position is left alone as
+        well: the platform places the window, so dragging it out of fullscreen
+        lands where the system put it instead of jumping to a position from
+        before. The size is still remembered, which is what that window becomes.
         """
         window = self._window
         if window is None:
             return
-        x, y = self._store.get("window.x"), self._store.get("window.y")
-        if x is not None and y is not None and self._is_on_a_screen(int(x), int(y)):
-            window.setProperty("x", int(x))
-            window.setProperty("y", int(y))
-        if self._store.get("window.maximized"):
+        maximized = bool(self._store.get("window.maximized"))
+        if not maximized:
+            x, y = self._store.get("window.x"), self._store.get("window.y")
+            if x is not None and y is not None and self._is_on_a_screen(int(x), int(y)):
+                window.setProperty("x", int(x))
+                window.setProperty("y", int(y))
+        else:
             # Maximizing before the window is shown has the same stale-surface
-            # effect, so the state is applied once the window is actually shown.
-            # MainWindow.qml declares `visible: true`, so at this point it usually
-            # already is — hence the timer fallback rather than only the signal.
+            # effect as resizing it, so the state is applied once the window is
+            # actually shown. MainWindow.qml declares `visible: true`, so at this
+            # point it usually already is — hence the timer fallback rather than
+            # only the signal.
             if window.property("visible"):
                 QTimer.singleShot(0, self._apply_maximized_once)
             else:
