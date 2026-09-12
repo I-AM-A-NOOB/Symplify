@@ -256,8 +256,8 @@ print("RINUI", json.dumps(RinConfig.config, sort_keys=True))
 RinConfig["theme"] = {"current_theme": "Light"}       # must not touch disk
 RinConfig.upload_config("theme_color", "#000000")
 print("ROOT_ENTRIES", sorted(p.name for p in root.iterdir()))
-placeholder = settings.path.parent / "RinUI" / "config" / "rin_ui.json"
-print("PLACEHOLDER", placeholder.read_text(encoding="utf-8").strip())
+# nothing RinUI-shaped anywhere: the import ran in a scratch directory
+print("CONFIG_DIR_ENTRIES", sorted(p.name for p in settings.path.parent.iterdir()))
 print("WINDOW", RinUIWindow.__name__)
 print("VERSION", runtime.rinui_version)
 """
@@ -307,7 +307,7 @@ def test_bootstrap_migrates_removes_and_never_writes_again():
     # RinUI runs on our values but can no longer persist anything
     assert '"current_theme": "Dark"' in report["RINUI"]
     assert '"backdrop_effect": "acrylic"' in report["RINUI"]
-    assert report["PLACEHOLDER"] == "{}"
+    assert report["CONFIG_DIR_ENTRIES"] == "['config.yaml']"
     assert report["WINDOW"] == "RinUIWindow"
     assert report["VERSION"].count(".") >= 1
 
@@ -317,7 +317,7 @@ def test_bootstrap_leaves_the_launch_dir_clean_without_a_legacy_config():
     appdata = temp_dir()
     report = run_bootstrap(root, appdata)
     assert report["ROOT_ENTRIES"] == "[]"
-    assert report["PLACEHOLDER"] == "{}"
+    assert report["CONFIG_DIR_ENTRIES"] == "['config.yaml']"
     assert report["THEME"] == "Auto"
 
 

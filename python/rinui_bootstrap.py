@@ -8,16 +8,16 @@ is no supported switch to redirect or disable that (verified against 0.4.4.1).
 
 This module takes the location back, in four steps — see :func:`prepare`:
 
-1. pre-seed an empty ``rin_ui.json`` inside *our* configuration directory, so the
-   import-time load finds a file and therefore writes nothing;
-2. ``chdir`` into that directory for the duration of ``import RinUI``, so even a
-   stray write lands there instead of in the app directory;
-3. inject our appearance settings into ``RinConfig`` and neutralise
+1. ``chdir`` into a throwaway temporary directory for the duration of
+   ``import RinUI``, so the file it writes lands there and is deleted with that
+   directory right afterwards — nothing RinUI-shaped is left anywhere;
+2. inject our appearance settings into ``RinConfig`` and neutralise
    ``RinConfig.save_config`` — RinUI's only write funnel (``load_config``,
    ``upload_config`` and ``__setitem__`` all call it) — so nothing RinUI does can
    persist again;
-4. on the first run of this scheme, fold a legacy ``<app>/RinUI/config`` into our
-   settings file and remove it.
+3. on the first run of this scheme, fold a legacy ``<app>/RinUI/config`` into our
+   settings file and remove that directory;
+4. hand the settings store and RinUI's window class to the composition root.
 
 **The settings file is the single source of truth.** Never re-enable RinUI's own
 persistence, and never import ``RinUI`` before :func:`prepare` has run.
@@ -25,6 +25,8 @@ persistence, and never import ``RinUI`` before :func:`prepare` has run.
 
 import json
 import os
+import shutil
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict
@@ -67,17 +69,22 @@ def prepare(root: Path) -> Runtime:
     store = SettingsStore(directory / CONFIG_FILENAME, is_portable)
     store.load()
 
-    if first_run:
-        _seed_placeholder(store)      # before the import: its load must not write
-
+    # The import writes RinUI's own config file when it is missing, at the
+    # cwd-relative path <cwd>/RinUI/config/rin_ui.json. Do it from a throwaway
+    # directory: nothing RinUI-shaped is left anywhere the user can see (our
+    # config directory holds only config.yaml), and there is no placeholder file
+    # to keep in sync. The directory is removed again right after the import —
+    # nothing reads it afterwards, and writes were just disabled.
     cwd = Path.cwd()
-    os.chdir(store.path.parent)          # the only line that needs explaining: see module docstring
+    scratch = Path(tempfile.mkdtemp(prefix="symplify-boot-"))
+    os.chdir(scratch)
     try:
         import RinUI
         from RinUI import RinUIWindow
         from RinUI.core.config import DEFAULT_CONFIG, RinConfig
     finally:
         os.chdir(cwd)
+        shutil.rmtree(scratch, ignore_errors=True)
 
     if first_run:
         # A fresh install takes RinUI's own platform detection (mica on Win11,
@@ -103,24 +110,6 @@ def _rinui_config(store: SettingsStore, defaults: Dict[str, Any]) -> Dict[str, A
     config["backdrop_effect"] = store.get("appearance.backdrop")
     config["theme_color"] = store.get("appearance.accent")
     return config
-
-
-def _seed_placeholder(store: SettingsStore) -> Path:
-    """Create an empty ``rin_ui.json`` in our config dir if it is missing.
-
-    Its only job is to exist: RinUI's import-time ``load_config`` writes a file
-    when it is absent and reads it when it is present. We never read or update it
-    (the real values are injected in memory by :func:`_rinui_config`).
-    """
-    placeholder = _placeholder_path(store)
-    if not placeholder.exists():
-        placeholder.parent.mkdir(parents=True, exist_ok=True)
-        placeholder.write_text("{}\n", encoding="utf-8")
-    return placeholder
-
-
-def _placeholder_path(store: SettingsStore) -> Path:
-    return store.path.parent / "RinUI" / "config" / _RINUI_FILENAME
 
 
 def _migrate(store: SettingsStore, root: Path) -> None:
