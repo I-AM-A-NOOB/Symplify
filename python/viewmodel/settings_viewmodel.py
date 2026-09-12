@@ -30,6 +30,7 @@ class SettingsViewModel(QObject):
 
     changed = Signal()
     latexSizeChanged = Signal()
+    accentChanged = Signal()
 
     def __init__(
         self,
@@ -60,12 +61,18 @@ class SettingsViewModel(QObject):
     # --- appearance -------------------------------------------------------
 
     def _apply_appearance(self) -> None:
-        """Push the stored appearance into RinUI (no-op without a theme manager)."""
+        """Push the stored appearance into RinUI (no-op without a theme manager).
+
+        The accent colour is *not* applied here: RinUI's own
+        ``Theme.setThemeColor`` also sets ``Utils.primaryColor``, which is what
+        actually re-colours the UI, so it has to run on the QML side (see the
+        ``accentChanged`` handler in SettingsPage.qml). This method is for theme
+        and backdrop, which apply fine through the Python slots.
+        """
         if self._theme_manager is None:
             return
         self._theme_manager.toggle_theme(self._get_theme())
         self._theme_manager.apply_backdrop_effect(self._get_backdrop())
-        self._theme_manager.set_theme_color(self._get_accent())
 
     def _get_theme(self) -> str:
         return self._store.get("appearance.theme")
@@ -89,9 +96,13 @@ class SettingsViewModel(QObject):
         return self._store.get("appearance.accent")
 
     def _set_accent(self, accent: str) -> None:
-        accent = self._store.set("appearance.accent", accent)
-        if self._theme_manager is not None:
-            self._theme_manager.set_theme_color(accent)
+        """Persist the accent colour and ask the QML side to apply it.
+
+        RinUI's Python slot only persists the value; the visible change comes from
+        ``Utils.primaryColor``, which its QML ``Theme.setThemeColor`` sets too.
+        """
+        self._store.set("appearance.accent", accent)
+        self.accentChanged.emit()
         self.changed.emit()
 
     # --- rendering --------------------------------------------------------
@@ -265,6 +276,7 @@ class SettingsViewModel(QObject):
         """Restore every default and apply the result live."""
         self._store.reset()
         self._apply_appearance()
+        self.accentChanged.emit()
         self.latexSizeChanged.emit()
         self.changed.emit()
 

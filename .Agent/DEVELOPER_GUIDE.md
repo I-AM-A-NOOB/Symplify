@@ -208,7 +208,15 @@ scripts/
   `~/Library/Application Support/Symplify/` (macOS). The settings page shows the resolved path and
   mode, and clicking that row opens the folder.
 - Appearance is applied through RinUI's `ThemeManager` (the QML `Theme` singleton wraps it), injected
-  before the window exists so the first frame is already themed. `rendering.latex_size` reaches the
+  before the window exists so the first frame is already themed. The **accent colour is the
+  exception**: RinUI's Python `set_theme_color` only persists the value — what actually re-colours the
+  controls is `Utils.primaryColor`, which its QML `Theme.setThemeColor` sets as well. So the viewmodel
+  stores the accent and emits `accentChanged`, and `SettingsPage.qml` applies it. Theme and backdrop
+  apply fine through the Python slots.
+- The settings page's content lives in a `Flickable` (with an AsNeeded `ScrollBar`) because the page
+  is taller than a short window. Keep new rows inside that column — giving the content
+  `anchors.fill: parent` again would silently disable scrolling, and the numbers to watch are
+  `contentHeight` vs the viewport height. `rendering.latex_size` reaches the
   renderers via `CalculatorViewModel.set_latex_size` / `HistoryModel.set_latex_size` (mirroring
   `set_latex_color`), applied by `MainViewModel` at startup.
 - Window geometry is remembered when `window.remember` is on: the **size** is supplied declaratively
