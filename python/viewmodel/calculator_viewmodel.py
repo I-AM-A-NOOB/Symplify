@@ -72,6 +72,8 @@ class CalculatorViewModel(QObject):
         self._latex_height = 0
         self._latex_color = "#000000"
         self._latex_size = 24
+        #: Path to the LaTeX font file; '' uses ziamath's bundled font.
+        self._latex_font = ""
 
     def _get_input_mode(self) -> int:
         """Current input mode as a stable int (InputMode.CODE.value)."""
@@ -141,7 +143,12 @@ class CalculatorViewModel(QObject):
 
     def _build_latex_url(self, latex: str) -> str:
         """Render LaTeX to an SVG data URL, storing its intrinsic size."""
-        svg = latex_to_svg(latex, size=self._latex_size, color=self._latex_color)
+        svg = latex_to_svg(
+            latex,
+            size=self._latex_size,
+            color=self._latex_color,
+            font=self._latex_font,
+        )
         if not svg:
             self._latex_svg_url = ""
             self._latex_width = 0
@@ -180,6 +187,21 @@ class CalculatorViewModel(QObject):
         if size == self._latex_size:
             return
         self._latex_size = size
+        if self._result_latex:
+            self._build_latex_url(self._result_latex)
+            self.resultChanged.emit()
+
+    @Slot(str)
+    def set_latex_font(self, font: str) -> None:
+        """Re-render the current result with a different LaTeX font.
+
+        Mirrors :meth:`set_latex_size`; ``font`` is a font file path (or '' for
+        ziamath's bundled font), resolved by ``python/fonts.py``.
+        """
+        font = font or ""
+        if font == self._latex_font:
+            return
+        self._latex_font = font
         if self._result_latex:
             self._build_latex_url(self._result_latex)
             self.resultChanged.emit()

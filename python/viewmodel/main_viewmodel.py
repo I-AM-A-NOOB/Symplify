@@ -83,12 +83,25 @@ class MainViewModel(QObject):
         self._settings = SettingsViewModel(settings, theme_manager, parent=self)
         self._settings.latexSizeChanged.connect(self._apply_latex_size)
         self._apply_latex_size()      # apply the persisted rendering settings now
+        self._settings.changed.connect(self._apply_latex_font)
+        self._apply_latex_font()
 
     def _apply_latex_size(self) -> None:
         """Push the configured result font size to everything that renders LaTeX."""
         size = self._settings.latexSize
         self._calculator_vm.set_latex_size(size)
         self._history.set_latex_size(size)
+
+    def _apply_latex_font(self) -> None:
+        """Push the configured LaTeX font file to everything that renders LaTeX.
+
+        ``latexFontPath`` is a filesystem path (resolved by ``python/fonts.py``),
+        so it is re-read on every settings change rather than only when the
+        family name changes.
+        """
+        path = self._settings.latexFontPath
+        self._calculator_vm.set_latex_font(path)
+        self._history.set_latex_font(path)
 
     @Property(QObject, constant=True)
     def calculator(self) -> CalculatorViewModel:

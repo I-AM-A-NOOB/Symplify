@@ -72,15 +72,36 @@ Rectangle {
                         model: keyGrid.modelData.keys
 
                         delegate: Rin.Button {
+                            id: keyButton
+
                             required property var modelData
 
                             Layout.row: modelData.row
                             Layout.column: modelData.col
                             Layout.fillWidth: true
                             Layout.fillHeight: true
-                            text: modelData.text
+                            // The key shows `label` and types `insert`; they are
+                            // the same string unless the glyph differs from the
+                            // name it inserts (√ shows, sqrt( types).
+                            text: modelData.label
                             focusPolicy: Qt.NoFocus
-                            onClicked: root.keyPressed(modelData.text)
+                            onClicked: root.keyPressed(modelData.insert)
+
+                            // RinUI's Button draws its own label with a hardcoded
+                            // `Typography.Body` (whose family is `Utils.fontFamily`),
+                            // so `font.*` on the button never reaches the glyphs —
+                            // the face has to be given to the label itself. A serif
+                            // face is the point here: it carries ∞ √ ∛ ≤ ≥ better.
+                            contentItem: Text {
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                                elide: Text.ElideRight
+                                text: keyButton.text
+                                color: keyButton.highlighted
+                                    ? Rin.Theme.currentTheme.colors.textOnAccentColor
+                                    : Rin.Theme.currentTheme.colors.textColor
+                                font: settingsVM.keyboardFont
+                            }
                         }
                     }
                 }

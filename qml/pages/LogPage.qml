@@ -56,6 +56,8 @@ Item {
                 wrapMode: TextArea.Wrap
                 text: logVM.formattedLogs
                 color: Theme.currentTheme.colors.textColor
+                // Code text: log lines are expressions and results.
+                font: settingsVM.codeFont
             }
 
             Text {

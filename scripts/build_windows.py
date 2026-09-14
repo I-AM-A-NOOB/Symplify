@@ -33,6 +33,9 @@ CMD = [
     "--include-package-data=ziafont",
     # latex2mathml ships a symbol table that ziamath reads at runtime
     "--include-package-data=latex2mathml",
+    # fontTools reads installed fonts (python/fonts.py: which ones can typeset
+    # maths). Imported lazily inside functions, so make it explicit.
+    "--include-package=fontTools",
     # our package data (keyboard_config.yaml lives next to the module)
     "--include-package-data=python",
     # QML views (loaded by path at runtime next to the exe)

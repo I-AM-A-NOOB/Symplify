@@ -153,10 +153,35 @@ Item {
 
                 // RinUI's delegate (Fluent visuals); a click selects the row.
                 delegate: TableViewDelegate {
+                    id: cell
+
                     onClicked: {
                         varTable.selectionModel.select(
                             variablesFilter.modelIndex(row, 0),
                             ItemSelectionModel.ClearAndSelect | ItemSelectionModel.Current)
+                    }
+
+                    // RinUI's own contentItem hardcodes its label font
+                    // (`typography: Typography.Body`, whose family is
+                    // `Utils.fontFamily`), so a code font there has to replace
+                    // it. Geometry mirrors the stock one; `visible: !cell.editing`
+                    // still hides the label while the inline editor is open,
+                    // otherwise the edited text would draw on top of it.
+                    contentItem: Text {
+                        anchors.fill: parent
+                        anchors.leftMargin: 12
+                        anchors.rightMargin: 12
+                        anchors.topMargin: 7
+                        anchors.bottomMargin: 9
+                        visible: !cell.editing
+                        text: model.display !== undefined ? model.display : ""
+                        elide: Text.ElideRight
+                        wrapMode: Text.NoWrap
+                        verticalAlignment: Text.AlignVCenter
+                        color: cell.enabled
+                            ? Theme.currentTheme.colors.textColor
+                            : Theme.currentTheme.colors.textDisabledColor
+                        font: settingsVM.codeFont
                     }
                 }
             }

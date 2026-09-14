@@ -10,6 +10,10 @@ dependencies = [
     "pyyaml>=6.0.3",
     "sympy>=1.14.0",
     "ziamath>=0.13",
+    # Reading font tables ourselves (python/fonts.py): which installed fonts can
+    # typeset maths is a question only the files answer. Transitive via ziamath
+    # today, but we import it directly, so it is declared.
+    "fonttools>=4.0",
 ]
 
 [dependency-groups]

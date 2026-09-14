@@ -5,9 +5,9 @@ Pure Python (no Qt) so the whole store is testable headless.
 
 **Location**, in priority order:
 
-1. *Portable*: if a ``Data`` directory exists next to the app (the exe's
+1. *Portable*: if a ``data`` directory exists next to the app (the exe's
    directory when frozen, the repository root otherwise), settings live in
-   ``<root>/Data/config.yaml`` — ship that folder and the app is
+   ``<root>/data/config.yaml`` — ship that folder and the app is
    self-contained.
 2. Otherwise the platform's user configuration directory:
 
@@ -38,8 +38,10 @@ from typing import Any, Dict, Optional, Tuple
 
 import yaml
 
+from .fonts import DEFAULT_CODE_FAMILY, DEFAULT_KEYBOARD_FAMILY
+
 #: Directory (next to the app) whose presence switches on portable mode.
-PORTABLE_DIRNAME = "Data"
+PORTABLE_DIRNAME = "data"
 
 #: Settings file name inside the resolved configuration directory.
 CONFIG_FILENAME = "config.yaml"
@@ -53,10 +55,25 @@ DEFAULTS: Dict[str, Any] = {
     "appearance": {
         "theme": "Auto",          # Auto | Light | Dark
         "backdrop": "mica",       # mica | acrylic | tabbed | none (Windows only)
-        "accent": "#605ed2",      # accent colour, #rrggbb
+        "accent": "#605ed2",      # the CUSTOM accent colour, #rrggbb (accent_mode == custom)
+        "accent_mode": "default", # default (RinUI's own colour) | system (QPalette) | custom
+        # Finetune the accent per colour scheme with our own WinUI-style steps,
+        # for every mode. Off uses each colour exactly as it is.
+        "accent_shading": True,
+        # Use the OS's own tuned accent per scheme where it has one (Windows)
+        # instead of the built-in blend. Only meaningful with the system accent
+        # and shading on; see SettingsViewModel.accentOsShadingAvailable.
+        "accent_os_shading": True,
     },
-    "rendering": {
-        "latex_size": 24,         # result LaTeX font size, in points
+    "fonts": {
+        # A comma-separated PREFERENCE list, resolved to the first family the
+        # system has (QML cannot express a fallback list — see python/fonts.py).
+        "code_family": DEFAULT_CODE_FAMILY,
+        "code_size": 14,          # code text: inputs, outputs, log, table cells
+        "keyboard_family": DEFAULT_KEYBOARD_FAMILY,
+        "keyboard_size": 16,
+        "latex_font": "",         # "" = ziamath's bundled STIX Two Math
+        "latex_size": 24,         # ziamath's own default font size, in points
     },
     "window": {
         "remember": True,         # restore size/position on the next launch
@@ -72,11 +89,14 @@ DEFAULTS: Dict[str, Any] = {
 _CHOICES = {
     "appearance.theme": ("Auto", "Light", "Dark"),
     "appearance.backdrop": ("mica", "acrylic", "tabbed", "none"),
+    "appearance.accent_mode": ("default", "system", "custom"),
 }
 
 #: Keys clamped into a numeric range.
 _CLAMPS = {
-    "rendering.latex_size": (8, 96),
+    "fonts.code_size": (6, 72),
+    "fonts.keyboard_size": (6, 72),
+    "fonts.latex_size": (8, 96),
     "window.width": (860, 20000),
     "window.height": (560, 20000),
 }
@@ -88,7 +108,15 @@ _KNOWN_KEYS = (
     "appearance.theme",
     "appearance.backdrop",
     "appearance.accent",
-    "rendering.latex_size",
+    "appearance.accent_mode",
+    "appearance.accent_shading",
+    "appearance.accent_os_shading",
+    "fonts.code_family",
+    "fonts.code_size",
+    "fonts.keyboard_family",
+    "fonts.keyboard_size",
+    "fonts.latex_font",
+    "fonts.latex_size",
     "window.remember",
     "window.width",
     "window.height",
@@ -185,6 +213,8 @@ class SettingsStore:
         except (OSError, yaml.YAMLError) as exc:
             self.warning = f"config unreadable, using defaults: {exc}"
         self.values = _merge_defaults(loaded)
+        self._infer_accent_mode(loaded)
+        self._migrate_latex_size(loaded)
         for key in _KNOWN_KEYS:
             self._write_key(key, self._validate_known(key, self.get(key)))
 
@@ -232,6 +262,37 @@ class SettingsStore:
 
     # --- internals --------------------------------------------------------
 
+    def _infer_accent_mode(self, loaded: Any) -> None:
+        """Treat an accent colour written before accent modes existed as custom.
+
+        Such a file has no ``accent_mode`` key, and the colour it holds *was*
+        the accent the app applied — falling back to the ``default`` mode would
+        silently drop the user's choice.
+        """
+        appearance = loaded.get("appearance") if isinstance(loaded, dict) else None
+        if (isinstance(appearance, dict)
+                and "accent" in appearance
+                and "accent_mode" not in appearance):
+            self.values["appearance"]["accent_mode"] = "custom"
+
+    def _migrate_latex_size(self, loaded: Any) -> None:
+        """Move a pre-``fonts`` ``rendering.latex_size`` into the fonts section.
+
+        The key only moved; the value is still the result font size, so a file
+        written before the Typography section existed keeps its setting. An
+        already-present ``fonts.latex_size`` wins (the user has been through the
+        new page and the old key is stale).
+        """
+        if not isinstance(loaded, dict):
+            return
+        rendering = loaded.get("rendering")
+        fonts = loaded.get("fonts")
+        if not isinstance(rendering, dict) or "latex_size" not in rendering:
+            return
+        if isinstance(fonts, dict) and "latex_size" in fonts:
+            return
+        self.values["fonts"]["latex_size"] = rendering["latex_size"]
+
     def _default_for(self, key: str) -> Any:
         node: Any = DEFAULTS
         for part in key.split("."):
@@ -263,6 +324,14 @@ class SettingsStore:
             return max(low, min(high, number))
         if key == "appearance.accent":
             return value if isinstance(value, str) and _HEX_COLOR.match(value) else default
+        if key in ("fonts.code_family", "fonts.keyboard_family"):
+            # A preference LIST: keep it verbatim so nothing the user typed is
+            # silently dropped; only a non-string or an empty list falls back.
+            text = value.strip() if isinstance(value, str) else ""
+            return text if text else default
+        if key == "fonts.latex_font":
+            # A family name from the dropdown, or "" for ziamath's own font.
+            return value.strip() if isinstance(value, str) else default
         if key in ("window.x", "window.y"):
             if value is None:
                 return None
@@ -270,6 +339,8 @@ class SettingsStore:
                 return int(value)
             except (TypeError, ValueError):
                 return None
-        if key == "window.maximized" or key == "window.remember":
+        if key in ("window.maximized", "window.remember",
+                   "appearance.accent_shading",
+                   "appearance.accent_os_shading"):
             return bool(value)
         return value

@@ -18,23 +18,35 @@ _SVG_HEIGHT_RE = re.compile(r'height="([\d.]+)"')
 
 
 def latex_to_svg(
-    latex: str, size: Optional[float] = None, color: Optional[str] = None
+    latex: str,
+    size: Optional[float] = None,
+    color: Optional[str] = None,
+    font: Optional[str] = None,
 ) -> str:
     """Render a LaTeX string to an SVG string, or ``''`` if it cannot be parsed.
 
     Args:
         latex: The LaTeX source.
-        size: Optional font size in points; the ziamath default (24) is used
-            when None. Exposed so a settings option can drive it later.
+        size: Optional font size in points; ziamath's own default (24) is used
+            when None.
         color: Optional text color (any CSS color, e.g. ``'#ffffff'``);
             ziamath defaults to black when None.
+        font: Optional path to a font **file** containing a MATH typesetting
+            table (see ``python/fonts.py``); None uses ziamath's bundled STIX Two
+            Math. ziamath takes a file, not a family, and fails outright on a
+            font without a MATH table rather than falling back to another one.
     """
     try:
         from ziamath.zmath import Latex
 
-        if size is None:
-            return Latex(latex, color=color).svg()
-        return Latex(latex, size=size, color=color).svg()
+        kwargs = {}
+        if size is not None:
+            kwargs["size"] = size
+        if color is not None:
+            kwargs["color"] = color
+        if font:
+            kwargs["font"] = font
+        return Latex(latex, **kwargs).svg()
     except Exception:
         return ""
 

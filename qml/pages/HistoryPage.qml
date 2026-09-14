@@ -145,8 +145,7 @@ Item {
                         QQ.Text {
                             Layout.fillWidth: true
                             Layout.alignment: Qt.AlignVCenter
-                            font.family: "Consolas"
-                            font.pixelSize: 13
+                            font: settingsVM.codeFont
                             color: Theme.currentTheme.colors.textColor
                             elide: QQ.Text.ElideRight
                             text: card.mode === "Assign"
@@ -196,8 +195,10 @@ Item {
                     // error card (input line, background) stays normal.
                     QQ.Text {
                         Layout.fillWidth: true
-                        font.family: "Consolas"
-                        font.pixelSize: 13
+                        // Code text: the aligned `= result` line. The name-length
+                        // padding aligns it under the assignment operator, so it
+                        // has to stay monospace for the alignment to hold.
+                        font: settingsVM.codeFont
                         color: card.isError
                             ? card.errorColor
                             : Theme.currentTheme.colors.textSecondaryColor

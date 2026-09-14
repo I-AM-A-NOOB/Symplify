@@ -80,6 +80,7 @@ class HistoryModel(QAbstractListModel):
         self._items: List[HistoryItem] = []
         self._latex_color: str = "#000000"
         self._latex_size: int = 24
+        self._latex_font: str = ""
 
     def roleNames(self):
         return {
@@ -135,7 +136,12 @@ class HistoryModel(QAbstractListModel):
         """Render (once) and return the entry's SVG data URL."""
         item = self._items[row]
         if item.svg_url is None:
-            svg = latex_to_svg(item.latex, size=self._latex_size, color=self._latex_color)
+            svg = latex_to_svg(
+                item.latex,
+                size=self._latex_size,
+                color=self._latex_color,
+                font=self._latex_font,
+            )
             item.svg_url = (
                 "data:image/svg+xml;charset=utf-8," + quote(svg, safe="")
                 if svg else ""
@@ -175,6 +181,26 @@ class HistoryModel(QAbstractListModel):
         if size == self._latex_size:
             return
         self._latex_size = size
+        if self._items:
+            for item in self._items:
+                item.svg_url = None
+            self.dataChanged.emit(
+                self.index(0, 0),
+                self.index(len(self._items) - 1, 0),
+                [self.LatexUrlRole, self.NaturalWidthRole, self.NaturalHeightRole],
+            )
+
+    @Slot(str)
+    def set_latex_font(self, font: str) -> None:
+        """Re-render every entry with a different LaTeX font.
+
+        Mirrors :meth:`set_latex_size`: cached SVGs are dropped so each entry is
+        rendered again on demand. ``font`` is a font file path ('' = bundled).
+        """
+        font = font or ""
+        if font == self._latex_font:
+            return
+        self._latex_font = font
         if self._items:
             for item in self._items:
                 item.svg_url = None

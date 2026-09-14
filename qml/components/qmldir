@@ -1,5 +1,7 @@
 module Symplify.Components
 
+ExpanderPanel 1.0 ExpanderPanel.qml
+ExpanderRow 1.0 ExpanderRow.qml
 HScrollView 1.0 HScrollView.qml
 KeyboardPanel 1.0 KeyboardPanel.qml
 LatexImage 1.0 LatexImage.qml

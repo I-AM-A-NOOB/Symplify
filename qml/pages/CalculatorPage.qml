@@ -260,8 +260,10 @@ Item {
                                 text: calcVM.inputText
                                 wrapMode: TextArea.Wrap
                                 placeholderText: qsTr("Enter expression...")
-                                font.pixelSize: 15
-
+                                // Code text: expressions in, results out. The
+                                // whole font (family list + size) comes from the
+                                // viewmodel, so Qt can fall back per character.
+                                font: settingsVM.codeFont
                                 onTextChanged: calcVM.inputText = text
 
                                 // Smart mode switch: '=' in an empty input -> Assign
@@ -288,7 +290,7 @@ Item {
                                 Layout.alignment: Qt.AlignVCenter
                                 text: calcVM.assignName
                                 placeholderText: qsTr("name")
-
+                                font: settingsVM.codeFont
                                 onTextChanged: calcVM.assignName = text
 
                                 // Smart navigation: an operator typed at the end of
@@ -334,7 +336,7 @@ Item {
                                 Layout.alignment: Qt.AlignVCenter
                                 text: calcVM.assignValue
                                 placeholderText: qsTr("expression")
-
+                                font: settingsVM.codeFont
                                 onTextChanged: calcVM.assignValue = text
 
                                 Keys.onPressed: (event) => {
@@ -381,7 +383,8 @@ Item {
 
                         Text {
                             Layout.fillWidth: true
-                            typography: Typography.Body
+                            // Code text: this is the expression's value.
+                            font: settingsVM.codeFont
                             wrapMode: Text.NoWrap
                             elide: Text.ElideRight
                             color: calcVM.isError
@@ -460,13 +463,17 @@ Item {
                                         source: page.hasLatex ? calcVM.latexSvgUrl : ""
                                     }
 
+                                    // Shown instead of the rendered LaTeX
+                                    // (error text, or the plain result when
+                                    // there is no LaTeX for it) — an output, so
+                                    // it typesets in the code font too.
                                     Text {
                                         anchors.fill: parent
                                         visible: !page.hasLatex
                                         horizontalAlignment: Text.AlignHCenter
                                         verticalAlignment: Text.AlignVCenter
                                         wrapMode: Text.WrapAnywhere
-                                        typography: calcVM.isError ? Typography.Body : Typography.Subtitle
+                                        font: settingsVM.codeFont
                                         color: calcVM.isError
                                             ? Theme.currentTheme.colors.systemCriticalColor
                                             : calcVM.resultText === ""

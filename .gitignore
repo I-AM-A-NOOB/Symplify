@@ -8,9 +8,9 @@ __pycache__
 /main.build
 /main.dist
 /build
-# Portable-mode marker: its presence makes the app read/write Data/config.yaml
+# Portable-mode marker: its presence makes the app read/write data/config.yaml
 # instead of the system config directory (see python/settings.py)
-/Data
+/data
 # Old files
 *.old
 *.old.py

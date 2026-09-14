@@ -20,7 +20,55 @@ FluentWindow {
 
     // Settings own the window geometry (settingsVM remembers it when enabled).
     // Called before the window is shown, so the restore is invisible.
-    Component.onCompleted: settingsVM.attachWindow(window)
+    //
+    // The accent lives here too, and this is its only owner: applying it needs
+    // to happen at startup, whenever the setting changes, and again after every
+    // theme switch — RinUI rebuilds the theme object on a switch, which restores
+    // the binding below, so the exact value has to be re-asserted each time. The
+    // window outlives the pages, so none of that can live on a page.
+    Component.onCompleted: {
+        settingsVM.attachWindow(window)
+        applyAccent()
+    }
+
+    // RinUI's accent handling, and why this is not just a call to Theme:
+    //
+    //   * RinUI's Python `set_theme_color` only persists the value; what
+    //     re-colours the controls is `Utils.primaryColor`, which the QML
+    //     `Theme.setThemeColor` sets as well.
+    //   * RinUI then derives the theme's `primaryColor` from it, with its own
+    //     dark-mode adjustment. That adjustment is a scale on the HSV value and
+    //     desaturates hard, so the accent is resolved here instead (see
+    //     `SettingsViewModel.accentForScheme`): `system` is the OS colour exactly
+    //     as the OS tuned it for this scheme, and `default`/`custom` take the
+    //     WinUI-style lightening step for dark themes.
+    //   * Assigning the property replaces RinUI's binding. That is fine because
+    //     this is now the binding's only owner and every theme change is
+    //     followed by a re-apply below.
+    function applyAccent() {
+        Theme.setThemeColor(settingsVM.accent)
+        Theme.currentTheme.colors.primaryColor =
+            settingsVM.accentForScheme(Theme.currentTheme.isDark)
+    }
+
+    Connections {
+        target: settingsVM
+
+        function onAccentChanged() {
+            applyAccent()
+        }
+    }
+
+    // A theme switch rebuilds the theme object, so the accent has to be
+    // re-applied to the new one (this also covers the OS scheme changing while
+    // the theme follows it).
+    Connections {
+        target: Theme
+
+        function onCurrentThemeChanged() {
+            applyAccent()
+        }
+    }
 
     // Top section stays empty (RinUI caps it at 20% of the nav height,
     // which squeezed items into a scrollbar on short windows):

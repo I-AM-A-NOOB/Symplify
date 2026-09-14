@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict
 
-from .settings import CONFIG_FILENAME, SettingsStore, resolve_config_dir
+from .settings import CONFIG_FILENAME, DEFAULTS, SettingsStore, resolve_config_dir
 
 #: RinUI's config file name inside its own directory.
 _RINUI_FILENAME = "rin_ui.json"
@@ -104,11 +104,21 @@ def _rinui_config(store: SettingsStore, defaults: Dict[str, Any]) -> Dict[str, A
 
     ``win10_feat`` has to survive: it holds the backdrop alpha values RinUI needs
     on Windows 10.
+
+    The accent is injected as a *colour*, because RinUI's config has no notion of
+    where it came from: a ``custom`` mode injects the stored colour, every other
+    mode RinUI's own (so does ``system`` — reading the palette needs a running
+    application, which does not exist until after :func:`prepare`, and the QML
+    side replaces it before the first frame is painted).
     """
     config = json.loads(json.dumps(defaults))  # deep copy of the library defaults
     config["theme"] = {"current_theme": store.get("appearance.theme")}
     config["backdrop_effect"] = store.get("appearance.backdrop")
-    config["theme_color"] = store.get("appearance.accent")
+    config["theme_color"] = (
+        store.get("appearance.accent")
+        if store.get("appearance.accent_mode") == "custom"
+        else DEFAULTS["appearance"]["accent"]
+    )
     return config
 
 
@@ -133,6 +143,9 @@ def _migrate(store: SettingsStore, root: Path) -> None:
             store.set("appearance.backdrop", data["backdrop_effect"])
         if isinstance(data.get("theme_color"), str):
             store.set("appearance.accent", data["theme_color"])
+            # The legacy colour *was* the running accent, so it has to arrive as
+            # a custom choice — the default mode would ignore it.
+            store.set("appearance.accent_mode", "custom")
 
     legacy.unlink(missing_ok=True)
     for folder in (root / "RinUI" / "config", root / "RinUI"):

@@ -15,10 +15,10 @@ Symplify is a graphical symbolic calculator that wraps SymPy's powerful CAS (Com
 - **Dual Input Modes** — Toggle between **Code** (evaluate any expression) and **Assign** (variable assignment with dedicated name/operator/value fields, including `+=`, `-=`, `*=`, `/=`). The mode and inputs survive page switches.
 - **Theme-Aware $\LaTeX$** — Results are rendered via `ziamath` at screen DPI and re-tinted automatically when the app theme changes.
 - **Variable Management** — Snapshot entries (name / expression / type). Invalid expressions are kept in the list as `NaN` rows instead of being dropped; double-click a cell to edit inline.
-- **Keyboard Panel** — On-screen math keyboard with smart cursor positioning for Greek letters, operators and functions (7 tabs, YAML-configurable).
+- **Keyboard Panel** — On-screen math keyboard with smart cursor positioning for Greek letters, operators and functions (7 tabs, YAML-configurable). A key shows a mathematical glyph and types the function behind it (`∞` types `oo`, `√` types `sqrt(`), so the layout reads like maths while the input stays plain SymPy syntax.
 - **History Cards** — Newest-first cards with rendered $\LaTeX$, timestamps, a context menu (copy value/result, copy $\LaTeX$), and *Send to input* to restore any entry in the calculator. Failed calculations are kept as error cards too (the reason shown in red), so a broken expression can be sent back and corrected.
 - **Live Search** — Both the History and Variables pages have a search box with a switchable match mode (History: fuzzy / expression / result; Variables: fuzzy / name / value / type). Typing is debounced; clearing the box restores every entry.
-- **Persistent Settings** — Theme, backdrop, accent colour, result font size and window geometry live in one YAML file. It goes in the OS config directory (`%APPDATA%\Symplify\` on Windows, `$XDG_CONFIG_HOME/symplify/` on Linux, `~/Library/Application Support/Symplify/` on macOS) — or next to the app in `Data/config.yaml` when that folder exists, which makes the whole thing portable.
+- **Persistent Settings** — Theme, background effect, accent colour (RinUI default / system accent / custom), three configurable font faces and sizes, and window geometry live in one YAML file. It goes in the OS config directory (`%APPDATA%\Symplify\` on Windows, `$XDG_CONFIG_HOME/symplify/` on Linux, `~/Library/Application Support/Symplify/` on macOS) — or next to the app in `data/config.yaml` when that folder exists, which makes the whole thing portable.
 - **Focus Navigation** — `Ctrl+Tab` / `Ctrl+Shift+Tab` cycle focus through the UI; `Ctrl+Return` calculates.
 
 ## Quick Start
@@ -156,11 +156,23 @@ Click the on-screen keyboard to insert functions, Greek letters, operators and d
 
 ### Settings
 
-Theme mode, backdrop effect (Windows 11), accent colour, result font size and whether the window geometry is remembered. Everything is written immediately to a single YAML file, and the *Settings file* row shows where that is — click it to open the folder.
+Theme mode, background effect (Windows 11), accent colour, result font size and whether the window geometry is remembered, grouped into **Interface**, **Typography**, **Language**, **Settings file** and **About** sections. Everything is written immediately to a single YAML file, and the *Open directory* row shows where that is — click it to open the folder.
+
+**Typography** sets three faces and their sizes:
+
+| | Applies to | Default |
+|---|---|---|
+| **Code font** | Expressions in and out — the calculator's inputs and result, the LaTeX fallback text, the Variables table, the History cards and the Log | 14 pt monospace |
+| **Keyboard font** | The on-screen keys | 16 pt serif |
+| **LaTeX font** | Rendered results | ziamath's built-in STIX Two Math, 24 pt |
+
+The code and keyboard rows take a **comma-separated list of families**, tried in order the way a font stack works in a browser: if the first font has no glyph for a character — `∛` in a mono face, say — it is drawn from the next one that does, rather than showing a blank box. The last entry is usually a generic word such as `monospace` or `serif`, which is matched against a list of real fonts, so the same configuration works on Windows, macOS and Linux. Expand a row to see what it starts with, how many fallbacks back it up, and a warning in the rare case that *none* of the listed fonts can draw something. The LaTeX row is a dropdown instead, because a font can only typeset maths if it carries an OpenType math table: the list holds the ones installed here, with the built-in font first (it is the only choice that needs no system font at all).
+
+The accent colour has three modes: **Default** (RinUI's own purple), **System** (the OS accent colour) and **Custom** (one of a set of presets; the colour you last chose is kept when you switch away). System takes Windows' own light and dark accents when you are on Windows, so it matches the rest of the system exactly; every other mode — and System on other platforms — gets its light and dark variants from one algorithm: the same RGB blend scheme the I-Synergy framework's ThemeColorCalculator uses: a 25% blend towards black for light themes and towards white for dark ones, so the result does not depend on what each toolkit happens to expose and behaves identically on Windows, macOS and Linux. Turn **Shade per theme** (inside the accent section) off to use each colour exactly as it is. Under it, **Use Windows accent finetuning** picks where the light and dark variants come from on Windows — the accents Windows derives itself (the default) or the built-in blend; it is only enabled with the System accent selected and Shade per theme on, and only appears on Windows. The section previews the accent as one rounded swatch — split into the light/current/dark segments when shading is on, a single field when it is off — and the button beside it opens a full colour picker for choosing any colour. The colour row previews the palette: the darker/primary/lighter trio when shading is on, a single flat swatch when it is off.
 
 The location is chosen at launch:
 
-1. **Portable** — if a `Data` folder sits next to the app (`symplify.exe`, or the repository root when running from source), the file is `Data/config.yaml` and nothing outside that folder is touched. Delete or move the folder to go back to the system location.
+1. **Portable** — if a `data` folder sits next to the app (`symplify.exe`, or the repository root when running from source), the file is `data/config.yaml` and nothing outside that folder is touched. Delete or move the folder to go back to the system location.
 2. **System** — otherwise the OS convention: `%APPDATA%\Symplify\config.yaml` (Windows), `$XDG_CONFIG_HOME/symplify/config.yaml` (Linux), `~/Library/Application Support/Symplify/config.yaml` (macOS).
 
 The file is meant to be hand-editable (comments and unknown keys survive, invalid values fall back to their defaults), and a location that cannot be written is not fatal — the app keeps running with the values applied in memory and says so on the settings page. RinUI's own `RinUI/config` folder is never created: its theme/backdrop/accent settings live in this file instead.
@@ -179,10 +191,10 @@ The file is meant to be hand-editable (comments and unknown keys survive, invali
 
 Prioritized directions:
 
-1. **Persistence & settings** — *done for settings* (theme, accent colour, backdrop, $\LaTeX$ size, window geometry, portable or system location); variables and history are still in-memory and are the next candidates for the same store.
+1. **Persistence & settings** — *done for settings* (theme, accent colour incl. system-accent mode, backdrop, $\LaTeX$ size, window geometry, portable or system location); variables and history are still in-memory and are the next candidates for the same store.
 2. **Variables refresh** — a preview panel (numeric approximation + large $\LaTeX$); search/filter is done.
 3. **History search & export** — *search done*; save/export recorded calculations is open.
-4. **Settings polish** — *done*; further options (fonts, key bindings) fit the same store.
+4. **Settings polish** — *done for appearance and typography* (theme, accent, code/keyboard/LaTeX faces and sizes); further options (key bindings) fit the same store.
 5. **Plotting** — classic 2D plotting first (via SymPy), then a Desmos-grade GPU plotting pipeline; plus optional SymPy convenience UIs (physics, geometry, code generation).
 
 ## License

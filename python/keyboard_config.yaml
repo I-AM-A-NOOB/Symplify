@@ -1,5 +1,10 @@
 # Keyboard configuration for calculator
 # Optimized for high school level mathematics
+#
+# A key is either a plain string — it shows that text and types it, the common
+# case — or a mapping with `label` (what the key shows) and `insert` (what it
+# types into the input). Use the mapping where the mathematical glyph differs
+# from the name it inserts: `√` shows, `sqrt(` types.
 
 basic:
   title: "Basic"
@@ -7,14 +12,14 @@ basic:
     - ["7", "8", "9", "/", "("]
     - ["4", "5", "6", "*", ")"]
     - ["1", "2", "3", "-", "^"]
-    - ["0", ".", "=", "+", "sqrt("]
+    - ["0", ".", "=", "+", { label: "√", insert: "sqrt(" }]
 
 alphabet:
   title: "Alphabet"
   grid:
     - ["q", "w", "e", "r", "t", "y", "u", "i", "o", "p"]
     - ["a", "s", "d", "f", "g", "h", "j", "k", "l"]
-    - ["","z", "x", "c", "v", "b", "n", "m"]
+    - ["", "z", "x", "c", "v", "b", "n", "m"]
 
 functions:
   title: "Functions"
@@ -22,13 +27,15 @@ functions:
     - ["sin(", "cos(", "tan("]
     - ["asin(", "acos(", "atan("]
     - ["log(", "ln(", "log10(", "exp("]
-    - ["abs(", "sqrt(", "factorial(", "cbrt("]
+    - [{ label: "|x|", insert: "abs(" }, { label: "√", insert: "sqrt(" },
+       { label: "x!", insert: "factorial(" }, { label: "∛", insert: "cbrt(" }]
 
 calculus:
   title: "Calculus"
   grid:
     - ["limit(", "diff(", "integrate(", "Derivative(", "Integral("]
-    - ["Limit(", "oo", "zoo", "pi", "E"]
+    - ["Limit(", { label: "∞", insert: "oo" }, { label: "∞", insert: "zoo" },
+       { label: "π", insert: "pi" }, { label: "e", insert: "E" }]
     - ["Sum(", "Product(", "summation(", "", ""]
 
 algebra:
@@ -43,12 +50,15 @@ symbols:
   title: "Symbols"
   grid:
     - ["+", "-", "*", "/", "^"]
-    - ["=", "<", ">", "<=", ">="]
-    - ["(", ")", "|", "pi", "E"]
-    - ["deg", "rad", "%", "!", "sqrt("]
+    - ["=", "<", ">", { label: "≤", insert: "<=" }, { label: "≥", insert: ">=" }]
+    - ["(", ")", "|", { label: "π", insert: "pi" }, { label: "e", insert: "E" }]
+    - ["deg", "rad", "%", "!", { label: "√", insert: "sqrt(" }]
 
 constants:
   title: "Constants"
   grid:
-    - ["pi", "E", "I", "oo", "zoo"]
-    - ["GoldenRatio", "EulerGamma", "Catalan", "inf", "nan"]
+    - [{ label: "π", insert: "pi" }, { label: "e", insert: "E" },
+       { label: "i", insert: "I" }, { label: "∞", insert: "oo" },
+       { label: "∞", insert: "zoo" }]
+    - [{ label: "φ", insert: "GoldenRatio" }, { label: "γ", insert: "EulerGamma" },
+       { label: "G", insert: "Catalan" }, { label: "∞", insert: "inf" }, "nan"]
