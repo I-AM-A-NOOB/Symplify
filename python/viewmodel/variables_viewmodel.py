@@ -43,6 +43,7 @@ class VariablesModel(QAbstractTableModel):
     """
 
     warningOccurred = Signal(str, str)
+    countChanged = Signal()
 
     def __init__(
         self,
@@ -165,6 +166,7 @@ class VariablesModel(QAbstractTableModel):
             self.beginInsertRows(QModelIndex(), row, row)
             self._keys.append(name)
             self.endInsertRows()
+            self.countChanged.emit()
         else:
             row = self._keys.index(name)
             self.dataChanged.emit(
@@ -205,12 +207,8 @@ class VariablesModel(QAbstractTableModel):
         self._manager.delete(name)
         self._keys.pop(row)
         self.endRemoveRows()
+        self.countChanged.emit()
         return True
-
-    @Slot(int, int, result=QModelIndex)
-    def modelIndex(self, row: int, column: int) -> QModelIndex:
-        """Build a QModelIndex for QML (e.g. TableView.edit)."""
-        return self.index(row, column)
 
     @Slot(int, int, result=str)
     def cellAt(self, row: int, column: int) -> str:
@@ -226,10 +224,11 @@ class VariablesModel(QAbstractTableModel):
         """Return the variable name at ``row`` (or empty string)."""
         return self.cellAt(row, 0)
 
-    @Slot(result=int)
-    def count(self) -> int:
-        """Number of rows, callable from QML."""
+    def _get_count(self) -> int:
+        """Number of rows."""
         return len(self._keys)
+
+    count = Property(int, _get_count, notify=countChanged)
 
 
 class VariablesViewModel(QObject):

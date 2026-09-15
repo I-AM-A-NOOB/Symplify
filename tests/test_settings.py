@@ -210,6 +210,17 @@ def test_the_new_latex_size_wins_over_the_old_key():
     assert store_at(path).get("fonts.latex_size") == 20
 
 
+def test_a_scalar_fonts_value_degrades_instead_of_crashing_the_migration():
+    """A non-mapping ``fonts`` value must not replace the section: the old
+    ``rendering.latex_size`` still migrates and the other fonts keys keep their
+    defaults."""
+    path = temp_dir() / CONFIG_FILENAME
+    path.write_text("rendering:\n  latex_size: 40\nfonts: hello\n", encoding="utf-8")
+    store = store_at(path)
+    assert store.get("fonts.latex_size") == 40
+    assert store.get("fonts.code_size") == DEFAULTS["fonts"]["code_size"]
+
+
 def test_window_coordinates_and_flags():
     path = temp_dir() / CONFIG_FILENAME
     store = store_at(path)
@@ -232,6 +243,23 @@ def test_non_mapping_yaml_falls_back_to_defaults():
     path.write_text("- 1\n- 2\n", encoding="utf-8")
     store = store_at(path)
     assert store.values["appearance"]["theme"] == "Auto"
+
+
+def test_malformed_keyboard_yaml_never_breaks_startup():
+    """A hand-edited layout — a list at the root, or a scalar tab — must fall
+    back to the numeric keypad rather than raise at boot."""
+    import python.keyboard_config as kc
+
+    for doc in ("- a\n- b\n", "basic: hello\n"):
+        path = temp_dir() / "keyboard_config.yaml"
+        path.write_text(doc, encoding="utf-8")
+        original = kc.KEYBOARD_CONFIG_PATH
+        kc.KEYBOARD_CONFIG_PATH = path
+        try:
+            tabs = kc.load_keyboard_tabs()
+        finally:
+            kc.KEYBOARD_CONFIG_PATH = original
+        assert tabs and tabs[0]["key"] == "basic" and tabs[0]["keys"]
 
 
 def test_writes_are_atomic_and_leave_no_temp_file():
@@ -532,6 +560,22 @@ def test_an_invalid_picked_colour_is_ignored():
     assert vm.customAccent == DEFAULTS["appearance"]["accent"]
 
 
+def test_reset_discards_a_pending_accent_write():
+    """A pick that settled moments before reset must not fire after it and
+    resurrect the colour the user just wiped."""
+    from python.viewmodel.settings_viewmodel import SettingsViewModel
+
+    store = store_at(temp_dir() / CONFIG_FILENAME)
+    vm = SettingsViewModel(store)
+    vm.customAccent = "#ff0000"          # pending, not yet written
+    assert vm._pending_accent == "#ff0000"
+    vm.resetToDefaults()
+    assert vm._pending_accent is None
+    vm._flush_pending_accent()           # what the timer would do after reset
+    assert store.get("appearance.accent") == DEFAULTS["appearance"]["accent"]
+    assert vm.customAccent == DEFAULTS["appearance"]["accent"]
+
+
 # --------------------------------------------------------------------------
 # Font resolution. Needs a real QApplication (QFontDatabase aborts without one
 # rather than raising, and glyph coverage has to be measured), so it runs in a
@@ -704,6 +748,24 @@ def test_maximized_restore_leaves_the_position_to_the_platform():
     assert (window.property("x"), window.property("y")) == (0, 0)   # untouched
 
 
+def test_turning_remember_on_mid_session_starts_tracking():
+    """attachWindow skips the wiring when remember is off at startup; turning it
+    on later must start tracking, or the final geometry is silently lost."""
+    from python.viewmodel.settings_viewmodel import SettingsViewModel
+
+    store = store_at(temp_dir() / CONFIG_FILENAME)
+    store.update({"window.remember": False})
+    vm = SettingsViewModel(store)
+    window = FakeWindow()
+    vm.attachWindow(window)               # off at startup -> no wiring
+    vm.rememberWindow = True              # turn on mid-session
+    window.setProperty("width", 900)
+    window.setProperty("height", 600)
+    window.closing.emit()                 # what Window.closing does on quit
+    assert store.get("window.width") == 900
+    assert store.get("window.height") == 600
+
+
 # --------------------------------------------------------------------------
 # The RinUI bootstrap (needs a fresh process: RinUI's config is built on import)
 # --------------------------------------------------------------------------
@@ -723,6 +785,7 @@ print("STORE", settings.path)
 print("THEME", settings.get("appearance.theme"))
 print("BACKDROP", settings.get("appearance.backdrop"))
 print("ACCENT", settings.get("appearance.accent"))
+print("ACCENT_MODE", settings.get("appearance.accent_mode"))
 print("RINUI", json.dumps(RinConfig.config, sort_keys=True))
 RinConfig["theme"] = {"current_theme": "Light"}       # must not touch disk
 RinConfig.upload_config("theme_color", "#000000")
@@ -774,6 +837,7 @@ def test_bootstrap_migrates_removes_and_never_writes_again():
     assert report["THEME"] == "Dark"
     assert report["BACKDROP"] == "acrylic"
     assert report["ACCENT"] == "#ff8800"
+    assert report["ACCENT_MODE"] == "custom"   # a real pick arrives as one
     assert str(appdata) in report["STORE"]
     # RinUI runs on our values but can no longer persist anything
     assert '"current_theme": "Dark"' in report["RINUI"]
@@ -781,6 +845,21 @@ def test_bootstrap_migrates_removes_and_never_writes_again():
     assert report["CONFIG_DIR_ENTRIES"] == "['config.yaml']"
     assert report["WINDOW"] == "RinUIWindow"
     assert report["VERSION"].count(".") >= 1
+
+
+def test_bootstrap_keeps_default_mode_for_a_default_coloured_legacy_accent():
+    """A legacy colour equal to RinUI's own default was never a pick, so the
+    migration must leave the mode on `default` instead of pinning `custom`."""
+    root = temp_dir()
+    appdata = temp_dir()
+    legacy = root / "RinUI" / "config"
+    legacy.mkdir(parents=True)
+    (legacy / "rin_ui.json").write_text(json.dumps({
+        "theme_color": DEFAULTS["appearance"]["accent"],
+    }), encoding="utf-8")
+
+    report = run_bootstrap(root, appdata)
+    assert report["ACCENT_MODE"] == "default"
 
 
 def test_bootstrap_leaves_the_launch_dir_clean_without_a_legacy_config():

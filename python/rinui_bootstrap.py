@@ -144,8 +144,11 @@ def _migrate(store: SettingsStore, root: Path) -> None:
         if isinstance(data.get("theme_color"), str):
             store.set("appearance.accent", data["theme_color"])
             # The legacy colour *was* the running accent, so it has to arrive as
-            # a custom choice — the default mode would ignore it.
-            store.set("appearance.accent_mode", "custom")
+            # a custom choice — the default mode would ignore it. Unless it *is*
+            # RinUI's default: nothing was ever picked then, so staying on
+            # `default` keeps following the library's own accent.
+            if data["theme_color"].lower() != DEFAULTS["appearance"]["accent"].lower():
+                store.set("appearance.accent_mode", "custom")
 
     legacy.unlink(missing_ok=True)
     for folder in (root / "RinUI" / "config", root / "RinUI"):

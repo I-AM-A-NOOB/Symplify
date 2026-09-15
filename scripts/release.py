@@ -72,8 +72,13 @@ def main() -> int:
     cur = read_version()
     if re.fullmatch(r"\d+\.\d+\.\d+", args.version):
         new = tuple(int(p) for p in args.version.split("."))
-    else:
+    elif args.version in ("patch", "minor", "major"):
         new = bump(*cur, args.version)
+    else:
+        sys.exit(
+            f"not a SemVer version or bump kind: {args.version!r} "
+            "(expected patch | minor | major | X.Y.Z)"
+        )
 
     # Never go backwards by accident.
     if new <= cur:
@@ -87,8 +92,13 @@ def main() -> int:
     if args.tag:
         tag = f"v{version_str}"
         subprocess.run(["git", "add", str(PYPROJECT), str(VERSION_PY)], cwd=ROOT, check=True)
-        subprocess.run(["git", "commit", "-m", f"Bump version to {version_str}"],
-                       cwd=ROOT, check=True)
+        # Explicit pathspec: commit only the version files, never whatever else
+        # the caller happened to have staged.
+        subprocess.run(
+            ["git", "commit", "-m", f"Bump version to {version_str}", "--",
+             str(PYPROJECT), str(VERSION_PY)],
+            cwd=ROOT, check=True,
+        )
         subprocess.run(["git", "tag", tag], cwd=ROOT, check=True)
         print(f"Committed and tagged {tag}")
     return 0

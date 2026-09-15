@@ -58,31 +58,35 @@ def load_keyboard_tabs() -> List[Dict[str, Any]]:
     """Load the keyboard layout, flattening each tab's grid.
 
     Each tab becomes ``{"title", "columns", "keys": [{label, insert, row, col}]}``.
-    Falls back to a minimal numeric keypad if the config file is missing.
+    Falls back to a minimal numeric keypad when the file is missing, empty, or
+    not a mapping — a hand-edited layout must never break startup.
 
     Returns:
         A list of tab descriptors usable as a QML model.
     """
     try:
         with open(KEYBOARD_CONFIG_PATH, "r", encoding="utf-8") as f:
-            config = yaml.safe_load(f) or {}
+            config = yaml.safe_load(f)
     except (OSError, yaml.YAMLError):
-        config = {}
+        config = None
 
-    if not config:
+    # A list/scalar at the root (or a missing file) has no tabs to iterate.
+    if not isinstance(config, dict) or not config:
         return [{"key": "basic", "title": "Basic", **_flatten_grid(FALLBACK_GRID)}]
 
     tabs: List[Dict[str, Any]] = []
     for route_key, tab in config.items():
-        grid = tab.get("grid") or []
+        if not isinstance(tab, dict):
+            continue  # a malformed tab contributes no keys
+        grid = tab.get("grid")
         tabs.append(
             {
                 "key": route_key,
                 "title": tab.get("title", route_key),
-                **_flatten_grid(grid),
+                **_flatten_grid(grid if isinstance(grid, list) else []),
             }
         )
-    return tabs
+    return tabs or [{"key": "basic", "title": "Basic", **_flatten_grid(FALLBACK_GRID)}]
 
 
 def label_glyphs() -> str:

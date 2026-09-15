@@ -17,17 +17,19 @@ from typing import Any, Dict, List, Optional
 #: Names sympy already defines, which a variable would shadow. User input is
 #: resolved against sympy's namespace, so these are exactly the names that can
 #: silently change what an expression means.
-SYMPY_CONSTANTS = frozenset({
-    "pi",
-    "E",
-    "I",
-    "oo",
-    "zoo",
-    "nan",
-    "GoldenRatio",
-    "EulerGamma",
-    "Catalan",
-})
+SYMPY_CONSTANTS = frozenset(
+    {
+        "pi",
+        "E",
+        "I",
+        "oo",
+        "zoo",
+        "nan",
+        "GoldenRatio",
+        "EulerGamma",
+        "Catalan",
+    }
+)
 
 
 @lru_cache(maxsize=1)
@@ -36,7 +38,8 @@ def sympy_callables() -> frozenset:
     import sympy as sp
 
     return frozenset(
-        name for name in dir(sp)
+        name
+        for name in dir(sp)
         if not name.startswith("_") and callable(getattr(sp, name, None))
     )
 
@@ -49,23 +52,17 @@ def is_sympy_name(name: str) -> bool:
 def validate_name(name: str) -> bool:
     """Check if a variable name is legal (the single source of truth).
 
-    Identifier rules: first char alpha/underscore, then alnum/underscore, and
-    not a Python keyword. Both the variable store and the assignment path use
-    this function, so UI and model can never disagree.
+    A name must be a valid Python identifier and not a keyword. Delegating to
+    ``str.isidentifier`` (rather than hand-rolled ``isalpha``/``isalnum``
+    checks) keeps the rule in lockstep with sympy's parser, which tokenizes
+    with the same grammar: e.g. ``x²`` (a superscript two) is ``isalnum`` but
+    not a valid identifier, so the old check admitted a name that could never
+    be referenced back in an expression.
 
     Returns:
         True if the name is valid, False otherwise.
     """
-    if not name or not isinstance(name, str):
-        return False
-
-    if not (name[0].isalpha() or name[0] == "_"):
-        return False
-
-    if not all(c.isalnum() or c == "_" for c in name[1:]):
-        return False
-
-    return not keyword.iskeyword(name)
+    return isinstance(name, str) and name.isidentifier() and not keyword.iskeyword(name)
 
 
 def classify_type(value: Any) -> str:
@@ -76,6 +73,8 @@ def classify_type(value: Any) -> str:
     every possible value still gets a label.
     """
     import sympy as sp
+    from sympy.core.relational import Relational
+    from sympy.logic.boolalg import BooleanAtom
 
     if value is None:
         return "Invalid"
@@ -85,9 +84,9 @@ def classify_type(value: Any) -> str:
         return "NaN"
     if value in (sp.oo, -sp.oo, sp.zoo):
         return "Infinity"
-    if isinstance(value, sp.logic.boolalg.BooleanAtom):
+    if isinstance(value, BooleanAtom):
         return "Boolean"
-    if isinstance(value, sp.core.relational.Relational):
+    if isinstance(value, Relational):
         return "Equation"
     if isinstance(value, sp.Symbol):
         return "Symbol"
@@ -99,8 +98,6 @@ def classify_type(value: Any) -> str:
         return "Float"
     if getattr(value, "is_number", False):
         return "Number"
-    if isinstance(value, sp.core.numbers.NumberSymbol):
-        return "Constant"
     if isinstance(value, sp.Function):
         return "Function"
     if isinstance(value, sp.Expr):

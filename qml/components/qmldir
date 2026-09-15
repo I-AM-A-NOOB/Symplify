@@ -1,5 +1,7 @@
 module Symplify.Components
 
+# ExpanderPanel has no in-tree user yet; kept deliberately as the plain-Expander
+# counterpart to ExpanderRow (same cursor fix) for future pages.
 ExpanderPanel 1.0 ExpanderPanel.qml
 ExpanderRow 1.0 ExpanderRow.qml
 HScrollView 1.0 HScrollView.qml

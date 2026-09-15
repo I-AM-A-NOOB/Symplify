@@ -15,7 +15,7 @@ from datetime import datetime
 from typing import List, Optional
 from urllib.parse import quote
 
-from PySide6.QtCore import QAbstractListModel, QModelIndex, Qt, Slot
+from PySide6.QtCore import Property, QAbstractListModel, QModelIndex, Qt, Signal, Slot
 from PySide6.QtGui import QColor
 
 from ..latex_render import latex_to_svg, svg_size
@@ -73,6 +73,8 @@ class HistoryModel(QAbstractListModel):
     NaturalHeightRole = Qt.UserRole + 9
     TimeRole = Qt.UserRole + 10
     ErrorRole = Qt.UserRole + 11
+
+    countChanged = Signal()
 
     def __init__(self, parent=None):
         """Initialize the history model."""
@@ -232,6 +234,7 @@ class HistoryModel(QAbstractListModel):
             ),
         )
         self.endInsertRows()
+        self.countChanged.emit()
 
     @Slot()
     def clear(self) -> None:
@@ -241,8 +244,10 @@ class HistoryModel(QAbstractListModel):
         self.beginRemoveRows(QModelIndex(), 0, len(self._items) - 1)
         self._items.clear()
         self.endRemoveRows()
+        self.countChanged.emit()
 
-    @Slot(result=int)
-    def count(self) -> int:
-        """Number of entries, callable from QML."""
+    def _get_count(self) -> int:
+        """Number of entries."""
         return len(self._items)
+
+    count = Property(int, _get_count, notify=countChanged)

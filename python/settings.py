@@ -173,10 +173,17 @@ def _merge_defaults(loaded: Any) -> Dict[str, Any]:
     if not isinstance(loaded, dict):
         return values
     for key, value in loaded.items():
-        if isinstance(value, dict) and isinstance(values.get(key), dict):
+        default = values.get(key)
+        if isinstance(value, dict) and isinstance(default, dict):
+            # A section: overlay the loaded keys onto the defaults.
             values[key].update(value)
-        else:
+        elif not isinstance(default, dict):
+            # A leaf key (or an unknown top-level key): take the loaded value,
+            # validation/clamping runs afterwards.
             values[key] = value
+        # A scalar loaded where the default is a section is deliberately
+        # ignored: it cannot be merged, and storing it would replace the whole
+        # section and break downstream writes and the latex-size migration.
     return values
 
 

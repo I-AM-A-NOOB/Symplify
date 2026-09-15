@@ -8,7 +8,7 @@ Item {
 
     // The table is bound to the search-filtered view, so every row index below
     // (selection, edit, delete) must come from `variablesFilter`, not the source
-    // model. `variablesModel.count()` is only used to tell the two empty cases
+    // model. `variablesModel.count` is only used to tell the two empty cases
     // apart: nothing added yet vs nothing matching the query.
     property int rowCount: variablesFilter.rowCount()
 
@@ -191,7 +191,7 @@ Item {
                 visible: page.rowCount === 0
                 typography: Typography.Body
                 color: Theme.currentTheme.colors.textSecondaryColor
-                text: variablesModel.count() === 0
+                text: variablesModel.count === 0
                     ? qsTr("No variables yet. Add one with the + button above.")
                     : qsTr("No variables match this search.")
             }

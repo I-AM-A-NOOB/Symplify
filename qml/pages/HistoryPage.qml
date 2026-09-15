@@ -53,7 +53,7 @@ Item {
                 flat: true
                 // The source count on purpose: an active search must not disable
                 // clearing the history.
-                enabled: historyVM.count() > 0
+                enabled: historyVM.count > 0
                 onClicked: historyVM.clear()
             }
         }
@@ -416,7 +416,7 @@ Item {
                 visible: historyList.count === 0
                 typography: Typography.Body
                 color: Theme.currentTheme.colors.textSecondaryColor
-                text: historyFilter.searchText !== "" && historyVM.count() > 0
+                text: historyFilter.searchText !== "" && historyVM.count > 0
                     ? qsTr("No calculations match this search.")
                     : qsTr("No calculations yet. Results will appear here.")
             }

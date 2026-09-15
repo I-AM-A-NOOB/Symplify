@@ -34,7 +34,7 @@ calculus:
   title: "Calculus"
   grid:
     - ["limit(", "diff(", "integrate(", "Derivative(", "Integral("]
-    - ["Limit(", { label: "∞", insert: "oo" }, { label: "∞", insert: "zoo" },
+    - [{ label: "+∞", insert: "+oo" }, { label: "-∞", insert: "-oo" }, { label: "∞", insert: "zoo" },
        { label: "π", insert: "pi" }, { label: "e", insert: "E" }]
     - ["Sum(", "Product(", "summation(", "", ""]
 

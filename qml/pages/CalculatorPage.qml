@@ -1,7 +1,6 @@
 import QtQuick
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 2.15
-import QtQuick.Window 2.15
 import RinUI
 import "../components"
 

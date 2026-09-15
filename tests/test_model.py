@@ -238,6 +238,14 @@ def test_validate_name_table():
         assert not validate_name(name), name
 
 
+def test_validate_name_rejects_unparseable_numerics():
+    """`isalnum` admits superscripts/fractions, but sympy's tokenizer does not:
+    a name that passes validation must stay referenceable in an expression."""
+    assert not validate_name("x²")   # superscript two (No) is not an identifier
+    assert not validate_name("x½")   # vulgar fraction (No) either
+    assert validate_name("x٣")       # an Arabic-Indic digit (Nd) is a real one
+
+
 def test_reserved_names_table():
     for name in ("solve", "sin", "Matrix", "E", "pi", "S"):
         assert is_sympy_name(name), name
@@ -287,8 +295,8 @@ def test_rejected_assignment_adds_an_error_card_and_no_variable():
     vm.calculator.calculateAssign("1x", "=", "5")
     assert vm.calculator.isError is True
     assert "invalid variable name" in vm.calculator.errorMessage
-    assert vm.variables.model.count() == 0
-    assert vm.history.count() == 1
+    assert vm.variables.model.count == 0
+    assert vm.history.count == 1
     assert history_role(vm, 0, HistoryModel.ErrorRole) != ""
     assert history_role(vm, 0, HistoryModel.ResultRole) == ""
 
@@ -297,15 +305,15 @@ def test_undefined_augmented_assignment_adds_an_error_card():
     vm = new_vm()
     vm.calculator.calculateAssign("x", "+=", "1")
     assert vm.calculator.isError is True
-    assert vm.variables.model.count() == 0
-    assert vm.history.count() == 1
+    assert vm.variables.model.count == 0
+    assert vm.history.count == 1
     assert "is not defined" in history_role(vm, 0, HistoryModel.ErrorRole)
 
 
 def test_failed_code_request_records_input_and_reason():
     vm = new_vm()
     vm.calculator.calculate("bar(2)")
-    assert vm.history.count() == 1
+    assert vm.history.count == 1
     assert history_role(vm, 0, HistoryModel.ExpressionRole) == "bar(2)"
     assert history_role(vm, 0, HistoryModel.ModeRole) == "Code"
     error = history_role(vm, 0, HistoryModel.ErrorRole)
@@ -317,7 +325,7 @@ def test_failed_assign_card_can_be_sent_back():
     """The card keeps name/op/expression, so Send to input can restore them."""
     vm = new_vm()
     vm.calculator.calculateAssign("y", "+=", "2z")
-    assert vm.history.count() == 1
+    assert vm.history.count == 1
     assert history_role(vm, 0, HistoryModel.ModeRole) == "Assign"
     assert history_role(vm, 0, HistoryModel.NameRole) == "y"
     assert history_role(vm, 0, HistoryModel.OpRole) == "+="
@@ -329,8 +337,8 @@ def test_successful_assignment_writes_history_and_variable():
     vm = new_vm()
     vm.calculator.calculateAssign("y", "=", "3")
     vm.calculator.calculateAssign("y", "+=", "1")
-    assert vm.history.count() == 2
-    assert vm.variables.model.count() == 1
+    assert vm.history.count == 2
+    assert vm.variables.model.count == 1
     assert vm.variables.model.cellAt(0, 0) == "y"
     assert vm.variables.model.cellAt(0, 1) == "4"
     assert vm.variables.model.cellAt(0, 2) == "Integer"
@@ -342,9 +350,9 @@ def test_unparsable_value_is_kept_as_an_invalid_entry():
     vm = new_vm()
     vm.calculator.calculateAssign("k", "=", "x +")
     assert vm.calculator.isError is True
-    assert vm.variables.model.count() == 1
+    assert vm.variables.model.count == 1
     assert vm.variables.model.cellAt(0, 2) == "Invalid"
-    assert vm.history.count() == 1
+    assert vm.history.count == 1
     assert history_role(vm, 0, HistoryModel.ErrorRole) != ""
 
 
@@ -353,7 +361,7 @@ def test_code_mode_still_selects_and_reports():
     vm.calculator.calculate("2 + 2")
     assert vm.calculator.resultText == "4"
     assert vm.calculator.isError is False
-    assert vm.history.count() == 1
+    assert vm.history.count == 1
 
 
 # --------------------------------------------------------------------------
@@ -449,6 +457,24 @@ def test_variable_filter_modes():
     assert names(model) == ["radius"]
 
 
+def test_count_is_a_notifying_property():
+    """QML binds to `count` reactively; it must announce every size change so a
+    Clear button / empty-state text re-evaluates without a page rebuild."""
+    history = HistoryModel()
+    h_sizes = []
+    history.countChanged.connect(lambda: h_sizes.append(history.count))
+    history.add_item("x + 1", "x + 1")
+    history.clear()
+    assert h_sizes == [1, 0]
+
+    variables = VariablesModel(VariableManager())
+    v_sizes = []
+    variables.countChanged.connect(lambda: v_sizes.append(variables.count))
+    variables.save("x", Integer(1))
+    variables.remove("x")
+    assert v_sizes == [1, 0]
+
+
 def test_variable_filter_reacts_to_later_writes():
     """An active query must hide a new non-matching row and drop matches on edit."""
     model, source = variable_filter()
@@ -458,7 +484,7 @@ def test_variable_filter_reacts_to_later_writes():
     assert names(model) == ["alpha", "alphabet"]
     source.save("gamma", Integer(0))                 # no match -> stays hidden
     assert names(model) == ["alpha", "alphabet"]
-    assert source.count() == 5
+    assert source.count == 5
     source.save("alpha", Integer(9))                 # still matches -> stays
     assert names(model) == ["alpha", "alphabet"]
     model.searchText = "9"

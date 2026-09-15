@@ -13,7 +13,7 @@ passed in rather than reached for globally. Rendering settings are applied by
 """
 
 import sys
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 from functools import lru_cache
 
 from PySide6.QtCore import Property, QObject, QPoint, QTimer, Qt, QUrl, Signal, Slot
@@ -132,6 +132,7 @@ class SettingsViewModel(QObject):
         self._capturing_accents = False
         self._theme_manager = theme_manager
         self._window: Optional[QObject] = None
+        self._geometry_wired = False
         self._geometry_timer = QTimer(self)
         self._geometry_timer.setSingleShot(True)
         self._geometry_timer.setInterval(500)
@@ -593,7 +594,12 @@ class SettingsViewModel(QObject):
     def _set_remember_window(self, remember: bool) -> None:
         self._store.set("window.remember", remember)
         if remember:
-            self._save_geometry()      # start remembering from the current geometry
+            # Start remembering the current geometry AND wire the tracking
+            # signals: turning the toggle on mid-session must behave exactly
+            # like starting with it on (attachWindow skips the wiring when the
+            # toggle was off at startup).
+            self._save_geometry()
+            self._wire_geometry()
         self.changed.emit()
 
     @Slot(QObject)
@@ -608,6 +614,14 @@ class SettingsViewModel(QObject):
         if not self._get_remember_window():
             return
         self._restore_geometry()
+        self._wire_geometry()
+
+    def _wire_geometry(self) -> None:
+        """Connect the geometry-tracking signals once (idempotent)."""
+        window = self._window
+        if window is None or self._geometry_wired:
+            return
+        self._geometry_wired = True
         for signal_name in ("widthChanged", "heightChanged", "xChanged", "yChanged"):
             getattr(window, signal_name).connect(self._on_geometry_changed)
         window.closing.connect(self._save_geometry)
@@ -752,6 +766,10 @@ class SettingsViewModel(QObject):
     @Slot()
     def resetToDefaults(self) -> None:
         """Restore every default and apply the result live."""
+        # Cancel a pending accent write: a pick that settled a moment ago must
+        # not fire after the reset and resurrect the colour the user just wiped.
+        self._accent_timer.stop()
+        self._pending_accent = None
         self._store.reset()
         self._apply_appearance()
         self.accentChanged.emit()
