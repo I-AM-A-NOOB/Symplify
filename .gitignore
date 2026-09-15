@@ -11,6 +11,10 @@ __pycache__
 # Portable-mode marker: its presence makes the app read/write data/config.yaml
 # instead of the system config directory (see python/settings.py)
 /data
+# Generated docs export (architecture.md -> html, local preview tooling)
+/docs/architecture.html
+/docs/architecture_files/
+
 # Old files
 *.old
 *.old.py

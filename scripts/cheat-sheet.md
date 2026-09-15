@@ -71,6 +71,8 @@ git push origin main               # 推送（远端分支 v1/v2/v3 见下）
 ## 快速自检
 
 ```bash
-uv run python -c "from python.viewmodel.main_viewmodel import MainViewModel; \
-vm=MainViewModel(); vm.calculator.calculate('diff(x**2, x)'); print(vm.calculator._result_text)"
+uv run python -c "import tempfile; from pathlib import Path; from python.settings import SettingsStore; \
+from python.viewmodel.main_viewmodel import MainViewModel; \
+vm=MainViewModel(SettingsStore(Path(tempfile.mkdtemp())/'config.yaml')); \
+vm.calculator.calculate('diff(x**2, x)'); print(vm.calculator._result_text)"
 ```

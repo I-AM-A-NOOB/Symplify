@@ -71,6 +71,9 @@ scripts/
   build_windows.py              # Nuitka standalone build
   release.py                    # SemVer bump (pyproject + python/version.py), optional tag
   cheat-sheet.md                # Human quick reference
+scratch/                        # Preserved experiments — NOT part of the app and not
+                                # maintained with it: test_plot.py is the SymPy->GLSL GPU
+                                # plotter prototype, the future plotting track's seed
 .github/workflows/build-windows.yml  # Builds on windows-latest for tags v* / manual runs
 ```
 
@@ -152,7 +155,8 @@ scripts/
   → `forceActiveFocus()` makes the current card focused (arrows), so exactly one card carries both
   the accent bar and the focus ring.
 - RinUI caps Top/Bottom nav sections at 20% height → keep main items unpositioned (middle) and at
-  most pin a few to `Position.Bottom`.- RinUI's `ToolTip`, `Menu`, `Dialog` are QQC2 subclasses used as **child elements** (not attached
+  most pin a few to `Position.Bottom`.
+- RinUI's `ToolTip`, `Menu`, `Dialog` are QQC2 subclasses used as **child elements** (not attached
   property syntax). Adding children of a RinUI control may fight its internal state overrides
   (e.g. disabled-state opacity) — prefer real child layout instead of `enabled` toggles.
 - Merely *instantiating* `RinUI.Dialog` logs two `TypeError: Cannot read property
@@ -205,7 +209,7 @@ scripts/
 - LaTeX: `Success.latex` (`Calculator.render_latex`, sympy) → VM builds a percent-encoded SVG
   **data URL** (`latex_render.latex_to_svg`, with `size=`/`color=`), `svg_size` for natural size;
   `LatexImage` (qml/components) renders crisp by scaling `sourceSize` by `devicePixelRatio`.
-  The font size comes from the settings page (`rendering.latex_size`), the colour from the theme.
+  The font size comes from the settings page (`fonts.latex_size`), the colour from the theme.
 - History renders each entry's LaTeX **lazily per visible row** and caches sizes; after lazy render
   the model emits `dataChanged` for the LaTeX/natural-size roles so the open delegate refreshes.
 - Long results/text use `elide: ElideRight` (mono lines in history align the result `=` under the

@@ -211,7 +211,7 @@ properties.
 The behaviour contract is locked by tests (no framework needed):
 
 ```bash
-uv run python -m tests.test_model      # 39 assertions, ~3s
+uv run python -m tests.test_model      # model + viewmodels, ~3s
 ```
 
 They cover the expression language, the error kinds, the assignment rules, the

@@ -73,7 +73,7 @@ Symplify follows **MVVM**. The `python/` package is split into layers; the model
 - **Model** (`python/model/`) — Pure business logic, and the only place that decides what an input *means*. `Calculator` answers two requests — `evaluate(expression, scope)` for a read and `assign(Assignment, scope)` for a write — returning a `Success` (value + LaTeX) or a `Failure` (kind + message + hint); it also audits unknown function calls and classifies errors. `VariableManager` is the snapshot variable store (name validation, type classification, unparsable values kept as invalid NaN rows). Zero Qt dependency.
 - **ViewModel** (`python/viewmodel/`) — Qt bridge layer. `QObject` subclasses expose properties, signals and slots to QML. `VariablesModel` (table) and `HistoryModel` (list) feed the table / card views with granular signals. Theme-aware LaTeX rendering lives in `python/latex_render.py` (ziamath), keyboard layout in `python/keyboard_config.py` (YAML).
 - **View** (`qml/`) — Qt Quick UI only: a `FluentWindow` with RinUI's `NavigationView`, five pages, and the shared components (`KeyboardPanel`, `HScrollView`, `LatexImage`, focus-aware `SegmentedItem`/`SelectorBarItem`). No business logic.
-- **Composition root** (`main.py`) — Builds `MainViewModel`, registers the viewmodels as flat QML context properties (`vm`, `calcVM`, `varsVM`, `historyVM`, `logVM`, `variablesModel`, `keyboardTabs`), and starts the QML engine via RinUI's `RinUIWindow`.
+- **Composition root** (`main.py`) — Builds `MainViewModel`, registers the viewmodels as flat QML context properties (`vm`, `appVersion`, `rinuiVersion`, `qtVersion`, `calcVM`, `varsVM`, `variablesModel`, `variablesFilter`, `historyVM`, `historyFilter`, `logVM`, `settingsVM`, `keyboardTabs`), and starts the QML engine via RinUI's `RinUIWindow`.
 
 A request flows: **QML event → ViewModel slot → Model → SymPy → result → LaTeX/SVG → QML**. A detailed walkthrough lives in [`docs/architecture.md`](docs/architecture.md).
 
@@ -100,6 +100,9 @@ python/
   rinui_bootstrap.py           # Takes RinUI's own config directory over (see the guide)
   latex_render.py              # LaTeX -> SVG via ziamath (theme-colored, sized)
   keyboard_config.py           # Keyboard layout from keyboard_config.yaml
+  accent.py                    # Accent shading (RGB blends, ported from I-Synergy)
+  fonts.py                     # Font discovery + OpenType MATH-table scan (zero Qt)
+  version.py                   # Runtime version copy (kept in sync with pyproject)
 qml/
   MainWindow.qml               # FluentWindow + RinUI navigation
   components/                  # KeyboardPanel, HScrollView, LatexImage, SearchBar,
@@ -112,7 +115,8 @@ tests/
 docs/
   architecture.svg             # Architecture diagram (model-focused)
   architecture.md              # Architecture walkthrough
-test_plot.py                   # Experimental SymPy->GLSL GPU prototype (kept
+scratch/
+  test_plot.py                 # Experimental SymPy->GLSL GPU prototype (kept
                                # as a seed for the future plotting track)
 ```
 
@@ -186,6 +190,7 @@ The file is meant to be hand-editable (comments and unknown keys survive, invali
 | [SymPy](https://sympy.org) | Symbolic mathematics engine | BSD |
 | [ziamath](https://github.com/vvandijck/ziamath) | LaTeX to SVG math rendering | MIT |
 | [PyYAML](https://pyyaml.org) | Keyboard layout config | MIT |
+| [fontTools](https://github.com/fonttools/fonttools) | Reads installed font tables to find math-capable fonts (`python/fonts.py`) | MIT |
 
 ## Roadmap
 
@@ -200,3 +205,8 @@ Prioritized directions:
 ## License
 
 Symplify is licensed under [GPLv3](LICENSE).
+
+Third-party attribution: the accent shading in `python/accent.py` is ported from
+the [`ThemeColorCalculator`](https://dev.azure.com/i-synergy/I-Synergy.Framework/_git/I-Synergy.Framework?path=%2Ftests%2FISynergy.Framework.UI.Tests%2FUtilities%2FThemeColorCalculatorTests.cs)
+in the I-Synergy Framework, used under the
+[MIT License](https://dev.azure.com/i-synergy/_git/I-Synergy.Framework?path=/LICENSE).

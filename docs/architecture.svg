@@ -114,7 +114,7 @@
   <text x="710" y="484" font-size="10.5" font-family="Consolas, monospace" fill="#92400e">list_all() · delete · rename · clear</text>
   <text x="710" y="500" font-size="10.5" font-family="Consolas, monospace" fill="#92400e">classify_type() · generate_unique_name()</text>
   <text x="710" y="519" font-size="10" fill="#b45309">file: python/model/variable.py</text>
-  <text x="710" y="538" font-size="10" fill="#b45309">+ InputMode: python/model/input_mode.py</text>
+  <text x="710" y="538" font-size="10" fill="#b45309">+ InputMode: python/viewmodel/input_mode.py</text>
 
   <!-- VariableManager -> SymPy (dashed) -->
   <path d="M 850 558 L 300 592 L 236 616" fill="none" stroke="#b45309" stroke-width="1.5" stroke-dasharray="5,4" marker-end="url(#arrowModel)"/>

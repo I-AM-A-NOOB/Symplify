@@ -1,10 +1,16 @@
 # coding: utf-8
 """Accent palette generation (pure Python, zero Qt).
 
-Ported from the C# ``ThemeColorCalculator`` (I-Synergy Framework): the accent's
-variants are RGB **blends** rather than HSL steps. ``white_blend`` mixes towards
-white by a factor, ``black_blend`` scales towards black, and the palette is the
-trio ``tertiary`` (darker, -25%) / ``primary`` / ``secondary`` (lighter, +25%).
+Ported from the C# ``ThemeColorCalculator`` in the I-Synergy Framework, released
+under the MIT License:
+
+* source — https://dev.azure.com/i-synergy/I-Synergy.Framework/_git/I-Synergy.Framework?path=%2Ftests%2FISynergy.Framework.UI.Tests%2FUtilities%2FThemeColorCalculatorTests.cs
+* license — https://dev.azure.com/i-synergy/_git/I-Synergy.Framework?path=/LICENSE
+
+The accent's variants are RGB **blends** rather than HSL steps. ``white_blend``
+mixes towards white by a factor, ``black_blend`` scales towards black, and the
+palette is the trio ``tertiary`` (darker, -25%) / ``primary`` / ``secondary``
+(lighter, +25%).
 Each blend is monotonic and clamped by construction, which is why the tests for
 it read as properties rather than expected values.
 
