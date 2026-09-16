@@ -204,6 +204,26 @@ scratch/                        # Preserved experiments — NOT part of the app 
   (`RinUIWindow` registers it, and can host the settings page); a throwaway probe must either
   register a `ThemeManager` or load the page through `RinUIWindow`.
 
+- **A QQC2 `ScrollView` creates its scroll bars inside the style's own file, so the importing
+  page cannot name them — but it can replace them.** Every style's `ScrollView.qml` does
+  `ScrollBar.vertical: ScrollBar { … }` in its own context, where `ScrollBar` resolves to *that
+  style*. A page that imports `QtQuick.Controls` therefore gets the style's groove-and-handle bar
+  (a wide grey trough laid over the text) even though every other surface in the app uses RinUI's
+  bars. The fix is to re-declare the bars on the instance —
+  `ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }` — which is exactly what RinUI's
+  own (unregistered) `components/ScrollView.qml` does. Two corollaries: the same override does
+  nothing for a plain `Flickable` (it has no style-made bars to replace), and a page that imports
+  `QtQuick.Controls` under a namespace must qualify the container too (`QQC2.ScrollView`) — a bare
+  `ScrollView` there is a hard "is not a type" at load, which RinUI surfaces as its error page.
+- **The Log page is a `Flickable` + `TextEdit`, not a `ScrollView` + `TextArea`.** A read-only log
+  needs its view driven to the tail, and the only handle that worked was the outer Flickable's own
+  `contentY`; the TextArea's inner `contentItem` never surfaced as the flickable to drive, so a
+  `ScrollView`-based log sat on its oldest line. Bind `contentY: Math.max(0, contentHeight -
+  height)` rather than scrolling once on `textChanged` — the text is laid out over several passes.
+  Open question from that work: the vertical `ScrollBar` promised by the attached property did not
+  appear in the flipped captures on the Flickable, while the same bar renders fine inside the
+  Calculator's `ScrollView`; treat the Log bar as unverified until someone sees the window.
+
 ## Rendering / display
 
 - LaTeX: `Success.latex` (`Calculator.render_latex`, sympy) → VM builds a percent-encoded SVG
@@ -498,7 +518,37 @@ scratch/                        # Preserved experiments — NOT part of the app 
 ## Building (Windows, Nuitka)
 
 `uv run python scripts/build_windows.py` → `build/main.dist/symplify.exe`
-(standalone dir, MSVC, LTO, no console window). Needs Visual Studio Build Tools locally; CI runs it.
+(standalone dir, MSVC, no console window). Needs Visual Studio Build Tools locally; CI runs it.
+The script is two steps: the Nuitka run, then `prune_qt`. Nuitka's PySide6 plugin bundles *every* Qt
+module it can find, where the app loads 23 of them — QtWebEngineCore alone was 205 MB of the 513 MB
+dist. `--prune-only` re-runs just the second step against an existing `build/main.dist/` (no
+rebuild), which is how a wrong list gets corrected without a second compile.
+
+**Both Qt lists are evidence-backed — keep them that way when you touch them:**
+
+- `KEEP_QT_DLLS` is exactly what a started `build/main.dist/symplify.exe` has mapped
+  (`(Get-Process symplify).Modules`). Counter-intuitive but real: `qt6pdf.dll` and
+  `qt6shadertools.dll` *are* loaded (the Qt Quick Controls stack pulls them in), and the Basic style
+  runs alongside `qt6quickcontrols2fusion.dll` + `…windowsstyleimpl.dll`.
+- `PRUNE_QML_DIRS` is the QML nothing reaches, checked with the `import` closure of the app's and
+  RinUI's files. Two edges worth remembering: `QtQuick/NativeStyle` is **kept** although no app QML
+  names it (QtQuick/Controls/Windows — 38 files — imports it), and `QtMultimedia` /
+  `Qt.labs.folderlistmodel` are reached *only* from QtQuick/VirtualKeyboard and QtQuick/Dialogs,
+  which are themselves pruned.
+- After a prune, re-check that every `import` in every remaining `.qml` resolves to a directory that
+  still exists — that is what catches a style variant referencing a pruned style (QtQuick/Pdf's
+  `+Material`/`+Universal` variants were doing exactly that).
+- The DLLs come from the venv (`.venv/Lib/site-packages/PySide6/Qt6*.dll`), so a wrongly pruned one
+  can be copied back and `--prune-only` re-run — no rebuild.
+
+`cleanup_rinui_dir()` runs after every build, and exists because Nuitka **imports** RinUI while
+analysing the program — that import sits outside `prepare()`, so the build makes RinUI drop
+`<root>/RinUI/config/rin_ui.json` in the project: exactly the directory invariant 8 keeps away at
+runtime, arriving through the build instead.
+
+`--lto=no`: the `/GL` + `/LTCG` link is single-threaded and a large slice of the build for no
+measurable runtime gain in a calculator. Measured on the dev machine: ~11 min per build, dist 266 MB
+(was 513 MB).
 
 Data-file pitfalls for frozen builds (update this list when you add data-reading deps):
 
