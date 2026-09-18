@@ -79,7 +79,7 @@ A request flows: **QML event → ViewModel slot → Model → SymPy → result �
 
 ## Project Structure
 
-```
+```plaintext
 main.py                        # Entry point (composition root)
 python/
   model/                       # Pure business logic, zero Qt

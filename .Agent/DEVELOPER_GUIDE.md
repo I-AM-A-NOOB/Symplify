@@ -27,6 +27,16 @@ python/
                                 #   -> Success | Failure; Assignment; ErrorKind; render_latex
     variable.py                 #   VariableManager (VariableEntry snapshots), validate_name,
                                 #   is_sympy_name + sympy name table, classify_type
+    lexer.py                    #   tokenize(text, scope) -> [(start, length, kind)]: what each run
+                                #   of characters IS — never whether it is valid. Python's own
+                                #   identifier/decimal rules, so it agrees with the parser.
+  brackets.py                   # Rainbow bracket pairing + nesting layers (zero Qt). Ported from
+                                # the v1 QWidget app's RainbowBracketsHighlighter.
+  code_style.py                 # spans(text, scope): the ONE colour-span list, merging lexer.py
+                                # with brackets.py; theme(family, dark) -> (styles, brackets);
+                                # to_rich_text() for the read-only Text items.
+  code_themes.py                # The colour families (a dark + a light member each), extracted from
+                                # the themes VSCode ships; FAMILIES / DEFAULT_FAMILY / THEMES. Zero Qt.
   settings.py                   # Settings store: config dir resolution (portable data/ or the
                                 # OS convention), atomic YAML read/write, validation. Zero Qt.
   rinui_bootstrap.py            # Takes RinUI's own config directory over and injects our
@@ -42,7 +52,10 @@ python/
                                 #   search boxes (proxy over the models above)
     settings_viewmodel.py       #   Settings: appearance/typography/window, config path, the only writer
     log_viewmodel.py            #   LogViewModel (formattedLogs)
-  accent.py                     # WinUI-style accent shading (HSL shade family, zero Qt)
+    highlighter.py              #   CodeHighlighter (QSyntaxHighlighter) for TextArea.textDocument;
+                                #   paints code_style spans, knows nothing about the rules
+  accent.py                     # WinUI-style accent shading: RGB blends, ported from the
+                                # I-Synergy ThemeColorCalculator (MIT), zero Qt
   latex_render.py               # latex_to_svg(latex, size=, color=, font=) + svg_size — theme-aware ziamath
   fonts.py                      # Font discovery: preference-list resolution, the
                                 # MATH-capable fonts, .ttc extraction (zero Qt)
@@ -59,6 +72,7 @@ qml/
                                 # section at 20% height and it scrolls/splits badly on short windows)
   pages/                        # Calculator / Variables / History / Log / Settings
   components/                   # Reusable pieces (+ qmldir):
+                                #   CodeSurface (a code input's box, in the code theme's colours),
                                 #   ExpanderRow / ExpanderPanel (RinUI expanders that keep
                                 #     their content's text cursors),
                                 #   HScrollView, LatexImage, KeyboardPanel, SearchBar,
@@ -70,6 +84,8 @@ docs/
 scripts/
   build_windows.py              # Nuitka standalone build
   release.py                    # SemVer bump (pyproject + python/version.py), optional tag
+  extract_themes.py             # Regenerates code_themes.THEMES from VS Code's bundled themes (the
+                                # five it ships — Atom One's data is baked in from its own files)
   cheat-sheet.md                # Human quick reference
 scratch/                        # Preserved experiments — NOT part of the app and not
                                 # maintained with it: test_plot.py is the SymPy->GLSL GPU
@@ -84,6 +100,14 @@ scratch/                        # Preserved experiments — NOT part of the app 
    `assign(Assignment, ...)` for a write — both returning `Success | Failure`. Never assemble an
    expression string in a ViewModel (that is how `x += 1` used to become the self-referential
    `x = x + 1`), and never re-implement name rules outside `validate_name` / `is_sympy_name`.
+   The expression language is **SymPy's, not Python's** — probed, not assumed. `lambda t: t + 1` and
+   list/dict comprehensions *do* parse (they only need their names in the scope, so `range(3)` is an
+   `UNKNOWN_NAME`), but a conditional expression (`a if c else b`) and `and` / `or` / `not` are a hard
+   `SYNTAX` failure, and Python builtins (`sum`, `len`, `min`, …) are unknown functions by design.
+   Attribute access is **unrestricted**: `x.__class__` evaluates. Acceptable while the input is the
+   user's own typing, but it is the reason this must never become a way to run *pasted* expressions
+   — that change needs an AST attribute allow-list first, which is why the lexical layer here is a
+   tokenizer and pointedly **not** a parser.
 2. **RinUI's NavigationView destroys & recreates pages on every navigation.**
    Anything that must survive switching pages lives in a ViewModel, not QML page state.
    The Calculator page pattern: VM is the single source of truth; the Segmented control
@@ -187,7 +211,11 @@ scratch/                        # Preserved experiments — NOT part of the app 
   property"; a `SettingCard`'s bare children land in its **right-hand** slot, while a
   `SettingExpander`'s bare children are its **collapsible content** and should be `SettingItem`s
   (`content:`/`action:` on it go to the header's right slot instead); `SettingItem` has **no**
-  `content` property; and RinUI has no `RadioButtons` (use `Segmented` or a `ComboBox`).
+  `content` property. RinUI *does* ship a themed `RadioButton`
+  (`components/BasicInput/RadioButton.qml` — QQC2's, restyled), but like QQC2's it only unchecks its
+  **siblings**: buttons in different parents are independent, which is why the code-theme rows — one
+  per `SettingItem` — drive exclusivity from the setting instead (`autoExclusive: false`, `checked`
+  bound to the value, and the click re-establishing the binding after Qt wrote `checked` itself).
 - **Never resize a RinUI window while it is being created and then maximize it.** The window fills
   the screen but its content stays drawn in the pre-resize rectangle, surrounded by a white border,
   and later resizes never repair it — while Qt reports the correct window state *and* content size,
@@ -215,14 +243,41 @@ scratch/                        # Preserved experiments — NOT part of the app 
   nothing for a plain `Flickable` (it has no style-made bars to replace), and a page that imports
   `QtQuick.Controls` under a namespace must qualify the container too (`QQC2.ScrollView`) — a bare
   `ScrollView` there is a hard "is not a type" at load, which RinUI surfaces as its error page.
-- **The Log page is a `Flickable` + `TextEdit`, not a `ScrollView` + `TextArea`.** A read-only log
-  needs its view driven to the tail, and the only handle that worked was the outer Flickable's own
-  `contentY`; the TextArea's inner `contentItem` never surfaced as the flickable to drive, so a
-  `ScrollView`-based log sat on its oldest line. Bind `contentY: Math.max(0, contentHeight -
-  height)` rather than scrolling once on `textChanged` — the text is laid out over several passes.
-  Open question from that work: the vertical `ScrollBar` promised by the attached property did not
-  appear in the flipped captures on the Flickable, while the same bar renders fine inside the
-  Calculator's `ScrollView`; treat the Log bar as unverified until someone sees the window.
+- **The Log and the Calculator's code input are RinUI `ScrollableTextArea`s.** Two things come with
+  that component. (1) It logs `ReferenceError: defaultHeight is not defined` on every instance —
+  line 20 binds `implicitHeight` to a property that does not exist. That is RinUI's own bug, its
+  gallery example triggers it too, and it is harmless noise: don't chase it. (2) **It does not
+  scroll.** An instrumented run with 80 log lines left the view on the *oldest* entry with the rest
+  clipped by the card and no bar, identical with and without pinning `implicitHeight` on the
+  instance. The tail-follow itself is one line —
+  `onTextChanged: textArea.cursorPosition = textArea.length` — but whether the pane scrolls at all
+  for overflowing content is still unverified.
+  The `Flickable` + `TextEdit` version that preceded it **did** scroll, and is worth remembering if
+  the wrapper ever has to go: drive `contentY` imperatively from `onContentHeightChanged`, because a
+  binding on `contentY` breaks the moment a Flickable writes that property itself. Its attached
+  `ScrollBar` never became visible in the captures either.
+
+- **Only `TextArea` / `TextEdit` expose `textDocument`, so only they can take a code highlighter.**
+  QQC2's `TextField` does not — probed, not assumed: `typeof tf.textDocument === "undefined"`, against
+  `"object"` for `TextArea`. That is why the Assign *value* field is a `TextArea` while the *name*
+  field stays a `TextField` — there is no expression to colour in a name. The `TextArea` wears the
+  field's manners explicitly: `textFormat: TextEdit.PlainText` (expressions hold `<` and `&`, which
+  the rich-text auto-detection would swallow) and a `Keys.onPressed` that runs the calculation on
+  Enter instead of inserting a newline — plus Backspace in an empty value, which focuses the name.
+  It **wraps** (`wrapMode: TextEdit.Wrap`), so a long expression grows the row instead of scrolling
+  sideways; the row's height is capped (`Math.min(240, Math.max(110, assignRow.implicitHeight + 8))`)
+  so the input area adapts while staying bounded.
+- **Two probe results worth keeping even though the value field no longer uses that design.** A
+  `Flickable` does **not** keep the caret in view (with the caret at the end of a line wider than the
+  viewport, `contentX` stayed `0`), so a `NoWrap` `TextArea` inside an `HScrollView` has to nudge
+  `contentX` itself from `onCursorRectangleChanged`; and the box such a field sits in has to be
+  *outside* the scroller, or the border stretches with the content and scrolls away with it, making
+  the field look broken as soon as the expression is wider than its box. That shell-plus-`HScrollView`
+  version was built and then reverted in favour of the wrapping field above; the backup is
+  `build/CalculatorPage.qml.shell-backup` (gitignored) if it is ever wanted back.
+- **`TextField` exposes no assignable `contentItem`** — unlike `Button` and `ItemDelegate`, where that
+  override is routine (and routine in this repo, on `DropDownColorPicker`). QML refuses it outright:
+  *"Cannot assign to non-existent property contentItem"*.
 
 ## Rendering / display
 
@@ -235,13 +290,142 @@ scratch/                        # Preserved experiments — NOT part of the app 
 - Long results/text use `elide: ElideRight` (mono lines in history align the result `=` under the
   assignment operator via `" ".repeat(name.length + 1)`).
 
+## Code colouring
+
+One lexer, one span list, two renderers. Anything that colours code contributes spans to
+`code_style.spans(text, scope)`, and nothing paints on its own.
+
+- **The lexical truth is `model/lexer.py`** — a tokenizer, not a parser and not a judge. It says
+  what each run of characters *is*; whether the expression is valid stays with `Calculator.evaluate`
+  (`Success` / `Failure`). That split is the point: `implicit_multiplication` turns `foo(1)` into
+  `f*o**2`, so a highlighter deciding for itself would call it a function call while
+  `unknown_calls` reports it as an unknown one.
+- Character classes come from Python itself (`str.isidentifier` to continue a name, **`isdecimal`**
+  for digits — never `isalnum`/`isdigit`, which accept superscripts). The parser tokenizes with
+  Python's tokenizer, so this agrees with it for free.
+- **No AST — and don't write one.** `parse_expr` already yields a sympy tree; what it lacks is source
+  positions, and positions are what a tokenizer gives. Hover, completion and error ranges work off
+  tokens plus the answers the model already produces; none of them needs a second tree.
+- **Brackets** (`brackets.py`, ported from the v1 app) are paired over the *whole document*, not per
+  block, so a bracket closed on the next line keeps its partner's colour. A stray bracket gets no
+  layer, so it cannot shift the colours of the pairs around it.
+- **Renderers**: `viewmodel/highlighter.py` (`QSyntaxHighlighter`, attached to the editable input's
+  `textArea.textDocument`) and `code_style.to_rich_text` (markup, for read-only `Text` items). A
+  second painter would lose — `setFormat` is last-write-wins, so two highlighters on one document
+  erase each other. A future Pygments, or any other language, becomes another *span producer*
+  behind the same function, never a second painter. The read-only labels use the
+  second renderer: `vm.highlighted(text, dark)` returns the markup and the pages
+  bind it into a `Text` with `textFormat: Text.RichText` — the Calculator's result
+  line and its LaTeX fallback, the History card's two lines, and the Variables
+  table's cells (the last two inside delegate bindings, so only the rows a view
+  actually has out are rendered, and a theme change re-evaluates them).
+  Two things come with that, both learned the hard way: `to_rich_text` takes the
+  scope as a **mapping** where `attach` takes the **provider** (the highlighter
+  re-asks on every keystroke; a one-shot render cannot), and handing the provider
+  to both raises `argument of type 'method' is not iterable` *inside the QML
+  binding* — invisible on an expression of digits and brackets, and every label
+  holding a name blank or stale. And rich text collapses runs of spaces, so the
+  History card's `=`-alignment padding is `&nbsp;` — the one place the markup leaks
+  into the surrounding text.
+- **The colours come from a theme *family*, not from a single theme.** `python/code_themes.py` holds
+  one entry per family — Atom One, VS Code Dark+/Light+, Dark/Light Modern, Dark/Light 2026,
+  Solarized, High Contrast — and **every family has a dark and a light member**, so
+  `code_style.theme(family, dark)` always answers: it returns `(styles, bracket_colors)` for the
+  half that matches the UI. `appearance.code_theme` names the family and the *page* passes
+  `Theme.isDark()`, so the two compose — the family says which colours, the UI theme says which half
+  of it. A family that could answer for only one side would leave the code bare the moment the UI
+  flipped, which is the point of pairing them.
+  The data is **baked into the repository** — the app reads neither a VS Code install nor the network
+  at run time. `scripts/extract_themes.py` regenerates **every** family from raw files on GitHub,
+  pinned to a tag or a commit: VS Code's five paired themes from `microsoft/vscode` (at `VSCODE_REF`,
+  the release whose editor the colours are meant to match), Atom One Dark/Light from
+  `akamud/vscode-theme-onedark` and its light counterpart. Pinning is what makes it reproducible —
+  the same ref always yields the same table, and the script reproduces the committed one exactly,
+  family by family — so bumping a pin is a reviewable change rather than a background drift. Two
+  things come with reading upstream files rather than an installed editor: they are **JSONC**
+  (`//` comments and trailing commas, which VS Code's own build strips from the copies it ships), and
+  their `include` chains have to be followed by hand. Both are handled in the script; a fetch that
+  cannot reach GitHub fails loudly, and the committed data is unaffected.
+  `OVERRIDES` there records the one place the app does not take a theme's word for it: Atom One names
+  the literal colour `white` for `invalid`, invisible on its own light background and
+  indistinguishable from text on its dark one.
+  Scopes map onto our kinds — `constant.numeric` for numbers, `constant.language`/`variable.language`
+  for SymPy constants, `entity.name.function`/`support.function` for callables, `variable.other` for
+  stored variables, `keyword.operator` for operators. A style a family omits is simply not painted,
+  and the families differ in what they omit and in what they paint alike: Solarized names no
+  keyword operator, so its operators keep the control's own ink, where Light+'s are its `#ee0000`;
+  Atom One paints a stored variable with the theme's own foreground, so there it reads like any
+  other text. A free symbol is never coloured. `DEFAULT_STYLES` is the fallback when the family is
+  unknown (a config naming one this build no longer has): `theme()` returns it rather than raising.
+- **The page passes `Theme.isDark()` along with the document.** RinUI resolves `Auto` against the
+  OS, so the *effective* theme decides, not the setting. `attachCodeHighlighting` reads the family
+  from the settings at that moment, and `highlighter.attach` parents the highlighter to the document
+  — so a changed family, or a flipped UI theme, lands when the page is next built, which RinUI's
+  rebuild on navigation is what causes. Verified from the rendered pixels, no restart: the same
+  expression gives `#b5cea8` digits under Dark+ (dark), `#098658` and `#ee0000` under Light+ once the
+  UI is switched to Light, and `#d33682` under Solarized.
+- **`MainViewModel._settings` is the settings *viewmodel*, not the store.** Read settings through its
+  properties (`self._settings.codeTheme`, like `latexSize` beside it). A store call on it
+  (`self._settings.get("appearance.code_theme")`) raises *inside the QML slot*, where it is a line in
+  the log and the feature quietly does nothing — which is how the code colouring once broke with
+  every palette test still green. `test_attaching_the_colouring_paints_the_named_family` covers that
+  seam: it fails with the store call and passes with the property.
+- **Brackets take the family's colours when it names any, and the rainbow when it does not.**
+  Solarized is the one family here that carries an `editorBracketHighlight`, and only its *dark*
+  half does — every other family, and Solarized light, gets `brackets.DEFAULT_COLORS` (the v1
+  rainbow). So an empty tuple from `theme()` means "this family has nothing to say about brackets",
+  not "no brackets"; the renderer supplies the rainbow in that case. `color_for` is where that
+  substitution happens — it owns both fallbacks (`None`/empty → the default palette or the rainbow),
+  so the highlighter and `to_rich_text` cannot disagree about it. Reading the empty tuple as "a
+  palette of zero colours" is what once divided by zero there, and because it blew up inside the
+  highlighter's recompute — *before* `rehighlight()` — the input kept the **previous** text's
+  formats: left brackets underlined as unmatched, right ones bare, and every later refresh (typing,
+  pasting, a theme switch) dying the same way. `to_rich_text` was a live trap too: it is what the
+  History cards use, and it asks the same function.
+  `test_a_family_with_no_bracket_colours_paints_the_rainbow` and
+  `test_an_empty_bracket_palette_means_no_opinion` hold that down.
+- **The input's surface is the family's too.** `code_style.surface(family, dark)` answers
+  `(background, ink)` — the theme's `editor.background` and `editor.foreground` — and
+  `settingsVM.codeSurface(dark)` hands QML the `{background, ink}` map the page binds to.
+  `qml/components/CodeSurface.qml` replaces the text area's `background:` (RinUI's chrome redrawn in
+  that colour: rounded to `buttonRadius`, bordered, accent underline while focused, clipped to the
+  rounding through an OpacityMask), and the page paints the control's `color` with the ink so text
+  the palette leaves unpainted stays legible on it — Solarized has no `keyword.operator`, so its
+  operators are exactly that case. The **placeholder** is the theme's too:
+  `input.placeholderForeground` where the theme names one (Solarized's carry an
+  alpha), and otherwise VSCode's own derivation of it — `transparent(foreground,
+  0.5)`, `0.7` in high contrast, with VSCode's default `foreground` when the theme
+  leaves that unset as well (Atom One and High Contrast do). The extractor resolves
+  that alpha against the background, because these inputs have exactly one surface;
+  it also keeps `#RRGGBBAA` out of QML, where eight digits would mean *AARRGGBB*.
+  A family that names no background gets no placeholder either — its surface is not
+  the theme's, so neither is what is written faintly on it.
+  **Only the code inputs get it** — the Code box, the Assign value
+  and the Assign *name* field, each by replacing its own `background:` (RinUI's `TextArea` and
+  `TextField` carry the same chrome; `contentItem` is the one a `TextField` will not give up —
+  `background` it will). An editor differs from its panels, so the operator dropdown, the result
+  line, the history cards and the tables keep the UI theme. The name field takes the ink too: it is
+  plain text — nothing highlights a name — but it sits on the same surface as the expressions beside
+  it, so it reads in the same colour. The inner area's
+  background has to be nulled, or RinUI's opaque `controlColor` covers the replacement. An empty
+  value is "no opinion" — High Contrast Light states neither colour — and the UI theme's own colours
+  stand in, the same rule the bracket palette follows.
+  Verified from the rendered pixels: Solarized on a dark UI gives the box `#002b36` with `#839496`
+  text and `#cdcdcd` brackets, and on a light UI `#fdf6e3` (its cream) with the rainbow brackets,
+  since that half carries no `editorBracketHighlight`.
+- **Cost**: the whole document is re-scanned and rehighlighted on every change, because pairing
+  spans lines. Fine for an input of a few hundred characters; do **not** attach it to the Log
+  (appended to constantly, grows without bound) or to anything long that changes often. Markup for a
+  read-only display belongs in the entry's own data, computed once — never inside `data()`, which
+  runs on every repaint.
+
 ## Settings & config
 
 - One YAML file, written **only** by `SettingsViewModel` (invariant 8). The schema, defaults and
   validation live in `python/settings.py` (`DEFAULTS`): unknown keys survive a rewrite, invalid
   values fall back or clamp, writes are atomic (temp file + `os.replace`), and a read-only location
   degrades to in-memory values with a warning the page displays. Keys:
-  `appearance.theme|backdrop|accent|accent_mode|accent_shading|accent_os_shading`,
+  `appearance.theme|backdrop|code_theme|accent|accent_mode|accent_shading|accent_os_shading`,
   `fonts.code_family|code_size|keyboard_family|keyboard_size|latex_font|latex_size`,
   `window.remember|width|height|x|y|maximized`. The page groups them under the subtitles
   **Interface / Typography / Language / Settings file / About**. Layout follows RinUI's own gallery
@@ -251,7 +435,7 @@ scratch/                        # Preserved experiments — NOT part of the app 
   the theme's `bodyStrongSize` (14 pt, weight 600), i.e. *the same size as a card title but bolder*;
   `Typography.Subtitle` (20 pt) is one size too large and reads as a second page heading. Most rows
   are `SettingCard`s; a `SettingExpander` is used only where a row carries a second row of its own
-  (the accent and About groups). `fonts.latex_size` used to be `rendering.latex_size`: `load()`
+  (the code theme, accent and About groups). `fonts.latex_size` used to be `rendering.latex_size`: `load()`
   migrates it, and a file that has both keeps the new key.
 - **Location**: `<root>/data/config.yaml` when a `data` folder sits next to the app (portable mode;
   `root` is the exe directory when frozen and the repository root in dev), otherwise the OS

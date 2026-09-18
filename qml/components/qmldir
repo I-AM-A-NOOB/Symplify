@@ -1,5 +1,8 @@
 module Symplify.Components
 
+# CodeSurface is the box behind the calculator's code inputs, in the code theme's
+# own colours.
+CodeSurface 1.0 CodeSurface.qml
 # ExpanderPanel has no in-tree user yet; kept deliberately as the plain-Expander
 # counterpart to ExpanderRow (same cursor fix) for future pages.
 ExpanderPanel 1.0 ExpanderPanel.qml

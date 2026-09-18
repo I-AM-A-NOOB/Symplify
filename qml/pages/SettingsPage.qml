@@ -143,6 +143,120 @@ Item {
                     }
                 }
 
+                // The code colours follow the UI theme, so this picks a FAMILY —
+                // every one of them has a dark and a light member — rather than a
+                // single theme: Atom One is One Dark on a dark UI and One Light on
+                // a light one, and so on for the rest.
+                ExpanderRow {
+                    id: codeThemeExpander
+
+                    Layout.fillWidth: true
+                    title: qsTr("Code theme")
+                    description: qsTr("Colours expressions in the calculator, variables and history. Follows the light/dark mode above.")
+                    icon.name: "ic_fluent_code_20_regular"
+
+                    // The header carries the current choice; the list below is
+                    // the control.
+                    content: Text {
+                        text: settingsVM.codeThemeLabel(settingsVM.codeTheme)
+                        color: Theme.currentTheme.colors.textSecondaryColor
+                    }
+
+                    // A RadioButton unchecks its SIBLINGS, and each of these sits
+                    // in a row of its own, so exclusivity is driven by the setting
+                    // instead: `checked` follows it, and the click puts the binding
+                    // back after Qt wrote `checked` itself.
+                    SettingItem {
+                        title: settingsVM.codeThemeLabel("one")
+                        description: qsTr("One Dark / One Light. The one everyone copies — warm greys, honest colours.")
+                        showDivider: false
+
+                        RadioButton {
+                            autoExclusive: false
+                            checked: settingsVM.codeTheme === "one"
+                            onClicked: {
+                                settingsVM.codeTheme = "one"
+                                checked = Qt.binding(() => settingsVM.codeTheme === "one")
+                            }
+                        }
+                    }
+
+                    SettingItem {
+                        title: settingsVM.codeThemeLabel("default")
+                        description: qsTr("Dark+ / Light+. The classics — what your muscle memory already sees.")
+                        showDivider: false
+
+                        RadioButton {
+                            autoExclusive: false
+                            checked: settingsVM.codeTheme === "default"
+                            onClicked: {
+                                settingsVM.codeTheme = "default"
+                                checked = Qt.binding(() => settingsVM.codeTheme === "default")
+                            }
+                        }
+                    }
+
+                    SettingItem {
+                        title: settingsVM.codeThemeLabel("modern")
+                        description: qsTr("Dark Modern / Light Modern. Same taste, quieter background.")
+                        showDivider: false
+
+                        RadioButton {
+                            autoExclusive: false
+                            checked: settingsVM.codeTheme === "modern"
+                            onClicked: {
+                                settingsVM.codeTheme = "modern"
+                                checked = Qt.binding(() => settingsVM.codeTheme === "modern")
+                            }
+                        }
+                    }
+
+                    SettingItem {
+                        title: settingsVM.codeThemeLabel("2026")
+                        description: qsTr("Dark 2026 / Light 2026. The new kid: more contrast, more glow.")
+                        showDivider: false
+
+                        RadioButton {
+                            autoExclusive: false
+                            checked: settingsVM.codeTheme === "2026"
+                            onClicked: {
+                                settingsVM.codeTheme = "2026"
+                                checked = Qt.binding(() => settingsVM.codeTheme === "2026")
+                            }
+                        }
+                    }
+
+                    SettingItem {
+                        title: settingsVM.codeThemeLabel("solarized")
+                        description: qsTr("Solarized Dark / Light. Low contrast on purpose — Schoonover's 2011 classic, and the only one here with its own bracket colours.")
+                        showDivider: false
+
+                        RadioButton {
+                            autoExclusive: false
+                            checked: settingsVM.codeTheme === "solarized"
+                            onClicked: {
+                                settingsVM.codeTheme = "solarized"
+                                checked = Qt.binding(() => settingsVM.codeTheme === "solarized")
+                            }
+                        }
+                    }
+
+                    SettingItem {
+                        title: settingsVM.codeThemeLabel("highcontrast")
+                        description: qsTr("High Contrast Black / Light. For when you would rather the code just shout.")
+                        showDivider: false
+
+                        RadioButton {
+                            autoExclusive: false
+                            checked: settingsVM.codeTheme === "highcontrast"
+                            onClicked: {
+                                settingsVM.codeTheme = "highcontrast"
+                                checked = Qt.binding(() => settingsVM.codeTheme === "highcontrast")
+                            }
+                        }
+                    }
+                }
+
                 SettingCard {
                     Layout.fillWidth: true
                     title: qsTr("Background effect")

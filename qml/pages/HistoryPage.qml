@@ -148,9 +148,12 @@ Item {
                             font: settingsVM.codeFont
                             color: Theme.currentTheme.colors.textColor
                             elide: QQ.Text.ElideRight
+                            // The expression is coloured like the input it was typed
+                            // into; the `> ` or `name op` around it is not part of it.
+                            textFormat: QQ.Text.RichText
                             text: card.mode === "Assign"
-                                ? `${card.name} ${card.op} ${card.expression}`
-                                : `> ${card.expression}`
+                                ? `${card.name} ${card.op} ${vm.highlighted(card.expression, Theme.isDark())}`
+                                : `> ${vm.highlighted(card.expression, Theme.isDark())}`
                         }
 
                         // Always visible and enabled -- only the opacity
@@ -204,11 +207,16 @@ Item {
                             : Theme.currentTheme.colors.textSecondaryColor
                         wrapMode: card.isError ? QQ.Text.WordWrap : QQ.Text.NoWrap
                         elide: card.isError ? QQ.Text.ElideNone : QQ.Text.ElideRight
+                        // Rich text collapses runs of spaces, so the padding that
+                        // holds `=` under the assignment operator has to be
+                        // non-breaking. A failure is prose, so it stays plain.
+                        textFormat: card.isError ? QQ.Text.PlainText : QQ.Text.RichText
                         text: card.isError
                             ? card.error
                             : card.mode === "Assign"
-                              ? " ".repeat(card.name.length + 1) + "= " + card.result
-                              : "= " + card.result
+                              ? "&nbsp;".repeat(card.name.length + 1) + "= "
+                                + vm.highlighted(card.result, Theme.isDark())
+                              : "= " + vm.highlighted(card.result, Theme.isDark())
                     }
 
                     // Rendered result, horizontally scrollable.

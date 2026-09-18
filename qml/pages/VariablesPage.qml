@@ -174,7 +174,13 @@ Item {
                         anchors.topMargin: 7
                         anchors.bottomMargin: 9
                         visible: !cell.editing
-                        text: model.display !== undefined ? model.display : ""
+                        // Coloured like the input it was typed into. `display` is
+                        // the raw cell text, so it is what the span list is asked
+                        // about — a name or a type paints nothing, a value does.
+                        textFormat: Text.RichText
+                        text: model.display !== undefined
+                            ? vm.highlighted(`${model.display}`, Theme.isDark())
+                            : ""
                         elide: Text.ElideRight
                         wrapMode: Text.NoWrap
                         verticalAlignment: Text.AlignVCenter

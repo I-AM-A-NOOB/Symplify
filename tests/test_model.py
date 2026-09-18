@@ -24,6 +24,15 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from sympy import Integer, Matrix, Rational, Symbol
 
+from PySide6.QtCore import QObject
+from PySide6.QtGui import QTextDocument
+
+from python.brackets import DEFAULT_COLORS, spans
+from python.code_style import DEFAULT_STYLES, CodeSpan, Style, color_for, surface, theme
+from python.code_style import spans as code_spans
+from python.code_style import to_rich_text
+from python.code_themes import FAMILIES
+from python.model.lexer import TokenKind, tokenize
 from python.model.calculator import (
     Assignment,
     Calculator,
@@ -32,7 +41,7 @@ from python.model.calculator import (
     Success,
 )
 from python.model.variable import VariableManager, is_sympy_name, validate_name
-from python.settings import SettingsStore
+from python.settings import DEFAULTS, SettingsStore
 from python.viewmodel.history_viewmodel import HistoryModel
 from python.viewmodel.main_viewmodel import MainViewModel
 from python.viewmodel.search import (
@@ -473,6 +482,331 @@ def test_count_is_a_notifying_property():
     variables.save("x", Integer(1))
     variables.remove("x")
     assert v_sizes == [1, 0]
+
+
+def test_brackets_take_a_layer_from_their_nesting_depth():
+    """A pair shares a colour, and each level of nesting steps the layer."""
+    assert [(start, layer) for start, _, layer in spans("(a[b{c}])")] == [
+        (0, 0), (2, 1), (4, 2), (6, 2), (7, 1), (8, 0),
+    ]
+
+
+def test_brackets_cycle_through_the_palette():
+    """Past the last colour the layers wrap, so deep nesting still alternates."""
+    assert [layer for _, _, layer in spans("((((((x))))))")] == [0, 1, 2, 3, 4, 5, 5, 4, 3, 2, 1, 0]
+
+
+def test_brackets_without_a_partner_are_errors_and_shift_nothing():
+    """A stray bracket gets no layer — and must not take one from its neighbours."""
+    assert spans(")[x]") == [(0, 1, None), (1, 1, 0), (3, 1, 0)]
+    assert spans("(a") == [(0, 1, None)]          # never closed
+    assert spans("a)b") == [(1, 1, None)]         # never opened
+
+
+def test_brackets_reach_across_lines():
+    """An expression may be typed over several lines; the pair still matches."""
+    assert spans("(a\nb)") == [(0, 1, 0), (4, 1, 0)]
+
+
+def test_bracket_markup_escapes_the_expression_around_the_spans():
+    """The result feeds a rich-text `Text`, so the rest of the line is escaped."""
+    assert to_rich_text("a < b & (c)") == (
+        'a &lt; b &amp; '
+        '<span style="color:#ff6b6b;">(</span>c<span style="color:#ff6b6b;">)</span>'
+    )
+    assert to_rich_text("") == ""
+
+
+def test_lexer_covers_the_expression_with_tokens():
+    assert [(token.start, token.length, token.kind) for token in tokenize("2*x + 1")] == [
+        (0, 1, TokenKind.NUMBER),
+        (1, 1, TokenKind.OPERATOR),
+        (2, 1, TokenKind.NAME),
+        (3, 1, TokenKind.SPACE),
+        (4, 1, TokenKind.OPERATOR),
+        (5, 1, TokenKind.SPACE),
+        (6, 1, TokenKind.NUMBER),
+    ]
+
+
+def test_lexer_takes_the_longest_operator():
+    """`**` must not lex as two `*`, or the colouring would split a power."""
+    assert [(token.length, token.kind) for token in tokenize("a**b")] == [
+        (1, TokenKind.NAME),
+        (2, TokenKind.OPERATOR),
+        (1, TokenKind.NAME),
+    ]
+    assert [(token.length, token.kind) for token in tokenize("a^b")] == [
+        (1, TokenKind.NAME),
+        (1, TokenKind.OPERATOR),
+        (1, TokenKind.NAME),
+    ]
+
+
+def _names(text, scope=None):
+    """The name-ish tokens of ``text`` as ``{source: kind}``."""
+    wanted = (TokenKind.NAME, TokenKind.VARIABLE, TokenKind.CALLABLE, TokenKind.CONSTANT)
+    return {
+        text[token.start:token.start + token.length]: token.kind
+        for token in tokenize(text, scope)
+        if token.kind in wanted
+    }
+
+
+def test_lexer_resolves_names_against_the_scope():
+    """A stored variable, a SymPy constant, a callable and a free symbol are
+    four different colours — resolved in the order the parser resolves them."""
+    assert _names("x + pi + sin(y)", {"x": Integer(1)}) == {
+        "x": TokenKind.VARIABLE,
+        "pi": TokenKind.CONSTANT,
+        "sin": TokenKind.CALLABLE,
+        "y": TokenKind.NAME,
+    }
+
+
+def test_lexer_follows_python_identifier_rules():
+    """`λ` is a name, `²` is not part of one — the rule the parser tokenizes by."""
+    assert [(token.kind, token.length) for token in tokenize("λ + x²")] == [
+        (TokenKind.NAME, 1),
+        (TokenKind.SPACE, 1),
+        (TokenKind.OPERATOR, 1),
+        (TokenKind.SPACE, 1),
+        (TokenKind.NAME, 1),
+        (TokenKind.UNKNOWN, 1),
+    ]
+
+
+def test_code_spans_merge_names_brackets_and_lexer_styles():
+    """One span list for both renderers, brackets sitting on top of the text.
+
+    A free symbol contributes nothing (its style is the control's own ink), and
+    so does whitespace — but the operator is classified, and whether it gets
+    painted is the palette's decision, not this function's.
+    """
+    assert [(span.start, span.style, span.layer) for span in code_spans("(1 + x)")] == [
+        (0, Style.BRACKET, 0),
+        (1, Style.NUMBER, None),
+        (3, Style.OPERATOR, None),
+        (6, Style.BRACKET, 0),
+    ]
+
+
+def test_code_markup_paints_the_merged_spans():
+    """The read-only renderer paints exactly what the highlighter would."""
+    assert to_rich_text("(1)") == (
+        '<span style="color:#ff6b6b;">(</span>'
+        "1"
+        '<span style="color:#ff6b6b;">)</span>'
+    )
+
+
+def test_a_supplied_palette_paints_the_kinds():
+    """The classification is always there; the colours are the caller's to set,
+    which is what lets a themed palette (or Pygments) come later."""
+    assert to_rich_text("(1)", styles={Style.NUMBER: "#123456"}) == (
+        '<span style="color:#ff6b6b;">(</span>'
+        '<span style="color:#123456;">1</span>'
+        '<span style="color:#ff6b6b;">)</span>'
+    )
+
+
+def test_every_theme_family_answers_for_both_sides():
+    """A family that cannot answer for one theme would leave the code bare the
+    moment the UI flips — which is the whole point of pairing them."""
+    for family, label in FAMILIES:
+        for dark in (True, False):
+            styles, brackets = theme(family, dark)
+            side = "dark" if dark else "light"
+            assert styles, f"{family} ({label}) has no {side} palette"
+            assert all(color.startswith("#") for color in styles.values())
+            assert all(color.startswith("#") for color in brackets), family
+
+
+def test_a_theme_family_colours_the_kinds():
+    """Spot checks against the extracted data. Dark+ numbers are its #b5cea8 —
+    the same colour that theme gives its own `numberLiteral` semantic token —
+    and Atom One Light's operators are its #a626a4, which One Dark does not name
+    at all: a family may answer for a kind its sibling leaves alone."""
+    one_dark, _ = theme("one", True)
+    assert one_dark[Style.NUMBER] == "#d19a66"
+    assert one_dark[Style.CALLABLE] == "#61afef"
+    assert one_dark[Style.VARIABLE] == "#abb2bf"     # One Dark names it the foreground
+    one_light, _ = theme("one", False)
+    assert one_light[Style.OPERATOR] == "#a626a4"    # which One Dark does not name
+
+    default, _ = theme("default", True)
+    assert default[Style.NUMBER] == "#b5cea8"
+    assert default[Style.CALLABLE] == "#569cd6"
+
+    solarized, _ = theme("solarized", True)
+    assert solarized[Style.CONSTANT] == "#b58900"
+
+
+def test_a_family_that_names_bracket_colours_replaces_the_rainbow():
+    """Solarized brings its own editorBracketHighlight; its light half does not."""
+    _, dark = theme("solarized", True)
+    assert dark == ("#cdcdcd", "#b58900", "#d33682")
+    _, light = theme("solarized", False)
+    assert light == ()          # nothing to say: the renderer keeps the rainbow
+
+
+def test_an_unknown_family_falls_back_instead_of_raising():
+    """A config file can name a family this build does not have."""
+    styles, brackets = theme("not-a-family", True)
+    assert styles == DEFAULT_STYLES
+    assert brackets == ()
+
+
+def test_the_family_reaches_the_renderer():
+    """A kind the palette mentions is painted; one it omits is left alone."""
+    dark, _ = theme("default", True)
+    assert '<span style="color:#b5cea8;">1</span>' in to_rich_text("1", styles=dark)
+    assert "<span" not in to_rich_text("x", styles=dark)        # a free symbol
+    assert "<span" not in to_rich_text("+", styles=theme("solarized", True)[0])
+
+
+class StubTextDocument(QObject):
+    """What a QML ``TextArea.textDocument`` stands in for.
+
+    The highlighter needs an object whose ``textDocument()`` hands back the
+    ``QTextDocument`` the item edits; a ``QQuickTextDocument`` cannot be built
+    from Python.
+    """
+
+    def __init__(self, text):
+        super().__init__()
+        self.doc = QTextDocument()
+        self.doc.setPlainText(text)
+
+    def textDocument(self):
+        return self.doc
+
+    def colors(self):
+        """The colours painted on the first block, in text order."""
+        return [entry.format.foreground().color().name()
+                for entry in self.doc.firstBlock().layout().formats()]
+
+
+def test_attaching_the_colouring_paints_the_named_family():
+    """The path the app actually takes: the page hands over its document, the
+    settings name the family, and the document comes back coloured.
+
+    This is the seam the palette tests cannot see, and it is the one that broke:
+    the slot read the settings through the wrong object, so every call raised
+    inside QML, every input stayed uncoloured, and the suite stayed green.
+    """
+    store = SettingsStore(temp_dir() / "config.yaml")
+    store.load()
+    store.set("appearance.code_theme", "solarized")
+    vm = MainViewModel(store)
+
+    target = StubTextDocument("(1)")
+    vm.attachCodeHighlighting(target, True)
+
+    # Read the colours back off the document itself: the brackets take Solarized's
+    # first bracket colour and the number its `constant.numeric`.
+    colors = target.colors()
+    assert "#cdcdcd" in colors, colors          # the bracketed pair
+    assert "#d33682" in colors, colors          # the digit
+
+
+def test_a_family_with_no_bracket_colours_paints_the_rainbow():
+    """The other half of that seam: a family that names no bracket colours.
+
+    Atom One is the default family and carries no ``editorBracketHighlight``, so
+    its ``theme()`` tuple is empty. The highlighter has to fall back to the v1
+    rainbow — and it must not raise, because it recomputes *before*
+    ``rehighlight()``: an exception there leaves the document painted with the
+    previous text's formats and kills every later refresh (typing, pasting, a
+    theme switch), which is exactly how the app lost its bracket colours and its
+    highlighting at once.
+    """
+    store = SettingsStore(temp_dir() / "config.yaml")
+    store.load()
+    assert store.get("appearance.code_theme") == "one"      # the default family
+    vm = MainViewModel(store)
+
+    target = StubTextDocument("((1))")
+    vm.attachCodeHighlighting(target, True)
+
+    colors = target.colors()
+    # Both ends of a pair share a colour, and the nesting steps the layer.
+    assert colors[:2] == [DEFAULT_COLORS[0], DEFAULT_COLORS[1]], colors
+    assert colors[-2:] == [DEFAULT_COLORS[1], DEFAULT_COLORS[0]], colors
+
+
+def test_an_empty_bracket_palette_means_no_opinion():
+    """An empty ``bracket_colors`` is "this family says nothing about brackets",
+    not "no brackets": *both* renderers have to supply the rainbow, because both
+    ask ``color_for``. Reading its length as a palette of zero colours is the
+    ZeroDivisionError that took the whole refresh path down with it."""
+    styles, brackets = theme("one", True)
+    assert brackets == ()                    # Atom One has no bracket colours
+    assert color_for(CodeSpan(0, 1, Style.BRACKET, 0), styles, brackets) == DEFAULT_COLORS[0]
+    assert DEFAULT_COLORS[0] in to_rich_text("(a)", styles=styles, bracket_colors=brackets)
+
+
+def test_the_code_theme_setting_is_written_and_remembered():
+    """The settings page's radio group writes this key, and reading it back is
+    what the next page build colours from."""
+    store = SettingsStore(temp_dir() / "config.yaml")
+    store.load()
+    vm = MainViewModel(store)
+    settings = vm.settings
+    assert settings.codeTheme == DEFAULTS["appearance"]["code_theme"]
+    settings.codeTheme = "solarized"
+    assert settings.codeTheme == "solarized"
+    assert store.get("appearance.code_theme") == "solarized"
+
+
+def test_every_family_carries_a_surface_for_both_sides():
+    """The code box is painted in the family's own ``editor.background`` and text
+    the palette leaves unpainted in its ``editor.foreground``, so a family that
+    could not answer would leave a plainly UI-coloured box around themed code.
+
+    Answering with ``""`` is allowed and meaningful — High Contrast Light states
+    neither — which is why a consumer reads it as "no opinion", not as a value."""
+    for family, label in FAMILIES:
+        for dark in (True, False):
+            background, ink, placeholder = surface(family, dark)
+            assert isinstance(background, str), (family, label)
+            assert isinstance(ink, str), (family, label)
+            assert isinstance(placeholder, str), (family, label)
+    assert surface("one", True) == ("#282c34", "#abb2bf", "#7a7c80")     # VSCode's derivation
+    assert surface("solarized", False) == ("#fdf6e3", "#657b83", "#8f9b9a")   # the theme's own
+    assert surface("highcontrast", False) == ("", "", "")    # nothing to say
+    assert surface("not-a-family", True) == ("", "", "")
+
+
+def test_the_highlighted_markup_survives_a_name():
+    """The read-only labels' renderer, on an expression that *has* a name.
+
+    `to_rich_text` takes the scope as a mapping, while the highlighter takes the
+    provider so it can ask again on each keystroke. Handing the provider to both is
+    the bug this holds down: the lexer then evaluates `name in <bound method>` and
+    raises inside the QML binding. An expression of digits and brackets never
+    reaches that lookup, which is exactly why the History cards looked right while
+    every label holding a name was blank.
+    """
+    store = SettingsStore(temp_dir() / "config.yaml")
+    store.load()
+    vm = MainViewModel(store)
+    markup = vm.highlighted("sin(x) + pi", True)          # callable, name, constant
+    assert "<span" in markup, markup
+
+
+def test_the_settings_viewmodel_hands_qml_the_surface():
+    """What the page binds to: ``codeSurface(dark)`` is the map ``CodeSurface.qml``
+    paints from. The argument is the *active* theme, as it is for the highlighter."""
+    store = SettingsStore(temp_dir() / "config.yaml")
+    store.load()
+    vm = MainViewModel(store)
+    settings = vm.settings
+    settings.codeTheme = "solarized"
+    assert settings.codeSurface(True) == {
+        "background": "#002b36", "ink": "#839496", "placeholder": "#627a7d"}
+    assert settings.codeSurface(False) == {
+        "background": "#fdf6e3", "ink": "#657b83", "placeholder": "#8f9b9a"}
 
 
 def test_variable_filter_reacts_to_later_writes():

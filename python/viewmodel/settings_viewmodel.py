@@ -27,6 +27,8 @@ from PySide6.QtGui import (
 )
 
 from ..accent import for_scheme, variants
+from ..code_style import surface as code_surface
+from ..code_themes import label as family_label
 from ..fonts import (
     CODE_GLYPHS,
     expand_keyword,
@@ -780,6 +782,36 @@ class SettingsViewModel(QObject):
 
     theme = Property(str, _get_theme, _set_theme, notify=changed)
     backdrop = Property(str, _get_backdrop, _set_backdrop, notify=changed)
+
+    def _get_code_theme(self) -> str:
+        return self._store.get("appearance.code_theme")
+
+    def _set_code_theme(self, family: str) -> None:
+        self._store.set("appearance.code_theme", family)
+        self.changed.emit()
+
+    @Slot(str, result=str)
+    def codeThemeLabel(self, family: str) -> str:
+        """A family's display name.
+
+        The ids and their labels live in ``python/code_themes.py``, so the page
+        does not repeat them — it only lists which id each row sets.
+        """
+        return family_label(family)
+
+    @Slot(bool, result="QVariantMap")
+    def codeSurface(self, dark: bool) -> Dict[str, str]:
+        """The code theme's ``background``, ``ink`` and ``placeholder`` for a code input.
+
+        The page passes the *effective* theme, as it does for the highlighter
+        (RinUI resolves ``Auto``, so the setting is not the authority). An empty
+        value means the family has no opinion on that part and the control keeps
+        the UI theme's own colour.
+        """
+        background, ink, placeholder = code_surface(self._store.get("appearance.code_theme"), dark)
+        return {"background": background, "ink": ink, "placeholder": placeholder}
+
+    codeTheme = Property(str, _get_code_theme, _set_code_theme, notify=changed)
     # `accent` is the colour in effect (mode resolved) and read-only: the modes
     # above decide it, `customAccent` is the only part the user picks directly.
     accent = Property(str, _get_accent, notify=changed)

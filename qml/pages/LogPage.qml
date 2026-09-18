@@ -47,17 +47,23 @@ Item {
             border.color: Theme.currentTheme.colors.cardBorderColor
             clip: true
 
-            TextArea {
+            ScrollableTextArea {
                 id: logText
 
                 anchors.fill: parent
                 anchors.margins: 12
                 readOnly: true
-                wrapMode: TextArea.Wrap
+                // Plain text: the log holds brackets and < >, which the rich
+                // text auto-detection would otherwise swallow.
+                textFormat: TextEdit.PlainText
+                wrapMode: TextEdit.Wrap
                 text: logVM.formattedLogs
-                color: Theme.currentTheme.colors.textColor
                 // Code text: log lines are expressions and results.
-                font: settingsVM.codeFont
+                textArea.font: settingsVM.codeFont
+
+                // Follow the tail: parking the text cursor on the last character
+                // is what makes the view scroll down as entries arrive.
+                onTextChanged: textArea.cursorPosition = textArea.length
             }
 
             Text {

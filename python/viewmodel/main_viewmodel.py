@@ -17,12 +17,14 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QGuiApplication, QKeyEvent
 from typing import Optional
 
+from ..code_style import to_rich_text, theme
 from ..model.calculator import Calculator
 from ..model.variable import VariableManager
 from ..settings import SettingsStore
 from .calculator_viewmodel import CalculatorViewModel
 from .history_viewmodel import HistoryModel
 from .log_viewmodel import LogViewModel
+from .highlighter import attach
 from .search import HistoryFilterModel, VariablesFilterModel
 from .settings_viewmodel import SettingsViewModel
 from .variables_viewmodel import VariablesViewModel
@@ -142,6 +144,45 @@ class MainViewModel(QObject):
     def copyText(self, text: str) -> None:
         """Copy ``text`` to the system clipboard."""
         QGuiApplication.clipboard().setText(text)
+
+    @Slot(QObject, bool)
+    def attachCodeHighlighting(self, text_document: QObject, dark: bool) -> None:
+        """Colour a QML code input (see ``viewmodel/highlighter.py``).
+
+        The page passes the input's ``textDocument`` — a ``QQuickTextDocument``,
+        which the annotation here cannot say because Qt's own slot signature for
+        a QML argument is ``QObject`` — together with whether the *active* theme
+        is dark (RinUI resolves ``Auto`` against the OS, so the page asks it, not
+        the setting). The colours then come from the family the settings name
+        (``appearance.code_theme``) at that theme: Atom One is One Dark on a dark
+        UI and One Light on a light one. The highlighter lives exactly as long as
+        the document, which RinUI recreates with the page — which is also what
+        re-applies a changed theme or family. Names are resolved against the live
+        variable scope, so a stored variable is classified apart from a free
+        symbol — whether the palette paints that difference is the palette's
+        business (Atom One gives both its own foreground).
+        """
+        styles, bracket_colors = theme(self._settings.codeTheme, dark)
+        attach(text_document, self._variable_manager.list_all, styles, bracket_colors)
+
+    @Slot(str, bool, result=str)
+    def highlighted(self, text: str, dark: bool) -> str:
+        """``text`` as markup, for the read-only code labels.
+
+        The same span list the editors are painted from, through the other
+        renderer — so a History card and the input it came from agree about what is
+        coloured, and there is no second set of rules to keep in step. The page
+        passes the active theme, as it does for :meth:`attachCodeHighlighting`.
+
+        The callers are QML *bindings* (a delegate's ``text``), so this runs when a
+        row is shown or the theme changes — not once per repaint, and only for the
+        rows a view actually has out.
+
+        The scope is resolved here, once: ``to_rich_text`` takes a mapping, where
+        the highlighter takes the *provider* so it can ask again on every keystroke.
+        """
+        styles, bracket_colors = theme(self._settings.codeTheme, dark)
+        return to_rich_text(text, self._variable_manager.list_all(), styles, bracket_colors)
 
     @Slot()
     def focusNext(self) -> None:

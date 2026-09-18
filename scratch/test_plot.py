@@ -1,13 +1,14 @@
 import sys
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
+
 import sympy as sp
-from PySide6.QtCore import Qt, QPoint, QObject
-from PySide6.QtWidgets import QApplication, QMainWindow
-from PySide6.QtOpenGLWidgets import QOpenGLWidget
+from PySide6.QtCore import QObject, QPoint, Qt
 from PySide6.QtOpenGL import (
-    QOpenGLShaderProgram,
     QOpenGLShader,
+    QOpenGLShaderProgram,
 )
+from PySide6.QtOpenGLWidgets import QOpenGLWidget
+from PySide6.QtWidgets import QApplication, QMainWindow
 
 if TYPE_CHECKING:
     from PySide6.QtOpenGL import QOpenGLFunctions
@@ -230,7 +231,7 @@ class MainWindow(QMainWindow):
         # ========== 在这里修改你的函数 ==========
         x = sp.Symbol("x")
         # 试试这些：
-        expr = sp.sin(1 / x)  # 经典 sinc
+        expr = 1 / (1 + sp.exp(-x))  # 经典 sinc
         # expr = sp.exp(-x**2) * sp.sin(10*x)  # 衰减震荡
         # expr = sp.Piecewise((x, x < 0), (x**2, True))  # 分段函数测试
         # expr = sp.gamma(x)  # 伽马函数（如果 GLSL 不支持，会报错，慎用）

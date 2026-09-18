@@ -38,6 +38,8 @@ from typing import Any, Dict, Optional, Tuple
 
 import yaml
 
+from .code_themes import DEFAULT_FAMILY as DEFAULT_CODE_THEME
+from .code_themes import family_ids
 from .fonts import DEFAULT_CODE_FAMILY, DEFAULT_KEYBOARD_FAMILY
 
 #: Directory (next to the app) whose presence switches on portable mode.
@@ -64,6 +66,10 @@ DEFAULTS: Dict[str, Any] = {
         # instead of the built-in blend. Only meaningful with the system accent
         # and shading on; see SettingsViewModel.accentOsShadingAvailable.
         "accent_os_shading": True,
+        # Which family the code colouring uses. Every family has a dark and a
+        # light member and follows the UI theme, so this names a STYLE rather
+        # than a colour scheme (see python/code_themes.py).
+        "code_theme": DEFAULT_CODE_THEME,
     },
     "fonts": {
         # A comma-separated PREFERENCE list, resolved to the first family the
@@ -90,6 +96,7 @@ _CHOICES = {
     "appearance.theme": ("Auto", "Light", "Dark"),
     "appearance.backdrop": ("mica", "acrylic", "tabbed", "none"),
     "appearance.accent_mode": ("default", "system", "custom"),
+    "appearance.code_theme": tuple(family_ids()),
 }
 
 #: Keys clamped into a numeric range.
@@ -111,6 +118,7 @@ _KNOWN_KEYS = (
     "appearance.accent_mode",
     "appearance.accent_shading",
     "appearance.accent_os_shading",
+    "appearance.code_theme",
     "fonts.code_family",
     "fonts.code_size",
     "fonts.keyboard_family",

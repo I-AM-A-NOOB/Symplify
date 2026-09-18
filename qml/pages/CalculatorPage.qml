@@ -9,8 +9,25 @@ Item {
 
     readonly property bool hasLatex: calcVM.latexSvgUrl !== ""
 
+    // The input is RinUI's scrollable text area; the helpers below (focus,
+    // insert, selectAll, fallbackTarget) address the text item, so this points
+    // them at the wrapper's inner area.
+    readonly property Item codeInput: codeArea.textArea
+
+    // The code theme's surface — `background` and `ink` for the ACTIVE theme,
+    // since a family has a dark and a light member. An empty value means the
+    // family has no opinion (High Contrast Light states neither) and the UI
+    // theme's own colours stand in.
+    readonly property var codeSurface: settingsVM.codeSurface(Theme.isDark())
+
     Component.onCompleted: {
         calcVM.set_latex_color(Theme.currentTheme.colors.textColor)
+        // Code colouring on the input. The item hands over its document, and the
+        // palette follows the ACTIVE theme — RinUI resolves Auto against the OS,
+        // so ask it rather than the setting.
+        vm.attachCodeHighlighting(codeArea.textArea.textDocument, Theme.isDark())
+        // The Assign value is the other place an expression gets typed.
+        vm.attachCodeHighlighting(assignValueField.textDocument, Theme.isDark())
         codeInput.forceActiveFocus()
     }
 
@@ -244,40 +261,58 @@ Item {
                     // children's minimum sizes and defeats preferredHeight)
                     Item {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 110
+                        // The Code box wants the full 110px. Assign is a row of
+                        // controls that only needs one line — but it has to grow
+                        // when the value wraps: the value is a TextArea now (a
+                        // TextField has no `textDocument`, so it cannot take the
+                        // highlighter) and a TextArea wraps rather than scrolling
+                        // sideways.
+                        Layout.preferredHeight: calcVM.inputMode === 0
+                                ? 110
+                                : Math.min(240, Math.max(110, assignRow.implicitHeight + 8))
 
-                        ScrollView {
-                            id: codeScroll
+                        ScrollableTextArea {
+                            id: codeArea
 
                             anchors.fill: parent
                             visible: calcVM.inputMode === 0
-
-                            TextArea {
-                                id: codeInput
-
-                                width: codeScroll.availableWidth
-                                text: calcVM.inputText
-                                wrapMode: TextArea.Wrap
-                                placeholderText: qsTr("Enter expression...")
-                                // Code text: expressions in, results out. The
-                                // whole font (family list + size) comes from the
-                                // viewmodel, so Qt can fall back per character.
-                                font: settingsVM.codeFont
-                                onTextChanged: calcVM.inputText = text
-
-                                // Smart mode switch: '=' in an empty input -> Assign
-                                Keys.onPressed: (event) => {
-                                    if (event.key === Qt.Key_Equal
-                                            && !event.modifiers
-                                            && calcVM.inputText.trim().length === 0) {
-                                        switchToAssign()
-                                        event.accepted = true
-                                    }
+                            text: calcVM.inputText
+                            placeholderText: qsTr("Enter expression...")
+                            wrapMode: TextEdit.Wrap
+                            onTextChanged: calcVM.inputText = text
+                            // The box takes the code theme's own surface, and the
+                            // inner area's background has to go or it would cover
+                            // it. Text the palette leaves unpainted (a free
+                            // symbol) then reads in the theme's ink rather than
+                            // the UI's, which is what keeps it legible there.
+                            background: CodeSurface {
+                                focused: codeArea.textArea.activeFocus
+                            }
+                            textArea.background: null
+                            textArea.color: page.codeSurface.ink
+                                || Theme.currentTheme.colors.textColor
+                            // The theme's own placeholder colour, which the family
+                            // states or VSCode derives from its foreground. "" keeps
+                            // RinUI's, for a family with no surface of its own.
+                            textArea.placeholderTextColor: page.codeSurface.placeholder
+                                || Theme.currentTheme.colors.textSecondaryColor
+                            // The inner area is the text item: it draws the
+                            // glyphs, so the code font has to reach it, and it
+                            // holds the keystrokes, so the '=' shortcut does too.
+                            textArea.font: settingsVM.codeFont
+                            textArea.Keys.onPressed: (event) => {
+                                if (event.key === Qt.Key_Equal
+                                        && !event.modifiers
+                                        && calcVM.inputText.trim().length === 0) {
+                                    switchToAssign()
+                                    event.accepted = true
                                 }
                             }
                         }
 
                         RowLayout {
+                            id: assignRow
+
                             anchors.fill: parent
                             visible: calcVM.inputMode === 1
                             spacing: 8
@@ -290,6 +325,18 @@ Item {
                                 text: calcVM.assignName
                                 placeholderText: qsTr("name")
                                 font: settingsVM.codeFont
+                                // Same surface as the two expression boxes — this is
+                                // part of the Assign row the code theme dresses — and
+                                // the same ink on it. Nothing highlights a name, so this
+                                // is plain text colour; an empty family answer leaves the
+                                // UI theme's colour in place, as it does for them.
+                                background: CodeSurface {
+                                    focused: assignNameField.activeFocus
+                                }
+                                color: page.codeSurface.ink
+                                    || Theme.currentTheme.colors.textColor
+                                placeholderTextColor: page.codeSurface.placeholder
+                                    || Theme.currentTheme.colors.textSecondaryColor
                                 onTextChanged: calcVM.assignName = text
 
                                 // Smart navigation: an operator typed at the end of
@@ -327,7 +374,12 @@ Item {
                                 onActivated: (index) => calcVM.assignOperator = model[index]
                             }
 
-                            TextField {
+                            // A TextArea, not a TextField: only TextArea/TextEdit
+                            // expose `textDocument`, which is what the code
+                            // highlighter attaches to. It keeps the field's
+                            // manners — Enter still calculates (see below) — and
+                            // wraps, so a long expression stays readable.
+                            TextArea {
                                 id: assignValueField
 
                                 Layout.fillWidth: true
@@ -335,11 +387,25 @@ Item {
                                 Layout.alignment: Qt.AlignVCenter
                                 text: calcVM.assignValue
                                 placeholderText: qsTr("expression")
+                                wrapMode: TextEdit.Wrap
+                                // Plain text: expressions hold < and &, which
+                                // the rich text auto-detection would swallow.
+                                textFormat: TextEdit.PlainText
                                 font: settingsVM.codeFont
+                                // Same surface as the Code box: an expression is
+                                // typed here too, and it is coloured by the same
+                                // highlighter.
+                                background: CodeSurface {
+                                    focused: assignValueField.activeFocus
+                                }
+                                color: page.codeSurface.ink
+                                    || Theme.currentTheme.colors.textColor
+                                placeholderTextColor: page.codeSurface.placeholder
+                                    || Theme.currentTheme.colors.textSecondaryColor
                                 onTextChanged: calcVM.assignValue = text
 
                                 Keys.onPressed: (event) => {
-                                    // Single line: Enter calculates, never inserts a newline.
+                                    // Enter calculates, never inserts a newline.
                                     if (event.key === Qt.Key_Return
                                             || event.key === Qt.Key_Enter) {
                                         runCalculation()
@@ -382,14 +448,17 @@ Item {
 
                         Text {
                             Layout.fillWidth: true
-                            // Code text: this is the expression's value.
+                            // Code text: this is the expression's value, coloured by
+                            // the same span list the input above is — through the
+                            // markup renderer, so label and editor agree.
                             font: settingsVM.codeFont
+                            textFormat: Text.RichText
                             wrapMode: Text.NoWrap
                             elide: Text.ElideRight
                             color: calcVM.isError
                                 ? Theme.currentTheme.colors.systemCriticalColor
                                 : Theme.currentTheme.colors.textColor
-                            text: calcVM.resultText
+                            text: vm.highlighted(calcVM.resultText, Theme.isDark())
                         }
 
                         Button {
@@ -473,6 +542,12 @@ Item {
                                         verticalAlignment: Text.AlignVCenter
                                         wrapMode: Text.WrapAnywhere
                                         font: settingsVM.codeFont
+                                        // The value is coloured like the input it
+                                        // came from; the hint and a failure are
+                                        // prose, so they stay plain (and raw — a
+                                        // translation is not markup).
+                                        textFormat: calcVM.isError || calcVM.resultText === ""
+                                            ? Text.PlainText : Text.RichText
                                         color: calcVM.isError
                                             ? Theme.currentTheme.colors.systemCriticalColor
                                             : calcVM.resultText === ""
@@ -481,7 +556,7 @@ Item {
                                         text: calcVM.isError
                                             ? calcVM.errorMessage
                                             : calcVM.resultText !== ""
-                                              ? calcVM.resultText
+                                              ? vm.highlighted(calcVM.resultText, Theme.isDark())
                                               : qsTr("Enter an expression, then press Ctrl+Return to calculate.")
                                     }
                                 }
