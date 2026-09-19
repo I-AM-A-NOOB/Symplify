@@ -15,6 +15,22 @@ FluentWindow {
     minimumWidth: 860
     minimumHeight: 560
 
+    // RinUI's title bar starts a native drag on press, but the same handler's
+    // onPositionChanged *also* moves the window by hand -- guarded by a platform
+    // test that returns off Windows rather than on it, so on Windows the manual
+    // move runs as well. Once the drag has un-maximized the window the handler's
+    // local coordinates no longer line up (they shift by half the width
+    // difference) and its `window.x + delta` teleports the window: measured from
+    // (395, 277) to (0, 300) for a window dragged out of fullscreen. The guard
+    // reads isMaximized, which RinUI never defines (its other disjunct,
+    // isFullScreen, is undefined too), so it only ever saw `visibility`.
+    //
+    // dragInProgress is raised by the window_drag manager for the whole gesture,
+    // the queued mouse events included -- so the manual move is skipped and the
+    // window lands where the system put it, as it does for any other app.
+    property bool dragInProgress: false
+    property bool isMaximized: dragInProgress || visibility === Window.Maximized
+
     navigationView.navExpandWidth: 230
 
     // Settings own the window geometry (settingsVM remembers it when enabled).

@@ -41,6 +41,9 @@ python/
                                 # OS convention), atomic YAML read/write, validation. Zero Qt.
   rinui_bootstrap.py            # Takes RinUI's own config directory over and injects our
                                 # settings; `prepare(ROOT)` is the ONLY way to import RinUI.
+  window_drag.py                # Replaces RinUI's WinEventManager with one whose title-bar drag
+                                # is a real caption press, and flags the drag so RinUI's own
+                                # onPositionChanged move is skipped. Windows only.
   viewmodel/                    # Qt bridge (QObject + models). The ONLY layer that imports Qt
                                 # (besides main.py). State that must survive page switches lives here.
     input_mode.py               #   InputMode (CODE=0 / ASSIGN=1) — UI state, not model state
@@ -222,10 +225,31 @@ scratch/                        # Preserved experiments — NOT part of the app 
   so the desync is purely in the presentation layer (Mica / DWM). Observed fixes and their reasons:
   the remembered **size** is set declaratively in `MainWindow.qml`
   (`width: settingsVM.startupWidth`), so the window is created at the right size and never resized;
-  the **position** is applied after creation (a move is safe); and the **maximized** state uses
+  the **position** is applied after creation (a move is safe) — and even when the window starts
+  maximized, because that x/y becomes the rect a restore-from-maximized returns to (left unset it is
+  the screen's corner, where such a window then lands); and the **maximized** state uses
   `showMaximized()` once the window is visible, because maximizing before it is shown has the same
   stale effect (as does `setWindowState(WindowMaximized)` afterwards). Verified against RinUI 0.4.4.1
   on Windows 11 — when touching window geometry, check it visually, Qt values can look perfect.
+- **RinUI's title bar moves the window twice: once natively, once by hand.** `TitleBar.qml`'s
+  `onPressed` starts a *native* system move, but its `onPositionChanged` also runs
+  `window.setX(window.x + delta.x)`. The guard meant to skip that on Windows tests
+  `Qt.platform.os !== "windows"`, so it returns everywhere *except* Windows — and its other two
+  disjuncts (`window.isMaximized`, `window.isFullScreen`) are never defined by RinUI at all, so the
+  guard only ever saw `visibility`. The manual move stays invisible until the window is dragged out
+  of fullscreen: the un-maximize shifts the title bar's local coordinates by half the width
+  difference, so the first event after it computes a delta of roughly `-(width/2)` and teleports the
+  window — measured from `(395, 277)` to `(0, 300)`, i.e. the drag's offset from the screen's
+  top-left corner. Ordinary apps do not do this (Paint lands on `(256, 277)` and stays there).
+  Fixed from our side: `python/window_drag.py` replaces the manager class (RinUI builds it with
+  `from .window import WinEventManager` *inside* the constructor, so replacing the name is enough)
+  to send `WM_NCLBUTTONDOWN`/`HTCAPTION` — a real caption press, which needs no cursor coordinates
+  to get wrong — and to raise `dragInProgress` on the window for the whole gesture.
+  `MainWindow.qml` folds that into `isMaximized`, which is what the guard reads, so the manual move
+  is skipped. The zero-timer that clears the flag is deliberate: the mouse events the system move
+  leaves queued are handled *after* `SendMessage` returns. Verified against RinUI 0.4.4.1 —
+  windowed drag, title-bar double-click, Aero Snap and the drag-out of a maximized window all
+  behave like a native app.
 - **A bare `QQuickView` can hang on components that touch the `Theme` singleton** — `Expander`
   (hence `SettingExpander`) spins forever during construction when the engine has no `ThemeManager`
   context property, instead of merely warning like the other singleton uses. The app is fine

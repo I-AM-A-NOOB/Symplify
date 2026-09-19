@@ -742,10 +742,12 @@ def test_windowed_restore_applies_the_remembered_position():
     assert window.maximized is False
 
 
-def test_maximized_restore_leaves_the_position_to_the_platform():
-    """Such a window must not jump to an old spot when dragged out of fullscreen."""
+def test_a_maximized_window_still_gets_its_position_applied():
+    """Windows restores a dragged-out maximized window to the rect Qt records as
+    its normal geometry, and that rect is this x/y. Leaving it at the QML default
+    (0, 0) is what made such a window land on the screen's top-left corner."""
     window = window_with({"window.maximized": True, "window.x": 250, "window.y": 180})
-    assert (window.property("x"), window.property("y")) == (0, 0)   # untouched
+    assert (window.property("x"), window.property("y")) == (250, 180)
 
 
 def test_turning_remember_on_mid_session_starts_tracking():
@@ -764,6 +766,23 @@ def test_turning_remember_on_mid_session_starts_tracking():
     window.closing.emit()                 # what Window.closing does on quit
     assert store.get("window.width") == 900
     assert store.get("window.height") == 600
+
+
+def test_the_drag_fix_is_a_no_op_off_windows():
+    """install() must leave the manager alone where there is no user32 — the
+    module builds its WinDLL at import and the caption press would otherwise be
+    wired into a platform that has no such message."""
+    from python import window_drag
+
+    class Manager:
+        pass
+
+    original = window_drag.WINDOWS
+    window_drag.WINDOWS = False
+    try:
+        assert window_drag.install(Manager) is Manager
+    finally:
+        window_drag.WINDOWS = original
 
 
 # --------------------------------------------------------------------------

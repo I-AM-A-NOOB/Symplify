@@ -6,7 +6,7 @@ RinUI persists theme/backdrop/accent by itself, and it does so **at import time*
 ``<BASE_DIR>/RinUI/config/rin_ui.json`` is missing, creates it right there. There
 is no supported switch to redirect or disable that (verified against 0.4.4.1).
 
-This module takes the location back, in four steps — see :func:`prepare`:
+This module takes the location back, in five steps — see :func:`prepare`:
 
 1. ``chdir`` into a throwaway temporary directory for the duration of
    ``import RinUI``, so the file it writes lands there and is deleted with that
@@ -17,7 +17,10 @@ This module takes the location back, in four steps — see :func:`prepare`:
    persist again;
 3. on the first run of this scheme, fold a legacy ``<app>/RinUI/config`` into our
    settings file and remove that directory;
-4. hand the settings store and RinUI's window class to the composition root.
+4. on Windows, replace RinUI's window-event manager with one whose title-bar drag
+   Windows understands — the stock one moves a maximized window twice and lands
+   it on the screen's corner (see :mod:`python.window_drag`);
+5. hand the settings store and RinUI's window class to the composition root.
 
 **The settings file is the single source of truth.** Never re-enable RinUI's own
 persistence, and never import ``RinUI`` before :func:`prepare` has run.
@@ -31,6 +34,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict
 
+from . import window_drag
 from .settings import CONFIG_FILENAME, DEFAULTS, SettingsStore, resolve_config_dir
 
 #: RinUI's config file name inside its own directory.
@@ -82,9 +86,18 @@ def prepare(root: Path) -> Runtime:
         import RinUI
         from RinUI import RinUIWindow
         from RinUI.core.config import DEFAULT_CONFIG, RinConfig
+        from RinUI.core.window import WinEventManager
     finally:
         os.chdir(cwd)
         shutil.rmtree(scratch, ignore_errors=True)
+
+    # RinUI's window-event manager exists only on Windows: its module imports
+    # pywin32 at the top, which is why RinUI's own __init__ imports it under the
+    # same condition. The drag fix goes in there too.
+    if window_drag.WINDOWS:
+        from RinUI.core.window import WinEventManager
+
+        window_drag.install(WinEventManager)
 
     if first_run:
         # A fresh install takes RinUI's own platform detection (mica on Win11,
