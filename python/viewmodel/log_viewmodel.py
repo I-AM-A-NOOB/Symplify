@@ -65,6 +65,10 @@ class LogViewModel(QObject):
     formattedLogsChanged = Signal()
     richLogsChanged = Signal()
     colorsChanged = Signal()
+    #: Emitted for each entry that is *appended* — repeats of the previous entry
+    #: collapse into it instead (see `add_log`) and do not re-emit. `log_capture`
+    #: mirrors this to the terminal.
+    entryAdded = Signal(str, str, str)      # level name, source, message
 
     def __init__(self, parent: QObject | None = None):
         """Initialize the log viewmodel."""
@@ -125,6 +129,7 @@ class LogViewModel(QObject):
                 return
 
         self._logs.append(LogEntry(datetime.now(), level, message, source))
+        self.entryAdded.emit(level.name, source, message)
         self._render()
 
     def add_info(self, message: str, source: str = "System") -> None:

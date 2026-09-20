@@ -45,6 +45,7 @@ FluentWindow {
         settingsVM.attachWindow(window)
         applyAccent()
         applyLogColors()
+        applyLatexColors()
     }
 
     // RinUI's accent handling, and why this is not just a call to Theme:
@@ -78,6 +79,18 @@ FluentWindow {
     // background, which is what Qt would have done anyway. And a `color` handed
     // straight to Python arrives as a QColor whose `str()` is not a colour at all,
     // so the strings are produced here, where the values are still colours.
+    // LaTeX images are SVG and the colour is baked in when one is rendered, so
+    // setting it late costs a whole extra pass: the pages used to do this in their
+    // own `Component.onCompleted`, which runs *after* their delegates exist, so
+    // every entry rendered once in the default black and then again once the
+    // colour arrived (and the arrival dropped the cache, so the second pass was
+    // unavoidable). Here, with the log colours, it is set before any page is built.
+    function applyLatexColors() {
+        const ink = Theme.currentTheme.colors.textColor
+        calcVM.set_latex_color(ink)
+        historyVM.set_latex_color(ink)
+    }
+
     function applyLogColors() {
         const c = Theme.currentTheme.colors
         const bg = c.backgroundColor
@@ -113,6 +126,7 @@ FluentWindow {
         function onCurrentThemeChanged() {
             applyAccent()
             applyLogColors()
+            applyLatexColors()
         }
     }
 

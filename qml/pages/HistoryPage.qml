@@ -9,74 +9,92 @@ import "../components"
 Item {
     id: page
 
-    //: How far the cards sit from the page edge. The list itself is full-bleed —
-    //: its scroll bar rides the window edge, the way the Microsoft Store's does —
-    //: so the cards carry the inset instead: the 24px they always had, plus 4 more
-    //: on each side to keep clear of the bar.
-    readonly property int cardInset: 28
+    //: Which card is selected. A `ListView` owned this (`currentIndex`,
+    //: `isCurrentItem`, `incrementCurrentIndex`); with a `Column` of delegates the
+    //: page owns it, and the cards read it back.
+    property int currentIndex: 0
+    //: Set by the arrow keys, cleared by any click, so the focus ring stays put
+    //: while selecting by keyboard.
+    property bool keyboardNavigation: false
 
-    // LatexImage rendering follows the app theme color.
-    Component.onCompleted: historyVM.set_latex_color(Theme.currentTheme.colors.textColor)
+    //: Cards revealed so far, and how many more each time the reader reaches the
+    //: bottom. A `Column` skips invisible children, so the content only ever spans
+    //: what is loaded: the page starts on the newest `batch` entries and grows as
+    //: it is scrolled, one batch at a time.
+    property int loaded: 12
+    readonly property int batch: 12
 
-    Connections {
-        target: Theme
+    //: How far the cards sit from the page edge: the content is already inset
+    //: 24px, and the cards add this much on each side, clear of the scroll bar.
+    readonly property int cardInset: 4
 
-        function onCurrentThemeChanged() {
-            historyVM.set_latex_color(Theme.currentTheme.colors.textColor)
-        }
+    //: Bring a card into view, which `ListView.positionViewAtIndex` did for us.
+    function reveal(index) {
+        if (index >= loaded)                  // not loaded yet: load up to it
+            loaded = Math.min(cards.count, index + 1)
+        const card = cards.itemAt(index)
+        if (!card)
+            return
+        const top = content.y + card.y
+        const bottom = top + card.height
+        if (top < historyScroll.contentY)
+            historyScroll.contentY = top
+        else if (bottom > historyScroll.contentY + historyScroll.height)
+            historyScroll.contentY = bottom - historyScroll.height
     }
 
-    // The view fills the page. The 24px inset is its own margin, and the scroll bar
-    // is a page-level sibling (see the end of this file) rather than the view's
-    // attached one: nothing inside a flickable can be drawn above a sibling, and
-    // the floating header is one. The inline title row goes in the view's own
-    // `header`, so it scrolls with the cards and reserves the actions' room.
-
-    // RinUI's native ListView adds add/remove/displaced transitions and
-    // an AsNeeded scrollbar. focusPolicy stays NoFocus so Ctrl+Tab lands
-    // on the current card (focus: ListView.isCurrentItem), not the view.
-    // Arrow keys navigate via the card's own Keys handlers below.
-    // The model is the *filtered* view; historyVM keeps every entry.
-    Rin.ListView {
-        id: historyList
+    // LatexImage rendering follows the app theme color.
+    // A `Flickable` + `Column` + `Repeater`, not a `ListView`. The list's `header`
+    // slot cost three traps — it is a `Component`, so ids in it are invisible and
+    // the row has to be fetched back through `headerItem`; the view does not size
+    // it; and this view parks it above the viewport whatever `headerPositioning`
+    // says — and what that bought was keeping delegates unbuilt until they scrolled
+    // into view, which measures at ~0.5-1.5ms per entry of cached SVG. The title is
+    // an ordinary child of the content now, exactly as on Log and Settings, so all
+    // three pages wire `PageScaffold` the same way.
+    Flickable {
+        id: historyScroll
 
         anchors.fill: parent
-        spacing: 10
-        model: historyFilter
-        focusPolicy: Qt.NoFocus
+        clip: true
+        contentWidth: width
+        // The content plus the page's bottom inset, so the last card can be
+        // scrolled clear of the edge.
+        contentHeight: content.height + 48
 
-        // Full-bleed on purpose: the bar RinUI attaches here anchors to this view's
-        // right edge, so a full-bleed view puts it on the window edge, clear of the
-        // cards.
-        //
-        // Overscroll is left entirely to the native behaviour.
-
-        header: Item {
-            id: headerWrap
-
-            //: What the actions travel with. An id inside a list's header is
-            //: invisible from outside it — the value is compiled into a Component —
-            //: but a property of the header item is not.
-            property alias inlineRow: historyHeaderRow
-
-            width: historyList.width
-            //: The content inset this list no longer gets from its own geometry:
-            //: 24px above the title, 12px of air before the first card.
-            height: 24 + historyHeaderRow.height + 12
-
-            PageHeaderRow {
-                id: historyHeaderRow
-
-                x: 24
-                y: 24
-                width: parent.width - 48
-                reservedWidth: frame.actionsWidth
-                title: qsTr("History")
-            }
+        //: One batch more as the reader nears the bottom of what is loaded.
+        onContentYChanged: {
+            if (page.loaded < cards.count && contentY + height > contentHeight - 320)
+                page.loaded = Math.min(cards.count, page.loaded + page.batch)
         }
 
-        //: The bottom half of the same inset.
-        footer: Item { height: 24 }
+        //: RinUI's own bar, attached to this flickable — the same bar the other
+        //: two pages attach.
+        Rin.ScrollBar.vertical: Rin.ScrollBar {}
+
+        Column {
+            id: content
+
+            x: 24
+            y: 24
+            width: historyScroll.width - 48
+            spacing: 10
+
+            //: The title, and the row the actions ride until the bar takes over.
+            PageHeaderRow {
+                id: titleRow
+
+                width: parent.width
+                reservedWidth: frame.actionsWidth
+                //: Air between the title row and the first card.
+                bottomGap: 12
+                title: qsTr("History")
+            }
+
+            Repeater {
+                id: cards
+
+                model: historyFilter
 
         delegate: QQC2.ItemDelegate {
             id: card
@@ -88,8 +106,14 @@ Item {
             required property string expression
             required property string result
             required property string error
-            required property string latexUrl
+            //: The LaTeX *source*, for the copy menu — cheap, so it stays a role.
             required property string latex
+            //: These three are cheap to read now — `HistoryModel.data` no longer
+            //: renders, it only looks the SVG up — so reading them at build time
+            //: costs nothing. What renders is `historyVM.requestLatex`, called from
+            //: `onLatexUrlChanged` below, i.e. only while this card is near the
+            //: viewport (see `nearView`) and again if the cache was dropped.
+            required property string latexUrl
             required property int naturalWidth
             required property int naturalHeight
             required property string time
@@ -100,9 +124,33 @@ Item {
             readonly property color errorColor:
                 Theme.currentTheme.colors.systemCriticalColor
 
+            //: Where this card's top is in the viewport, and whether it is close
+            //: enough to be worth rendering. Only the top edge is tested — testing
+            //: the card's own height would make this depend on what it gates, and
+            //: the two would chase each other. One screen of slack either way.
+            readonly property real topInView: y + content.y - historyScroll.contentY
+            //: `visible` comes first: a card that is not loaded yet is skipped by the
+            //: `Column`, so it has no position of its own and `y` reads 0 — which
+            //: this test would otherwise take for "at the top of the viewport".
+            readonly property bool nearView: visible
+                                          && topInView < historyScroll.height * 2
+                                          && topInView > -historyScroll.height
+
+            //: Rendering is the view's to ask for (see `HistoryModel.requestLatex`).
+            //: Both triggers end in a no-op once the entry has an SVG: `nearView`
+            //: fires as the card approaches, and `latexUrl` changes back to empty
+            //: when the cache is dropped under us by a theme or font change.
+            function askForLatex() {
+                if (nearView && latexUrl === "")
+                    historyVM.requestLatex(card.index)
+            }
+            onNearViewChanged: askForLatex()
+            onLatexUrlChanged: askForLatex()
+            Component.onCompleted: askForLatex()
+
             // Selection = the current item; drives the background tint
             // and the accent bar (mirrors ListViewDelegate.highlighted).
-            highlighted: ListView.isCurrentItem
+            highlighted: card.index === page.currentIndex
 
             // The current card holds keyboard focus so Enter/Space/
             // Shift+F10 open its menu; arrow keys navigate the list
@@ -120,24 +168,28 @@ Item {
             // accent bar and the focus ring always sit on the same card.
             onActiveFocusChanged: {
                 if (activeFocus)
-                    historyList.currentIndex = index
+                    page.currentIndex = index
             }
 
             // Keyboard-navigation flag: set on arrow keys, cleared on any
             // click. Drives the FocusIndicator so it stays while selecting
             // with Up/Down (mirrors ListViewDelegate.keyboardNavigation).
             readonly property bool keyboardNavigation:
-                historyList.keyboardNavigation && highlighted
+                page.keyboardNavigation && highlighted
 
-            width: ListView.view ? historyList.width : 200
+            width: content.width
             height: cardBody.implicitHeight + 20
+            //: Not loaded yet? The `Column` skips it, so it costs nothing on screen
+            //: and nothing in the scroll extent.
+            visible: card.index < page.loaded
 
             // The card inset is the delegate's to apply, because the list is
             // full-bleed; then the 10px of content padding it always had.
             leftPadding: page.cardInset + 10
             rightPadding: page.cardInset + 10
-            topPadding: 10
             bottomPadding: 10
+
+            topPadding: 10
 
             contentItem: ColumnLayout {
                 id: cardBody
@@ -251,8 +303,8 @@ Item {
                     TapHandler {
                         acceptedButtons: Qt.LeftButton
                         onTapped: {
-                            historyList.keyboardNavigation = false
-                            historyList.currentIndex = index
+                            page.keyboardNavigation = false
+                            page.currentIndex = card.index
                         }
                     }
                 }
@@ -305,11 +357,11 @@ Item {
 
                 visible: card.highlighted
                 x: page.cardInset + 2
+                y: 20
                 width: 3
                 radius: 2
                 color: Theme.currentTheme.colors.primaryColor
-                y: 20
-                height: card.height - 40
+                height: card.height - 40 - card.topInset
 
                 onVisibleChanged: {
                     if (visible)
@@ -348,12 +400,10 @@ Item {
                 }
             }
 
-
-
             // Left click (card body) selects the card.
             onClicked: {
-                historyList.keyboardNavigation = false
-                historyList.currentIndex = index
+                page.keyboardNavigation = false
+                page.currentIndex = index
             }
 
             // Right click selects the card and opens its menu at the
@@ -364,26 +414,23 @@ Item {
 
                 acceptedButtons: Qt.RightButton
                 onTapped: (eventPoint) => {
-                    historyList.keyboardNavigation = false
-                    historyList.currentIndex = index
+                    page.keyboardNavigation = false
+                    page.currentIndex = index
                     entryMenu.popup(eventPoint.position)
                 }
             }
 
-            // Arrow keys move the selection and keep it in view. ListView
-            // has no moveCurrentIndex*() -- those methods belong to
-            // GridView; a ListView moves with increment/decrement.
+            // Arrow keys move the selection; a `ListView` kept the item in view
+            // for us, so with a `Column` that part is `page.reveal`.
             Keys.onUpPressed: {
-                historyList.keyboardNavigation = true
-                historyList.decrementCurrentIndex()
-                historyList.positionViewAtIndex(historyList.currentIndex,
-                                                ListView.Contain)
+                page.keyboardNavigation = true
+                page.currentIndex = Math.max(0, page.currentIndex - 1)
+                page.reveal(page.currentIndex)
             }
             Keys.onDownPressed: {
-                historyList.keyboardNavigation = true
-                historyList.incrementCurrentIndex()
-                historyList.positionViewAtIndex(historyList.currentIndex,
-                                                ListView.Contain)
+                page.keyboardNavigation = true
+                page.currentIndex = Math.min(cards.count - 1, page.currentIndex + 1)
+                page.reveal(page.currentIndex)
             }
 
             // Keyboard: menu at the default position (not the pointer).
@@ -432,9 +479,12 @@ Item {
             }
         }
 
+            }
+        }
+
         Text {
             anchors.centerIn: parent
-            visible: historyList.count === 0
+            visible: cards.count === 0
             typography: Typography.Body
             color: Theme.currentTheme.colors.textSecondaryColor
             text: historyFilter.searchText !== "" && historyVM.count > 0
@@ -443,33 +493,14 @@ Item {
         }
     }
 
-    // With no entries a `ListView` does not instantiate its `header`, so the list
-    // cannot supply the inline title until there is something in it — which left
-    // an empty History page with no title at all, and an actions row with nothing
-    // to travel from. This row stands in: same inset, same reserved room, exactly
-    // one of the two visible at a time.
-    PageHeaderRow {
-        id: emptyRow
-
-        visible: historyList.count === 0
-        x: 24
-        y: 24
-        width: historyList.width - 48
-        reservedWidth: frame.actionsWidth
-        title: qsTr("History")
-    }
-
-    // The frame: title, actions, floating bar, window-edge scroll bar. The list
-    // above owns everything that scrolls.
+    // The frame: title, actions, floating bar, window-edge scroll bar. The
+    // Flickable above owns everything that scrolls, including the title row.
     PageScaffold {
         id: frame
 
         title: qsTr("History")
-        flickable: historyList
-        // `headerItem.inlineRow`, not the row's id: `ListView.header` is a
-        // `Component`, so ids declared inside it are not visible out here — the
-        // header item carries the row as a property instead.
-        inlineRow: historyList.count > 0 ? historyList.headerItem.inlineRow : emptyRow
+        flickable: historyScroll
+        inlineRow: titleRow
 
         SearchBar {
             id: searchBar

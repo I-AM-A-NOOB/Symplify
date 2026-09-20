@@ -9,9 +9,11 @@ component instantiation, type errors from dialogs — so the app looked healthy
 while its console filled up.
 
 This module hands that stream to the :class:`LogViewModel`, which is also where
-the app's own entries (Calculator, Variables) go, and which keeps them to itself:
-the page is the destination for both, and nothing is written to the terminal, so
-the two cannot drift apart.
+the app's own entries (Calculator, Variables) go, and **mirrors every entry to the
+terminal as well** — filtered by level, so DEBUG and INFO go to stdout and
+WARNING and ERROR to stderr, which keeps a redirected terminal usable. The page
+remains the surface a user reads; the terminal is for development, where the page
+is not scrollable in a script and the app may not even be visible.
 
 Two details the handlers have to get right:
 
@@ -38,13 +40,30 @@ _in_handler = False
 
 
 def install(sink: LogViewModel) -> None:
-    """Send Qt messages and uncaught exceptions to ``sink``.
+    """Send Qt messages and uncaught exceptions to ``sink``, and mirror it out.
 
     Args:
         sink: The log viewmodel, which owns the entries from here on.
     """
+    sink.entryAdded.connect(_mirror_to_terminal)
     _install_message_handler(sink)
     _install_excepthook(sink)
+
+
+def _mirror_to_terminal(level: str, source: str, message: str) -> None:
+    """Print one entry to the process's own streams, as the page shows it.
+
+    Written through ``sys.__stdout__``/``sys.__stderr__`` — the streams the
+    interpreter started with — and flushed, because a redirected stream is
+    block-buffered and a developer watching a file wants the line now.
+    """
+    stream = sys.__stderr__ if level in ("WARNING", "ERROR") else sys.__stdout__
+    if stream is None:                 # a windowed build may have none
+        return
+    try:
+        print(f"[{level}] {source}: {message}", file=stream, flush=True)
+    except Exception:                  # never let logging break the app
+        pass
 
 
 def _install_message_handler(sink: LogViewModel) -> None:
@@ -92,8 +111,6 @@ def _level_for(msg_type: "QtMsgType") -> LogLevel:
 
 def _install_excepthook(sink: LogViewModel) -> None:
     """Report uncaught exceptions, keeping Python's own reporting intact."""
-    previous = sys.excepthook
-
     def hook(
         exc_type: Type[BaseException],
         exc_value: BaseException,
@@ -102,7 +119,8 @@ def _install_excepthook(sink: LogViewModel) -> None:
         text = "".join(
             traceback.format_exception(exc_type, exc_value, exc_tb)
         ).rstrip()
+        # No `previous(...)`: the entry itself is mirrored to stderr now, so
+        # calling the default hook would print the same traceback twice.
         sink.add_log(text, level=LogLevel.ERROR, source="Python")
-        previous(exc_type, exc_value, exc_tb)
 
     sys.excepthook = hook

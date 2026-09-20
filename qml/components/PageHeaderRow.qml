@@ -25,12 +25,19 @@ RowLayout {
     //: How much room to leave for the actions. See above.
     property real reservedWidth: 0
     property string title: ""
+    //: Extra air below the title, for a page whose list needs a gap between its
+    //: header and its first row.
+    property real bottomGap: 0
 
     spacing: 8
 
     Text {
         typography: Typography.Subtitle
         text: row.title
+        //: The row is as tall as this plus `bottomGap`. Top-aligning the text keeps
+        //: the gap *below* it, instead of splitting it around the title.
+        Layout.alignment: Qt.AlignTop
+        Layout.preferredHeight: implicitHeight + row.bottomGap
     }
 
     Item { Layout.fillWidth: true }

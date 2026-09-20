@@ -234,24 +234,21 @@ scratch/                        # Preserved experiments — NOT part of the app 
   names `Rin.RadioButton` (an ambiguous type name is a runtime failure, not merely a lint warning);
   qmllint then reports the page's other unqualified RinUI types as unresolved, an artifact of the
   paired imports (`HistoryPage` carries the same pair) rather than a runtime problem.
-- **A list's header is a `Component` — and with no entries it is not created at all.** Three traps
-  met while giving the History page its floating header. An `id` declared inside `ListView.header`
-  is **not visible outside it** (the value is compiled into a component), so the page reaches that
-  row through `ListView.headerItem`; the tell is `ReferenceError: <id> is not defined` at a page
-  line. The header item keeps its own size too: a `RowLayout` there reports a height while laying
-  every child out at width 0, so the title silently fails to draw until the header sets `width:`
-  itself. And an **empty model means no `headerItem`**: the inline title disappears and the actions
-  lose the row they travel from, so they sit where the floating bar would be with no bar behind
-  them. The page therefore keeps a stand-in row of its own and switches —
-  `inlineRow: historyList.count > 0 ? historyList.headerItem.inlineRow : emptyRow`. Two more things
-  follow from the same boundary: the header is an `Item` that *wraps* the row, 24px down and 12px
-  taller, because the list itself is full-bleed (see the scroll-bar bullet below) and the title must
-  not sit on the first card; and it carries `property alias inlineRow: <row id>`, because an id
-  inside the header component is invisible from outside while a property of the header item is not —
-  the page can still name the row the actions track. It must be the row and not the wrapper: the
-  actions centre on whatever `PageHeader.inlineRow` is, so the wrapper would drop them by half of
-  both extra gaps. Inline rows that are ordinary children of the content (Log, Settings) are subject
-  to none of this.
+- **The History page deliberately does not use a `ListView`.** It is a `Flickable` + `Column` +
+  `Repeater`, with the title row as an ordinary child of the content — the same shape as the Log and
+  Settings pages — and that is a decision, not an accident. The list's `header` slot cost three
+  separate traps: it is a `Component`, so an `id` declared in it is **invisible outside it** and the
+  row has to be fetched back through `headerItem` (the tell is
+  `ReferenceError: <id> is not defined`); the view does not size it, so a `RowLayout` there reports a
+  height while laying every child out at width 0 until the header sets `width:` itself; and this view
+  positions it *above the viewport by its own height* at rest — measured, `headerItem.y` was -64 with
+  `contentY` at 0, whatever `headerPositioning` said — which leaves the page looking scrolled on
+  load, title gone and the first card at the very top. What that bought was keeping delegates unbuilt
+  until they scroll into view, and the lazy LaTeX behind it measures at **0.5-1.5 ms per entry**
+  (cached), so the machinery is not worth it. The page now owns what the view used to:
+  `currentIndex`, `keyboardNavigation`, and a `reveal(index)` standing in for
+  `positionViewAtIndex`. The `headerItem`/`ListView.header` traps above remain true of any *other*
+  list that wants a scrolling header — they are why this one does not.
 - **A binding that names the property it defines loops.** QML resolves a bare identifier on the
   right-hand side against the object's *own* properties before the enclosing ids, so
   `PageHeaderRow { header: header }` — where the page header had `id: header` — was a self-reference:
@@ -293,8 +290,8 @@ scratch/                        # Preserved experiments — NOT part of the app 
   bar itself, and the `Flickable` pages add `Rin.ScrollBar.vertical: Rin.ScrollBar {}`. One bar, at
   the right edge of the view that scrolls — which is why the History list is deliberately
   **full-bleed**: that puts its bar on the window edge, where the Microsoft Store keeps it, and the
-  *cards* carry the page inset instead (`page.cardInset`, 28px, plus their own 2px margin and 10px of
-  padding). That is also what keeps them clear of the bar.
+  *cards* carry the inset instead: the content sits at the usual 24px and the cards add
+  `page.cardInset` (4px) on each side, which is what keeps them clear of the bar.
 - **Never resize a RinUI window while it is being created and then maximize it.** The window fills
   the screen but its content stays drawn in the pre-resize rectangle, surrounded by a white border,
   and later resizes never repair it — while Qt reports the correct window state *and* content size,
@@ -424,8 +421,28 @@ scratch/                        # Preserved experiments — NOT part of the app 
   **data URL** (`latex_render.latex_to_svg`, with `size=`/`color=`), `svg_size` for natural size;
   `LatexImage` (qml/components) renders crisp by scaling `sourceSize` by `devicePixelRatio`.
   The font size comes from the settings page (`fonts.latex_size`), the colour from the theme.
-- History renders each entry's LaTeX **lazily per visible row** and caches sizes; after lazy render
-  the model emits `dataChanged` for the LaTeX/natural-size roles so the open delegate refreshes.
+- History renders each entry's LaTeX **lazily, per row, on approach**, and the pieces of that are
+  worth stating because two obvious implementations do not work. Reading the `latexUrl` role used to
+  render (the model's `_svg_url` caches the SVG on the entry and emits `dataChanged` for the
+  LaTeX/natural-size roles). That made *reading* the role the cost, so the read had to be deferred —
+  but a role can only be read where it is *injected*, which is the delegate root, so neither
+  `model.latexUrl` (there is no `model` object in a `Repeater` delegate) nor a `Loader`-wrapped
+  sub-component (a `Component` inside a delegate does not inherit the model context, and every
+  `required property` comes back uninitialised) can defer it. The render moved out of the read
+  instead: `data()` now only looks the SVG up, and the view calls `historyVM.requestLatex(index)`
+  while the card is near the viewport (`nearView`, one screen of slack) — and again when the cache
+  was dropped under it by a theme change, which shows up as the role going back to empty.
+- **The page loads in batches, and the `Column` makes that cheap.** Only `page.loaded` cards (12 to
+  start) are `visible`; the rest are skipped by the `Column`, so they occupy no space and the content
+  only ever spans what is loaded. Reaching the bottom raises `loaded` by another batch. One trap:
+  `nearView` has to test `visible` *first*, because a skipped card has no position of its own and `y`
+  reads 0 — which the geometry test otherwise takes for "at the top of the viewport", and every
+  unloaded card renders.
+- **Set the LaTeX colour before any page is built.** The pages used to do it in their own
+  `Component.onCompleted`, which runs after their delegates exist: every entry rendered once in the
+  default black, then the colour arrived, dropped the whole cache, and every entry rendered again.
+  `MainWindow` sets it with the log colours now (`applyLatexColors`), and the log — mirrored to the
+  terminal — is what made the doubling obvious.
 - Long results/text use `elide: ElideRight` (mono lines in history align the result `=` under the
   assignment operator via `" ".repeat(name.length + 1)`).
 
@@ -572,10 +589,15 @@ and `Dialog.qml:21/23 … TypeError: Cannot read property 'width'/'height' of nu
 visible in the page now, invisible before. The Qt handler must not re-enter itself (it ends in a
 signal emission that can make Qt print again), so a module flag drops nested calls.
 
-**Nothing goes to the terminal.** The page is the only destination: Qt's messages are taken off the
-console here, so echoing the app's own entries would put the two out of step rather than in step. An
-uncaught exception still reaches stderr — the excepthook chains to Python's own — because the app is
-about to die and that report is not ours to swallow.
+**Everything also goes to the terminal**, through `LogViewModel.entryAdded` — one signal, so the page
+and the terminal cannot drift apart. Levels are routed: DEBUG/INFO to stdout, WARNING/ERROR to
+stderr, written through `sys.__stdout__`/`sys.__stderr__` (the streams the interpreter started with)
+and flushed, because a redirected stream is block-buffered and a developer watching a file wants the
+line now. This is deliberate and it is what the earlier version of this file refused to do: without
+it, a headless run — or any run where nobody is looking at the window — leaves every message in a
+page nobody can read, and the app's own probes (a temporary `print`) simply vanish. The excepthook
+therefore no longer chains to Python's own: the entry *is* the traceback, and mirroring it prints it
+once.
 
 **Entries.** Consecutive identical entries collapse into one line with an `(xN)` count (that RinUI
 warning arrives once per instantiation), and the list is capped at `MAX_ENTRIES = 1000`, which also

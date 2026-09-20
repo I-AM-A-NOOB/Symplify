@@ -46,7 +46,7 @@ Item {
 
     //: Where the inline row's top sits in the *content*, before any scrolling.
     //: `mapToItem` answers with the position as it is on screen — the flickable's
-    //: scroll included — and `travellingY` takes the scroll off again, so the
+    //: scroll included — and `inlineRowPageY` takes the scroll off again, so the
     //: scroll has to come back off here first. Without that the actions moved at
     //: twice the scroll rate and drifted away from the row they belong beside, and
     //: the drift stayed after the gesture ended. Not `inlineRow.y` either: that is
@@ -54,6 +54,10 @@ Item {
     readonly property real inlineRowY: header.inlineRow && header.flickable
         ? header.inlineRow.mapToItem(header.flickable, 0, 0).y + header.flickable.contentY
         : header.y
+
+    //: Where the inline row's top is on the page right now.
+    readonly property real inlineRowPageY: header.inlineRowY
+        - (header.flickable ? header.flickable.contentY : 0)
 
     //: The actions' resting place, relative to this header — centred in the box.
     readonly property real restingY: header.pad
@@ -66,14 +70,24 @@ Item {
     //: negative overscroll included, so the actions ride the bounce with the rest
     //: of the content.
     readonly property real travellingY: header.flickable
-        ? header.inlineRowY - header.flickable.contentY
+        ? header.inlineRowPageY
           + (header.inlineRow ? (header.inlineRow.height - actionRow.implicitHeight) / 2 : 0)
         : header.restingPageY
 
-    //: True once the actions have ridden up as far as they go.
-    readonly property bool pinned: header.flickable !== null
+    //: True once the inline row has scrolled out above the bar, which is when the
+    //: bar takes over from it — the equivalent of the Microsoft Store's title
+    //: disappearing under the bar as you scroll.
+    //:
+    //: Both of the tempting shorter tests are wrong. "The actions have stopped
+    //: travelling" is true the instant the page opens, because the row's inset and
+    //: the bar's resting place are within a few pixels of each other. "The row has
+    //: scrolled into the bar's band" is *also* true at rest: the band is 8..68 and
+    //: the row starts at 24 and is 28 tall, so it begins inside the band. Either
+    //: one leaves the backdrop covering the very title it exists to replace, and
+    //: the page looks scrolled while it is still at the top.
+    readonly property bool barShown: header.flickable !== null
         && header.inlineRow !== null
-        && header.travellingY <= header.restingPageY
+        && header.inlineRowPageY + header.inlineRow.height <= header.y
 
     x: header.margin
     y: header.margin
@@ -87,10 +101,10 @@ Item {
 
         x: 0
         // Starts low and rises: that is the "float up".
-        y: header.pinned ? 0 : 10
+        y: header.barShown ? 0 : 10
         width: parent.width
         height: parent.height
-        opacity: header.pinned ? 1 : 0
+        opacity: header.barShown ? 1 : 0
         visible: opacity > 0
 
         Behavior on opacity {
@@ -126,7 +140,7 @@ Item {
             leftMargin: header.inset - header.margin
             verticalCenter: parent.verticalCenter
         }
-        opacity: header.pinned ? 1 : 0
+        opacity: header.barShown ? 1 : 0
         visible: opacity > 0
         typography: Typography.Subtitle
         text: header.title

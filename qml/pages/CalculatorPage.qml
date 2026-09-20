@@ -21,7 +21,6 @@ Item {
     readonly property var codeSurface: settingsVM.codeSurface(Theme.isDark())
 
     Component.onCompleted: {
-        calcVM.set_latex_color(Theme.currentTheme.colors.textColor)
         // Code colouring on the input. The item hands over its document, and the
         // palette follows the ACTIVE theme — RinUI resolves Auto against the OS,
         // so ask it rather than the setting.
@@ -29,15 +28,6 @@ Item {
         // The Assign value is the other place an expression gets typed.
         vm.attachCodeHighlighting(assignValueField.textDocument, Theme.isDark())
         codeInput.forceActiveFocus()
-    }
-
-    // Re-tint the LaTeX when the app theme changes.
-    Connections {
-        target: Theme
-
-        function onCurrentThemeChanged() {
-            calcVM.set_latex_color(Theme.currentTheme.colors.textColor)
-        }
     }
 
     function findFocusedEditable(item) {

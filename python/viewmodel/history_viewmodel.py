@@ -121,7 +121,11 @@ class HistoryModel(QAbstractListModel):
         if role == self.ErrorRole:
             return item.error
         if role == self.LatexUrlRole:
-            return self._svg_url(index.row())
+            # Not `self._svg_url(...)`: rendering here would make every read — and
+            # so every delegate that is built — render its entry. The view asks for
+            # the render via `requestLatex` when the card comes near the viewport,
+            # and `dataChanged` brings the result back to the binding.
+            return item.svg_url or ""
         if role == self.LatexRole:
             return item.latex
         if role == self.NaturalWidthRole:
@@ -133,6 +137,19 @@ class HistoryModel(QAbstractListModel):
         if role == Qt.DisplayRole:
             return item.expression
         return None
+
+    @Slot(int)
+    def requestLatex(self, row: int) -> None:
+        """Render the entry's SVG if it has not been rendered yet.
+
+        Called by the view when a card comes near the viewport. Reading the
+        ``latexUrl`` role used to do this, which meant every delegate rendered as
+        the page was built; the read is a cache lookup now and this is the only
+        thing that renders. The render notifies through ``dataChanged``, so the
+        card's own role bindings pick the result up.
+        """
+        if 0 <= row < len(self._items) and self._items[row].svg_url is None:
+            self._svg_url(row)
 
     def _svg_url(self, row: int) -> str:
         """Render (once) and return the entry's SVG data URL."""
