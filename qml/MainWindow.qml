@@ -44,6 +44,7 @@ FluentWindow {
     Component.onCompleted: {
         settingsVM.attachWindow(window)
         applyAccent()
+        applyLogColors()
     }
 
     // RinUI's accent handling, and why this is not just a call to Theme:
@@ -66,6 +67,35 @@ FluentWindow {
             settingsVM.accentForScheme(Theme.currentTheme.isDark)
     }
 
+    // The log colours its levels with the theme's status roles, and the theme
+    // object lives on this side — so the values are pushed into the viewmodel,
+    // which builds the log's rich text. `systemAttentionColor` is the accent, so
+    // the ramp is dim (debug) -> accent (info) -> caution -> critical.
+    //
+    // Two conversions are unavoidable here. Theme colours are translucent where
+    // the theme says so (secondary text is 60% white), and Qt's rich-text parser
+    // takes opaque `#rrggbb` only — so each one is composited over the page's own
+    // background, which is what Qt would have done anyway. And a `color` handed
+    // straight to Python arrives as a QColor whose `str()` is not a colour at all,
+    // so the strings are produced here, where the values are still colours.
+    function applyLogColors() {
+        const c = Theme.currentTheme.colors
+        const bg = c.backgroundColor
+        const over = function (fg) {
+            return Qt.rgba(fg.r * fg.a + bg.r * (1 - fg.a),
+                           fg.g * fg.a + bg.g * (1 - fg.a),
+                           fg.b * fg.a + bg.b * (1 - fg.a), 1).toString()
+        }
+        logVM.colors = {
+            "normal": over(c.textColor),
+            "secondary": over(c.textSecondaryColor),
+            "debug": over(c.textTertialyColor),
+            "info": over(c.systemAttentionColor),
+            "warning": over(c.systemCautionColor),
+            "error": over(c.systemCriticalColor)
+        }
+    }
+
     Connections {
         target: settingsVM
 
@@ -82,6 +112,7 @@ FluentWindow {
 
         function onCurrentThemeChanged() {
             applyAccent()
+            applyLogColors()
         }
     }
 

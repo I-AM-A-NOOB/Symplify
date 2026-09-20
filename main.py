@@ -62,6 +62,11 @@ def main() -> int:
     context.setContextProperty("settingsVM", vm.settings)
     context.setContextProperty("keyboardTabs", load_keyboard_tabs())
 
+    # Qt's warnings and any uncaught exception used to go only to a console a
+    # windowed build does not have (see python/log_capture.py). Installed before
+    # the QML loads, so engine-level complaints land in the Log page too.
+    vm.install_log_capture()
+
     window.load(ROOT / "qml" / "MainWindow.qml")
     return app.exec()
 

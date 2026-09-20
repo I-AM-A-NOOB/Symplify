@@ -17,6 +17,7 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QGuiApplication, QKeyEvent
 from typing import Optional
 
+from .. import log_capture
 from ..code_style import to_rich_text, theme
 from ..model.calculator import Calculator
 from ..model.variable import VariableManager
@@ -87,6 +88,18 @@ class MainViewModel(QObject):
         self._apply_latex_size()      # apply the persisted rendering settings now
         self._settings.changed.connect(self._apply_latex_font)
         self._apply_latex_font()
+
+    def install_log_capture(self) -> None:
+        """Take over Qt's and the interpreter's message streams.
+
+        Called by the composition root rather than from ``__init__``: the handlers
+        are process-wide and last for the life of the process, so a headless
+        ``MainViewModel`` — which is what the tests build — must not hijack them.
+
+        The sink is this viewmodel's log, so whatever Qt or the interpreter says
+        lands in the Log page beside the app's own entries.
+        """
+        log_capture.install(self._log)
 
     def _apply_latex_size(self) -> None:
         """Push the configured result font size to everything that renders LaTeX."""

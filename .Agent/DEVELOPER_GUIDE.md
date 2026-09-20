@@ -44,6 +44,10 @@ python/
   window_drag.py                # Replaces RinUI's WinEventManager with one whose title-bar drag
                                 # is a real caption press, and flags the drag so RinUI's own
                                 # onPositionChanged move is skipped. Windows only.
+  log_capture.py                # Takes over qInstallMessageHandler + sys.excepthook and feeds
+                                # them to the log viewmodel, so Qt's warnings and uncaught
+                                # exceptions reach the Log page instead of a console a windowed
+                                # build does not have.
   viewmodel/                    # Qt bridge (QObject + models). The ONLY layer that imports Qt
                                 # (besides main.py). State that must survive page switches lives here.
     input_mode.py               #   InputMode (CODE=0 / ASSIGN=1) — UI state, not model state
@@ -78,6 +82,11 @@ qml/
                                 #   CodeSurface (a code input's box, in the code theme's colours),
                                 #   ExpanderRow / ExpanderPanel (RinUI expanders that keep
                                 #     their content's text cursors),
+                                #   PageScaffold (the frame every page shares: title, actions and
+                                #     the floating bar they ride into) together with the two pieces
+                                #     it assembles — PageHeader (the bar that fades in as the
+                                #     inline title scrolls away) and PageHeaderRow (that title,
+                                #     plus the room the actions need),
                                 #   HScrollView, LatexImage, KeyboardPanel, SearchBar,
                                 #   SegmentedItem/SelectorBarItem (focus-indicator shadows)
 docs/
@@ -216,9 +225,76 @@ scratch/                        # Preserved experiments — NOT part of the app 
   (`content:`/`action:` on it go to the header's right slot instead); `SettingItem` has **no**
   `content` property. RinUI *does* ship a themed `RadioButton`
   (`components/BasicInput/RadioButton.qml` — QQC2's, restyled), but like QQC2's it only unchecks its
-  **siblings**: buttons in different parents are independent, which is why the code-theme rows — one
-  per `SettingItem` — drive exclusivity from the setting instead (`autoExclusive: false`, `checked`
-  bound to the value, and the click re-establishing the binding after Qt wrote `checked` itself).
+  **siblings**: buttons in different parents are independent, which is why the code-theme cells —
+  one `Column` per family, side by side in a `Flow` — drive exclusivity from the setting instead
+  (`autoExclusive: false`, `checked` bound to the value, and the click re-establishing the binding
+  after Qt wrote `checked` itself). A `Flow` is a positioner, not a layout, so `Layout.*` on those
+  cells is ignored and the widest line would size them; they carry an explicit `width` instead.
+  `QtQuick.Controls` and `RinUI` both export `RadioButton`, so the page imports `RinUI as Rin` and
+  names `Rin.RadioButton` (an ambiguous type name is a runtime failure, not merely a lint warning);
+  qmllint then reports the page's other unqualified RinUI types as unresolved, an artifact of the
+  paired imports (`HistoryPage` carries the same pair) rather than a runtime problem.
+- **A list's header is a `Component` — and with no entries it is not created at all.** Three traps
+  met while giving the History page its floating header. An `id` declared inside `ListView.header`
+  is **not visible outside it** (the value is compiled into a component), so the page reaches that
+  row through `ListView.headerItem`; the tell is `ReferenceError: <id> is not defined` at a page
+  line. The header item keeps its own size too: a `RowLayout` there reports a height while laying
+  every child out at width 0, so the title silently fails to draw until the header sets `width:`
+  itself. And an **empty model means no `headerItem`**: the inline title disappears and the actions
+  lose the row they travel from, so they sit where the floating bar would be with no bar behind
+  them. The page therefore keeps a stand-in row of its own and switches —
+  `inlineRow: historyList.count > 0 ? historyList.headerItem.inlineRow : emptyRow`. Two more things
+  follow from the same boundary: the header is an `Item` that *wraps* the row, 24px down and 12px
+  taller, because the list itself is full-bleed (see the scroll-bar bullet below) and the title must
+  not sit on the first card; and it carries `property alias inlineRow: <row id>`, because an id
+  inside the header component is invisible from outside while a property of the header item is not —
+  the page can still name the row the actions track. It must be the row and not the wrapper: the
+  actions centre on whatever `PageHeader.inlineRow` is, so the wrapper would drop them by half of
+  both extra gaps. Inline rows that are ordinary children of the content (Log, Settings) are subject
+  to none of this.
+- **A binding that names the property it defines loops.** QML resolves a bare identifier on the
+  right-hand side against the object's *own* properties before the enclosing ids, so
+  `PageHeaderRow { header: header }` — where the page header had `id: header` — was a self-reference:
+  `Binding loop detected for property "header"`, with `PageHeader.inlineRow`'s binding looping
+  alongside it. Name the ids for the role (`pageHeader`, `headerRow`) — and better, do not pass the
+  object at all. The row takes `reservedWidth: frame.actionsWidth`, a *number*: the row lives inside
+  the scrolling body and the actions outside it, so a reference is a loop across that boundary while
+  a number keeps the dependency one-way.
+- **`mapToItem` in a binding is a snapshot of where things are *now*, scroll included.** `PageHeader`
+  finds its inline row with `inlineRow.mapToItem(flickable, 0, 0).y`, and `travellingY` then subtracts
+  the flickable's scroll — so the scroll has to come back off at the mapping. Otherwise it is counted
+  twice, the actions move at twice the scroll rate, and they end up tens of pixels below the row they
+  belong beside. Worse, the error **persists**: a `mapToItem` call creates no dependency on the
+  positions it reads, so the property keeps whatever it saw when the binding last ran and the actions
+  stay displaced after the gesture ends. Mapping into the flickable and adding `contentY` back gives
+  the row's position in *content* coordinates (what the rest of the maths assumes), and that is
+  stable, because scrolling does not change it. Clamping the scroll (`Math.max(0, contentY)`) hides
+  the symptom without fixing the frame of reference — it lived in this file for a round, and the
+  drift came straight back the moment it was removed.
+- **Overscroll and its bounce are the native ones; nothing here needs to manage them.** An earlier
+  round set `boundsBehavior: Flickable.StopAtBounds` on every page body (and clamped `contentY` in
+  `PageHeader`) to stop a list being dragged past its end. All of it is gone. The stretched state
+  that prompted it was never the overscroll — it was the coordinate bug above, and what looked like
+  "the content stays where I dragged it" was the actions parked at a double-counted offset.
+  `Rin.ListView`'s own `updateAnimation` (which pulls `contentY` to -12 and back on every model
+  change) is left alone too: it is part of the list's feel. Verified by measuring screenshots:
+  idle, mid-drag and settled all put the toolbar 2px from the title, at the same absolute y.
+- **Do not hand-roll a page scroll bar; attach RinUI's.** The History page once showed two bars,
+  because the list's own attached bar and a hand-written page-level one were both drawn — and the
+  hand-written one, built on `T.ScrollBar`, was broken in the two ways an attached bar is immune to:
+  Qt sizes and places an *attached* bar's content item from `size`/`position` (a free-standing one
+  must do it itself, and the first attempt drew a **full-height line that never moved** — a permanent
+  stripe down the window edge of every page), and an attached bar's `active` is driven for it
+  (deriving it here deadlocked: hiding on `!active` while `active` includes `hovered` means an item
+  that is never visible and so can never be hovered). Note also that **nothing written through the
+  `verticalScrollBar` alias removes an attached bar**: the assignment raises no warning and does
+  nothing, because the bar binds `policy` itself — only declaring `ScrollBar.vertical: null` on the
+  view drops it. The pages therefore keep what the view already had: `Rin.ListView` attaches RinUI's
+  bar itself, and the `Flickable` pages add `Rin.ScrollBar.vertical: Rin.ScrollBar {}`. One bar, at
+  the right edge of the view that scrolls — which is why the History list is deliberately
+  **full-bleed**: that puts its bar on the window edge, where the Microsoft Store keeps it, and the
+  *cards* carry the page inset instead (`page.cardInset`, 28px, plus their own 2px margin and 10px of
+  padding). That is also what keeps them clear of the bar.
 - **Never resize a RinUI window while it is being created and then maximize it.** The window fills
   the screen but its content stays drawn in the pre-resize rectangle, surrounded by a white border,
   and later resizes never repair it — while Qt reports the correct window state *and* content size,
@@ -302,6 +378,45 @@ scratch/                        # Preserved experiments — NOT part of the app 
 - **`TextField` exposes no assignable `contentItem`** — unlike `Button` and `ItemDelegate`, where that
   override is routine (and routine in this repo, on `DropDownColorPicker`). QML refuses it outright:
   *"Cannot assign to non-existent property contentItem"*.
+
+- **A `ScrollView` sizes its content to the viewport, and a rich text `TextArea` inside one never
+  settles.** Changing the text area's width (a scroll bar appearing, a padding change) re-wraps the
+  text, which changes its height, which asks for the bar again. Measured on the Log page: the
+  flickable's `contentHeight` crawled 279 → 288 → 311 → 342 → 377 while the text itself reported
+  6290 — a few hundred pixels of scrollable range against ~6000 of text, so the tail was
+  unreachable, and binding `implicitHeight: contentHeight + paddings` on the text area did not
+  change it. What works is the Settings page's arrangement: a `Flickable` that declares its own
+  `contentHeight` from the content's real height. Reach for that whenever the content's size is
+  known — it is also what makes the attached `ScrollBar` hug the window edge.
+- **A QML `color` handed to Python is a `QColor`, and `str()` on it is not a colour.** `QColor.__str__`
+  gives `PySide6.QtGui.QColor.fromRgbF(1.000000, …)`, so a rich-text string built from it fails with
+  `QTextHtmlParser::applyAttributes: Unknown color name` and the text silently keeps the default
+  colour. Convert where the value is still a colour (QML: `Qt.rgba(...).toString()`; Python:
+  `QColor.name()`). And note the theme's roles are translucent (`Qt.alpha()`), so `name()` alone
+  drops the alpha and the ink comes out too bright — composite over the background first.
+
+- **A backdrop built by hand draws the sharp copy as well as the blurred one.** RinUI ships
+  `AcrylicBrush` (root `RinUI` module, `components/Styles/`) for exactly this: assign `sourceItem` and
+  it captures the band it covers, keeps its own capture item invisible, tints it with the theme's
+  acrylic colour, and falls back to a tinted fill when the effect is unavailable. A header that
+  instead kept a *visible* `ShaderEffectSource` and stacked a `MultiEffect` of it on top superimposed
+  the two — a blur of sparse text is mostly transparent, so the sharp text showed through it,
+  legible but with frayed edges. Use the material; and note that a hidden `ShaderEffectSource` still
+  provides its texture, which is what makes the library's own arrangement work. One structural
+  consequence follows for a *floating* bar: it is a sibling **above** the flickable while the scroll
+  bar lives **inside** it, so nothing in the flickable can ever be drawn over the bar — which is why
+  the header's scroll bar is a page-level sibling too (see the trap below) rather than the attached
+  one, letting the bar's outer margin simply equal its corner radius.
+
+- **A `ScrollBar` from `QtQuick.Controls` — or RinUI's (`components/ScrollBar.qml`), which is built
+  on that type — cannot be used free-standing.** A plain instance logs two warnings:
+  `Cannot specify top, bottom, and verticalCenter anchors at the same time` (the Controls type
+  anchors itself) and `ScrollBar attached property must be attached to an object deriving from
+  Flickable or ScrollView` (it declares that property). RinUI's own comment says it imports
+  `QtQuick.Templates` for a related reason. Extending `T.ScrollBar` to get a free-standing one is
+  possible — and is what a page-level bar here once did, badly enough to be worth avoiding (see the
+  two-scroll-bars bullet above). Attaching RinUI's bar is what the pages do now; it also means the
+  bar is not part of `PageScaffold`, which draws only what must not scroll.
 
 ## Rendering / display
 
@@ -443,6 +558,52 @@ One lexer, one span list, two renderers. Anything that colours code contributes 
   read-only display belongs in the entry's own data, computed once — never inside `data()`, which
   runs on every repaint.
 
+## Log
+
+The Log page shows one stream, arriving from two directions, and it is the app's only window into
+its own health.
+
+**Into the page.** `python/log_capture.py` takes over `qInstallMessageHandler` and `sys.excepthook`
+and hands both to `LogViewModel`. Before it, Qt's warnings went to a console a packaged build does
+not have (`--windows-console-mode=disable` leaves `sys.stdout` as `None`), and an uncaught exception
+went nowhere the user could look. What that stream carries is not academic: RinUI emits
+`ScrollableTextArea.qml:20 … ReferenceError: defaultHeight is not defined` on every instantiation,
+and `Dialog.qml:21/23 … TypeError: Cannot read property 'width'/'height' of null` — all of them
+visible in the page now, invisible before. The Qt handler must not re-enter itself (it ends in a
+signal emission that can make Qt print again), so a module flag drops nested calls.
+
+**Nothing goes to the terminal.** The page is the only destination: Qt's messages are taken off the
+console here, so echoing the app's own entries would put the two out of step rather than in step. An
+uncaught exception still reaches stderr — the excepthook chains to Python's own — because the app is
+about to die and that report is not ours to swallow.
+
+**Entries.** Consecutive identical entries collapse into one line with an `(xN)` count (that RinUI
+warning arrives once per instantiation), and the list is capped at `MAX_ENTRIES = 1000`, which also
+bounds the rich text rebuild on every append.
+
+**Colours come from QML**, not from Python: they are RinUI's status roles — `systemAttentionColor`
+for INFO, `systemCautionColor` for WARNING, `systemCriticalColor` for ERROR, `textTertialyColor` for
+DEBUG — and the theme lives on that side. `MainWindow.qml` pushes them with `logVM.colors = {…}`,
+and it has to convert on the way: a `color` handed to Python arrives as a `QColor` whose `str()` is
+`PySide6.QtGui.QColor.fromRgbF(…)`, which Qt's rich-text parser rejects with `Unknown color name`.
+The values are composited over the page background (theme roles are translucent) and emitted as
+opaque `#rrggbb`.
+
+**The page** (`qml/pages/LogPage.qml`) is a borderless `Flickable` + rich `Text`, deliberately not a
+`ScrollView` — see the trap below. It follows the tail unless the reader has scrolled away, and it
+distinguishes "not laid out yet" from "scrolled up"; conflating the two is what left the page
+opening on its oldest line. Its header is the two-part arrangement the Microsoft Store uses — the
+title, the actions and the bar in `qml/components/PageHeader.qml`, the inline row in
+`PageHeaderRow.qml`, and both assembled for every page by `PageScaffold.qml`; the scroll bar is not
+part of this at all — it belongs to the body, which attaches RinUI's (see the trap above). The title
+is content — the first thing in the column, on the
+ordinary page background — and scrolls away with everything else, while the *actions* are not
+content. There is exactly one copy of the actions, owned by that component, and they travel: their
+`y` tracks the inline row up the page and stops, centred, at the bar's resting place, so they ride
+the content and then stick under a rounded acrylic bar. (One copy is also what stops a
+scrolled-away set from still being clickable, which a second, hidden instance would be.) The bar's
+backdrop floats up from 10px below while fading in, and carries the page's own title as it does.
+
 ## Settings & config
 
 - One YAML file, written **only** by `SettingsViewModel` (invariant 8). The schema, defaults and
@@ -459,7 +620,9 @@ One lexer, one span list, two renderers. Anything that colours code contributes 
   the theme's `bodyStrongSize` (14 pt, weight 600), i.e. *the same size as a card title but bolder*;
   `Typography.Subtitle` (20 pt) is one size too large and reads as a second page heading. Most rows
   are `SettingCard`s; a `SettingExpander` is used only where a row carries a second row of its own
-  (the code theme, accent and About groups). `fonts.latex_size` used to be `rendering.latex_size`: `load()`
+    (the code theme, accent and About groups). The code theme's holds one cell per family — a `Flow`
+  of fixed-width columns, each a `RadioButton` over a wrapped line of description — so the choices
+  read as one row and wrap only when the window is narrow. `fonts.latex_size` used to be `rendering.latex_size`: `load()`
   migrates it, and a file that has both keeps the new key.
 - **Location**: `<root>/data/config.yaml` when a `data` folder sits next to the app (portable mode;
   `root` is the exe directory when frozen and the repository root in dev), otherwise the OS

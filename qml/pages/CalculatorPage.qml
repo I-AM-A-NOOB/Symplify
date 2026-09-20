@@ -130,7 +130,7 @@ Item {
             spacing: 8
 
             Text {
-                typography: Typography.Title
+                typography: Typography.Subtitle
                 text: qsTr("Calculator")
             }
 

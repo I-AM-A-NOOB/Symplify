@@ -10,6 +10,9 @@ ExpanderRow 1.0 ExpanderRow.qml
 HScrollView 1.0 HScrollView.qml
 KeyboardPanel 1.0 KeyboardPanel.qml
 LatexImage 1.0 LatexImage.qml
+PageHeader 1.0 PageHeader.qml
+PageHeaderRow 1.0 PageHeaderRow.qml
+PageScaffold 1.0 PageScaffold.qml
 SearchBar 1.0 SearchBar.qml
 SegmentedItem 1.0 SegmentedItem.qml
 SelectorBarItem 1.0 SelectorBarItem.qml

@@ -267,7 +267,7 @@ class CalculatorViewModel(QObject):
     @Slot(str)
     def calculate(self, expression: str) -> None:
         """Evaluate an expression in code mode."""
-        self._log.add_info(f"> {expression}", "Calculator")
+        self._log.add_info(expression, "Calculator")
         result = self._calculator.evaluate(
             expression, self._variable_manager.list_all()
         )
@@ -294,7 +294,7 @@ class CalculatorViewModel(QObject):
         store. An unparsable value is still kept as an invalid (NaN) entry, so
         the user's input survives.
         """
-        self._log.add_info(f"> {name} {operator} {value_str}", "Calculator")
+        self._log.add_info(f"{name} {operator} {value_str}", "Calculator")
         result = self._calculator.assign(
             Assignment(name, operator, value_str),
             self._variable_manager.list_all(),
