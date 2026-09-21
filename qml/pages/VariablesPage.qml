@@ -177,11 +177,12 @@ Item {
                         // Coloured like the input it was typed into. `display` is
                         // the raw cell text, so it is what the span list is asked
                         // about — a name or a type paints nothing, a value does.
+                        // `Text.elide` is ignored for rich text, so the elision
+                        // happens in the viewmodel with this cell's width.
                         textFormat: Text.RichText
                         text: model.display !== undefined
-                            ? vm.highlighted(`${model.display}`, Theme.isDark())
+                            ? vm.highlightedElided(`${model.display}`, width, Theme.isDark())
                             : ""
-                        elide: Text.ElideRight
                         wrapMode: Text.NoWrap
                         verticalAlignment: Text.AlignVCenter
                         color: cell.enabled

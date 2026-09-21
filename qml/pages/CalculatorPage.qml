@@ -7,8 +7,6 @@ import "../components"
 Item {
     id: page
 
-    readonly property bool hasLatex: calcVM.latexSvgUrl !== ""
-
     // The input is RinUI's scrollable text area; the helpers below (focus,
     // insert, selectAll, fallbackTarget) address the text item, so this points
     // them at the wrapper's inner area.
@@ -438,17 +436,38 @@ Item {
 
                         Text {
                             Layout.fillWidth: true
-                            // Code text: this is the expression's value, coloured by
-                            // the same span list the input above is — through the
-                            // markup renderer, so label and editor agree.
+                            // A RowLayout defaults an item's minimum width to
+                            // its implicit — which for rich text is the *full*
+                            // text's width, so the row would grow past the
+                            // panel instead of squeezing this label. Zero it.
+                            Layout.minimumWidth: 0
+                            // The one line that reports the outcome, and the
+                            // only home for the failure and the hint (the LaTeX
+                            // strip below carries no empty-state text): the value
+                            // — markup, coloured by the same span list the input
+                            // uses, and elided by the viewmodel because
+                            // `Text.elide` is ignored for rich text; a failure —
+                            // prose, in the critical colour, the substitution the
+                            // History card's result line also makes; or the hint
+                            // before the first calculation. Prose is plain text,
+                            // so Qt's own elide covers it.
+                            readonly property bool isProse:
+                                calcVM.isError || calcVM.resultText === ""
                             font: settingsVM.codeFont
-                            textFormat: Text.RichText
+                            textFormat: isProse ? Text.PlainText : Text.RichText
                             wrapMode: Text.NoWrap
-                            elide: Text.ElideRight
+                            elide: isProse ? Text.ElideRight : Text.ElideNone
                             color: calcVM.isError
                                 ? Theme.currentTheme.colors.systemCriticalColor
-                                : Theme.currentTheme.colors.textColor
-                            text: vm.highlighted(calcVM.resultText, Theme.isDark())
+                                : calcVM.resultText === ""
+                                  ? Theme.currentTheme.colors.textSecondaryColor
+                                  : Theme.currentTheme.colors.textColor
+                            text: calcVM.isError
+                                ? calcVM.errorMessage
+                                : calcVM.resultText !== ""
+                                  ? vm.highlightedElided(calcVM.resultText, width,
+                                                         Theme.isDark())
+                                  : qsTr("Enter an expression, then press Ctrl+Return to calculate.")
                         }
 
                         Button {
@@ -487,69 +506,19 @@ Item {
                             width: resultScroll.width
                             spacing: 12
 
-                            // LaTeX result area: rendered at the SVG's natural
-                            // height (crisp, not upscaled), left-aligned; the
-                            // vertical wheel pans horizontally and a scrollbar
-                            // appears when needed.
-                            HScrollView {
-                                id: latexScroll
-
+                            // LaTeX result area: the natural-height rendering,
+                            // horizontally scrollable when it is wider than the
+                            // panel (see `MathStrip` for the geometry, including
+                            // the room its overlay bar needs). The strip is only
+                            // as tall as the artwork, so with nothing to render
+                            // it takes no space at all — the outcome it would
+                            // have reported is on the result line above instead.
+                            MathStrip {
                                 Layout.fillWidth: true
-                                Layout.preferredHeight: page.hasLatex
-                                    ? Math.max(60, latexImage.height + 16) : 120
-                                contentWidth: Math.max(latexScroll.width, latexImage.width)
 
-                                // implicit sizes drive the content size,
-                                // avoiding an explicit contentWidth binding loop.
-                                Item {
-                                    id: latexContent
-
-                                    implicitWidth: page.hasLatex ? latexImage.width : 1
-                                    implicitHeight: page.hasLatex ? latexImage.height : 120
-                                    width: Math.max(latexScroll.width, implicitWidth)
-                                    height: implicitHeight
-
-                                    LatexImage {
-                                        id: latexImage
-
-                                        objectName: "latexImage"
-                                        visible: page.hasLatex
-                                        x: 0
-                                        y: (parent.height - height) / 2
-                                        naturalWidth: calcVM.latexWidth
-                                        naturalHeight: calcVM.latexHeight
-                                        source: page.hasLatex ? calcVM.latexSvgUrl : ""
-                                    }
-
-                                    // Shown instead of the rendered LaTeX
-                                    // (error text, or the plain result when
-                                    // there is no LaTeX for it) — an output, so
-                                    // it typesets in the code font too.
-                                    Text {
-                                        anchors.fill: parent
-                                        visible: !page.hasLatex
-                                        horizontalAlignment: Text.AlignHCenter
-                                        verticalAlignment: Text.AlignVCenter
-                                        wrapMode: Text.WrapAnywhere
-                                        font: settingsVM.codeFont
-                                        // The value is coloured like the input it
-                                        // came from; the hint and a failure are
-                                        // prose, so they stay plain (and raw — a
-                                        // translation is not markup).
-                                        textFormat: calcVM.isError || calcVM.resultText === ""
-                                            ? Text.PlainText : Text.RichText
-                                        color: calcVM.isError
-                                            ? Theme.currentTheme.colors.systemCriticalColor
-                                            : calcVM.resultText === ""
-                                              ? Theme.currentTheme.colors.textSecondaryColor
-                                              : Theme.currentTheme.colors.textColor
-                                        text: calcVM.isError
-                                            ? calcVM.errorMessage
-                                            : calcVM.resultText !== ""
-                                              ? vm.highlighted(calcVM.resultText, Theme.isDark())
-                                              : qsTr("Enter an expression, then press Ctrl+Return to calculate.")
-                                    }
-                                }
+                                naturalWidth: calcVM.latexWidth
+                                naturalHeight: calcVM.latexHeight
+                                source: calcVM.latexSvgUrl
                             }
 
                             // Function/plot area with a fixed 4:3 aspect ratio.

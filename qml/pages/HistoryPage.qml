@@ -17,6 +17,10 @@ Item {
     //: while selecting by keyboard.
     property bool keyboardNavigation: false
 
+    //: First layout may already satisfy the load condition (a tall window with
+    //: a short first batch); `maybeLoadMore` fills until it does not.
+    Component.onCompleted: maybeLoadMore()
+
     //: Cards revealed so far, and how many more each time the reader reaches the
     //: bottom. A `Column` skips invisible children, so the content only ever spans
     //: what is loaded: the page starts on the newest `batch` entries and grows as
@@ -27,6 +31,25 @@ Item {
     //: How far the cards sit from the page edge: the content is already inset
     //: 24px, and the cards add this much on each side, clear of the scroll bar.
     readonly property int cardInset: 4
+    //: Load one more batch when the reader is already near the bottom of what
+    //: is loaded. Deliberately a single step, never a loop: a batch's cards
+    //: only join `contentHeight` after the next layout pass, so a loop reads a
+    //: stale height and would pour in everything at once. After loading, the
+    //: check re-queues itself for after that layout (`Qt.callLater`) — a
+    //: `contentHeightChanged` handler would do the same job, but Qt swallows
+    //: the re-entrant emission when the height changes inside a handler's own
+    //: cycle, which stalls the chain one batch after a resize. The chain stops
+    //: as soon as the condition is false. This is also what keeps a window too
+    //: tall for one batch loading anyway: there is nothing to scroll, so
+    //: `contentY` alone would never fire.
+    function maybeLoadMore() {
+        if (loaded < cards.count
+                && historyScroll.contentY + historyScroll.height
+                   > historyScroll.contentHeight - 320) {
+            loaded = Math.min(cards.count, loaded + batch)
+            Qt.callLater(maybeLoadMore)
+        }
+    }
 
     //: Bring a card into view, which `ListView.positionViewAtIndex` did for us.
     function reveal(index) {
@@ -63,10 +86,11 @@ Item {
         contentHeight: content.height + 48
 
         //: One batch more as the reader nears the bottom of what is loaded.
-        onContentYChanged: {
-            if (page.loaded < cards.count && contentY + height > contentHeight - 320)
-                page.loaded = Math.min(cards.count, page.loaded + page.batch)
-        }
+        //: These two plus the page's completion cover every state where the
+        //: load condition can newly hold; the `Qt.callLater` chain inside
+        //: `maybeLoadMore` carries it through the following layouts.
+        onContentYChanged: page.maybeLoadMore()
+        onHeightChanged: page.maybeLoadMore()
 
         //: RinUI's own bar, attached to this flickable — the same bar the other
         //: two pages attach.
@@ -184,12 +208,35 @@ Item {
             visible: card.index < page.loaded
 
             // The card inset is the delegate's to apply, because the list is
-            // full-bleed; then the 10px of content padding it always had.
-            leftPadding: page.cardInset + 10
-            rightPadding: page.cardInset + 10
-            bottomPadding: 10
+            // full-bleed; then the content padding it always had, plus 8px so
+            // the text keeps its distance from the card edge.
+            leftPadding: page.cardInset + 18
+            rightPadding: page.cardInset + 18
+            bottomPadding: 18
 
-            topPadding: 10
+            topPadding: 18
+
+            //: Widths of the plain prefixes (`> `, `name op `, the aligned
+            //: `= ` line) the two code lines hang in front of the highlighted
+            //: text — the viewmodel elides that text to what remains. A
+            //: no-break space has the same advance as a plain one, so the
+            //: alignment padding measures with spaces.
+            readonly property string inputPrefix:
+                card.mode === "Assign" ? `${card.name} ${card.op} ` : "> "
+            readonly property string resultPrefix:
+                card.isError ? "" : "&nbsp;".repeat(card.name.length + 1) + "= "
+            readonly property string resultPrefixPlain:
+                card.isError ? "" : "\u00A0".repeat(card.name.length + 1) + "= "
+            TextMetrics {
+                id: inputPrefixMetrics
+                font: settingsVM.codeFont
+                text: card.inputPrefix
+            }
+            TextMetrics {
+                id: resultPrefixMetrics
+                font: settingsVM.codeFont
+                text: card.resultPrefixPlain
+            }
 
             contentItem: ColumnLayout {
                 id: cardBody
@@ -202,16 +249,21 @@ Item {
 
                     QQ.Text {
                         Layout.fillWidth: true
+                        // Rich text's implicit width is the full text, and a
+                        // layout defaults an item's minimum to that — zero it
+                        // so the row squeezes this line instead of overflowing.
+                        Layout.minimumWidth: 0
                         Layout.alignment: Qt.AlignVCenter
                         font: settingsVM.codeFont
                         color: Theme.currentTheme.colors.textColor
-                        elide: QQ.Text.ElideRight
-                        // The expression is coloured like the input it was typed
-                        // into; the `> ` or `name op` around it is not part of it.
+                        // `Text.elide` is ignored for rich text, so the
+                        // expression is elided by the viewmodel, on the plain
+                        // string, to what remains of the line beside the prefix.
                         textFormat: QQ.Text.RichText
-                        text: card.mode === "Assign"
-                            ? `${card.name} ${card.op} ${vm.highlighted(card.expression, Theme.isDark())}`
-                            : `> ${vm.highlighted(card.expression, Theme.isDark())}`
+                        text: card.inputPrefix
+                            + vm.highlightedElided(card.expression,
+                                                   width - inputPrefixMetrics.width,
+                                                   Theme.isDark())
                     }
 
                     // Always visible and enabled -- only the opacity
@@ -256,45 +308,40 @@ Item {
                 // error card (input line, background) stays normal.
                 QQ.Text {
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     // Code text: the aligned `= result` line. The name-length
                     // padding aligns it under the assignment operator, so it
-                    // has to stay monospace for the alignment to hold.
+                    // has to stay monospace for the alignment to hold. The
+                    // result is elided by the viewmodel to what remains beside
+                    // the padding: `Text.elide` is ignored for rich text.
                     font: settingsVM.codeFont
                     color: card.isError
                         ? card.errorColor
                         : Theme.currentTheme.colors.textSecondaryColor
                     wrapMode: card.isError ? QQ.Text.WordWrap : QQ.Text.NoWrap
-                    elide: card.isError ? QQ.Text.ElideNone : QQ.Text.ElideRight
                     // Rich text collapses runs of spaces, so the padding that
                     // holds `=` under the assignment operator has to be
                     // non-breaking. A failure is prose, so it stays plain.
                     textFormat: card.isError ? QQ.Text.PlainText : QQ.Text.RichText
                     text: card.isError
                         ? card.error
-                        : card.mode === "Assign"
-                          ? "&nbsp;".repeat(card.name.length + 1) + "= "
-                            + vm.highlighted(card.result, Theme.isDark())
-                          : "= " + vm.highlighted(card.result, Theme.isDark())
+                        : card.resultPrefix
+                          + vm.highlightedElided(card.result,
+                                                 width - resultPrefixMetrics.width,
+                                                 Theme.isDark())
                 }
 
-                // Rendered result, horizontally scrollable.
-                HScrollView {
-                    id: latexScroll
-
+                // Rendered result, horizontally scrollable (see `MathStrip`
+                // for the geometry, including the room its overlay bar needs).
+                // Hidden outright when the entry has no artwork — the card's
+                // Result line is where a failure is reported.
+                MathStrip {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: latexImg.height + 8
-                    visible: latexImg.height > 0
-                    contentWidth: latexImg.width
 
-                    LatexImage {
-                        id: latexImg
-
-                        x: 0
-                        y: (parent.height - height) / 2
-                        naturalWidth: card.naturalWidth
-                        naturalHeight: card.naturalHeight
-                        source: card.latexUrl
-                    }
+                    visible: card.naturalHeight > 0
+                    naturalWidth: card.naturalWidth
+                    naturalHeight: card.naturalHeight
+                    source: card.latexUrl
 
                     // The scroll strip is a Flickable, so it owns left
                     // presses and the delegate's onClicked doesn't fire

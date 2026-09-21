@@ -87,7 +87,9 @@ qml/
                                 #     it assembles — PageHeader (the bar that fades in as the
                                 #     inline title scrolls away) and PageHeaderRow (that title,
                                 #     plus the room the actions need),
-                                #   HScrollView, LatexImage, KeyboardPanel, SearchBar,
+                                #   HScrollView, LatexImage, MathStrip (the formula area: HScrollView
+                                #     + LatexImage + the room its overlay bar needs — the one place
+                                #     that geometry lives), KeyboardPanel, SearchBar,
                                 #   SegmentedItem/SelectorBarItem (focus-indicator shadows)
 docs/
   architecture.md               # Model-first walkthrough: the two requests, the data flow
@@ -291,7 +293,14 @@ scratch/                        # Preserved experiments — NOT part of the app 
   the right edge of the view that scrolls — which is why the History list is deliberately
   **full-bleed**: that puts its bar on the window edge, where the Microsoft Store keeps it, and the
   *cards* carry the inset instead: the content sits at the usual 24px and the cards add
-  `page.cardInset` (4px) on each side, which is what keeps them clear of the bar.
+  `page.cardInset` (4px) on each side. Note the painted bar is tiny — RinUI's thumb is
+  `scrollBarWidth` (6px) when hovered, 2px idle, inside a 12px interaction zone — so the cards'
+  32px stand-off from the edge is plenty; nothing needs to give way for it. The real overlay fight
+  is *inside* a strip that scrolls horizontally: RinUI's bar is an overlay along the bottom edge,
+  ~16px tall in all (6px thumb plus the arrow `ToolButton`s, which overhang the 12px control), so a
+  formula with only 8px under it has the arrows sitting on its feet. That clearance belongs to
+  `MathStrip` (`barRoom`), not to each page — two hand-written copies of that arithmetic is what
+  clipped the Calculator's formula.
 - **Never resize a RinUI window while it is being created and then maximize it.** The window fills
   the screen but its content stays drawn in the pre-resize rectangle, surrounded by a white border,
   and later resizes never repair it — while Qt reports the correct window state *and* content size,
@@ -421,6 +430,19 @@ scratch/                        # Preserved experiments — NOT part of the app 
   **data URL** (`latex_render.latex_to_svg`, with `size=`/`color=`), `svg_size` for natural size;
   `LatexImage` (qml/components) renders crisp by scaling `sourceSize` by `devicePixelRatio`.
   The font size comes from the settings page (`fonts.latex_size`), the colour from the theme.
+- **`MathStrip` is the one place a rendered formula is laid out** — the Calculator's result area,
+  the History card's strip, and (when the Variables page grows one) any third caller. It is an
+  `HScrollView` whose content is a single `LatexImage` at natural size, and it owns both pieces of
+  arithmetic that used to be hand-written per page: the height (`natural + 2*padding + barRoom`)
+  and the image's `y` (`padding` from the top). Those two numbers in two coordinate systems is
+  exactly what broke: both pages carried `y: (parent.height - height - 16) / 2`, the image's parent
+  was the strip on one page and an inner content `Item` on the other, and on the Calculator that
+  resolved to -8 — the formula's top was clipped. It takes `naturalWidth/naturalHeight/source` and
+  collapses to zero height when there is no artwork; it carries **no** empty-state text (the
+  Calculator's failure and hint live on its outcome line, the History card's failure on its result
+  line). `barRoom` (16) is the height of RinUI's overlay bar along the strip's bottom edge — a 6px
+  thumb inside a 12px control, plus the 16px arrow `ToolButton`s that overhang it — and is
+  deliberately hardcoded against a third party's internals, in this one place.
 - History renders each entry's LaTeX **lazily, per row, on approach**, and the pieces of that are
   worth stating because two obvious implementations do not work. Reading the `latexUrl` role used to
   render (the model's `_svg_url` caches the SVG on the entry and emits `dataChanged` for the
@@ -434,7 +456,13 @@ scratch/                        # Preserved experiments — NOT part of the app 
   was dropped under it by a theme change, which shows up as the role going back to empty.
 - **The page loads in batches, and the `Column` makes that cheap.** Only `page.loaded` cards (12 to
   start) are `visible`; the rest are skipped by the `Column`, so they occupy no space and the content
-  only ever spans what is loaded. Reaching the bottom raises `loaded` by another batch. One trap:
+  only ever spans what is loaded. `maybeLoadMore()` raises `loaded` by another batch when the reader
+  is within 320px of the loaded bottom. It is a *single* step that re-queues itself with
+  `Qt.callLater` after the new cards' layout, not a loop (a loop reads a stale `contentHeight` and
+  pours everything in) and not a `contentHeightChanged` handler (Qt swallows the re-entrant emission,
+  stalling the chain one batch after a resize). Beyond `onContentYChanged` it also runs on page
+  completion and on flickable height changes, because a window too tall for one batch has nothing to
+  scroll — without those, the rest of the history is unreachable. One trap:
   `nearView` has to test `visible` *first*, because a skipped card has no position of its own and `y`
   reads 0 — which the geometry test otherwise takes for "at the top of the viewport", and every
   unloaded card renders.
@@ -471,10 +499,11 @@ One lexer, one span list, two renderers. Anything that colours code contributes 
   erase each other. A future Pygments, or any other language, becomes another *span producer*
   behind the same function, never a second painter. The read-only labels use the
   second renderer: `vm.highlighted(text, dark)` returns the markup and the pages
-  bind it into a `Text` with `textFormat: Text.RichText` — the Calculator's result
-  line and its LaTeX fallback, the History card's two lines, and the Variables
-  table's cells (the last two inside delegate bindings, so only the rows a view
-  actually has out are rendered, and a theme change re-evaluates them).
+  bind it into a `Text` with `textFormat: Text.RichText` — the Calculator's outcome
+  line (value, failure text or hint), the History card's two lines, and the
+  Variables table's cells (the last two inside delegate bindings, so only the rows
+  a view actually has out are rendered, and a theme change re-evaluates them).
+  The formula area itself is not one of these: it is an image (`MathStrip`).
   Two things come with that, both learned the hard way: `to_rich_text` takes the
   scope as a **mapping** where `attach` takes the **provider** (the highlighter
   re-asks on every keystroke; a one-shot render cannot), and handing the provider
@@ -483,6 +512,24 @@ One lexer, one span list, two renderers. Anything that colours code contributes 
   holding a name blank or stale. And rich text collapses runs of spaces, so the
   History card's `=`-alignment padding is `&nbsp;` — the one place the markup leaks
   into the surrounding text.
+- **`Text.elide` is silently ignored for `Text.RichText`** — probed on Qt 6.11:
+  plain and styled text truncate, rich text paints at its full painted width and
+  bleeds over whatever sits beside it (that was the overflow on the Calculator's
+  result line, the History card's two lines and the Variables cells). The
+  escape hatch, `Text.StyledText`, is not one: it parses `<span style="color:…">`
+  but renders `&nbsp;` and even `&lt;` **literally**, so switching would break
+  the escaping and the `=`-alignment padding. The elision therefore happens on
+  the plain string, in `vm.highlightedElided(text, width, dark)` — the code
+  font's `QFontMetricsF.elidedText` runs *before* the span list, and the elision
+  mark is just another character to the highlighter. Callers pass their label's
+  own `width` (minus a measured prefix where one exists — `TextMetrics` with a
+  no-break space, which advances like a plain one). Two consequences to keep:
+  those labels sit in layouts, whose default minimum width is the item's
+  implicit — for rich text the *full* text's width, so the row would grow past
+  the panel instead of squeezing the label; every code label in a `RowLayout`
+  carries `Layout.minimumWidth: 0` for that. And the label's `text` binding now
+  depends on its `width` — safe from loops because the layout width no longer
+  reads the implicit width.
 - **The colours come from a theme *family*, not from a single theme.** `python/code_themes.py` holds
   one entry per family — Atom One, VS Code Dark+/Light+, Dark/Light Modern, Dark/Light 2026,
   Solarized, High Contrast — and **every family has a dark and a light member**, so
@@ -788,7 +835,7 @@ backdrop floats up from 10px below while fading in, and carries the page's own t
   `contentHeight` carries one extra inset (`+ 48`) so the last card clears the bottom edge.
 - **Typography** (`fonts.*`) is three faces, all applied live:
   - **Code** (`code_family`/`code_size`): the expression surfaces — the calculator's two inputs
-    and its result line, the LaTeX fallback text, the Variables table cells, the History card lines
+    and its outcome line, the Variables table cells, the History card lines
     and the Log pane. Size defaults to 14.
   - **Keyboard** (`keyboard_family`/`keyboard_size`): the on-screen keys; 16 by default, because the
     math glyphs (∞ √ ∛ ≤ ≥) are the content there. A serif face is recommended and is the default:

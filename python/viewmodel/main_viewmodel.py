@@ -14,7 +14,7 @@ from PySide6.QtCore import (
     Signal,
     Slot,
 )
-from PySide6.QtGui import QGuiApplication, QKeyEvent
+from PySide6.QtGui import QFontMetricsF, QGuiApplication, QKeyEvent
 from typing import Optional
 
 from .. import log_capture
@@ -196,6 +196,40 @@ class MainViewModel(QObject):
         """
         styles, bracket_colors = theme(self._settings.codeTheme, dark)
         return to_rich_text(text, self._variable_manager.list_all(), styles, bracket_colors)
+
+    @Slot(str, float, bool, result=str)
+    def highlightedElided(self, text: str, width: float, dark: bool) -> str:
+        """``text`` elided to ``width`` pixels of the code font, then marked up.
+
+        Qt's ``Text.elide`` is silently ignored for ``Text.RichText`` (probed on
+        Qt 6.11: plain and styled text truncate, rich text paints at its full
+        width and bleeds over whatever sits beside it), and ``Text.StyledText``
+        cannot carry this markup instead — it renders ``&nbsp;`` and ``&lt;``
+        literally, so the escaping and the aligned ``=`` padding would break.
+        The eliding therefore happens here, on the *plain* string, with the code
+        font's metrics — the same font the label paints with — before the span
+        list is asked about it. Callers pass their label's width; the elision
+        mark itself stays outside every span, so it inherits the label's colour
+        rather than the last token's.
+
+        The callers are QML *bindings* on the label's ``text``, so this re-runs
+        when the label is resized (a window drag) or the theme changes — the
+        same cadence :meth:`highlighted` already had.
+        """
+        if width <= 0 or not text:
+            return ""
+        plain = QFontMetricsF(self._settings.codeFont).elidedText(
+            text, Qt.TextElideMode.ElideRight, width
+        )
+        styles, bracket_colors = theme(self._settings.codeTheme, dark)
+        # The elision mark stays *outside* the spans, so it inherits the label's
+        # own colour instead of the last token's — a truncated number would
+        # otherwise end in a pink/red `…` whatever it truncates.
+        if plain.endswith("\u2026"):
+            body = to_rich_text(plain[:-1], self._variable_manager.list_all(),
+                                styles, bracket_colors)
+            return body + "\u2026"
+        return to_rich_text(plain, self._variable_manager.list_all(), styles, bracket_colors)
 
     @Slot()
     def focusNext(self) -> None:
