@@ -89,7 +89,8 @@ qml/
                                 #     plus the room the actions need),
                                 #   HScrollView, LatexImage, MathStrip (the formula area: HScrollView
                                 #     + LatexImage + the room its overlay bar needs — the one place
-                                #     that geometry lives), KeyboardPanel, SearchBar,
+                                #     that geometry lives), RadioSettingRow (a SettingItem whose
+                                #     radio leads its own label), KeyboardPanel, SearchBar,
                                 #   SegmentedItem/SelectorBarItem (focus-indicator shadows)
 docs/
   architecture.md               # Model-first walkthrough: the two requests, the data flow
@@ -227,15 +228,33 @@ scratch/                        # Preserved experiments — NOT part of the app 
   (`content:`/`action:` on it go to the header's right slot instead); `SettingItem` has **no**
   `content` property. RinUI *does* ship a themed `RadioButton`
   (`components/BasicInput/RadioButton.qml` — QQC2's, restyled), but like QQC2's it only unchecks its
-  **siblings**: buttons in different parents are independent, which is why the code-theme cells —
-  one `Column` per family, side by side in a `Flow` — drive exclusivity from the setting instead
-  (`autoExclusive: false`, `checked` bound to the value, and the click re-establishing the binding
-  after Qt wrote `checked` itself). A `Flow` is a positioner, not a layout, so `Layout.*` on those
-  cells is ignored and the widest line would size them; they carry an explicit `width` instead.
-  `QtQuick.Controls` and `RinUI` both export `RadioButton`, so the page imports `RinUI as Rin` and
-  names `Rin.RadioButton` (an ambiguous type name is a runtime failure, not merely a lint warning);
-  qmllint then reports the page's other unqualified RinUI types as unresolved, an artifact of the
-  paired imports (`HistoryPage` carries the same pair) rather than a runtime problem.
+  **siblings**: buttons in different parents are independent. A short list of choices is therefore
+  `qml/components/RadioSettingRow.qml` — a `SettingItem` whose radio leads its own label, with the
+  exclusivity driven by the caller's setting. Three things in it are load-bearing and easy to undo by
+  accident:
+  * The base's `title`/`description` are **pinned empty with a `Binding`** (not an expression, and with
+    `restoreMode: Binding.RestoreNone`), so an instance cannot re-open the item's left label column:
+    with that column visible the content moves to the *right-hand* slot and the radio trails the text
+    — the one thing this row exists to avoid.
+  * The content column carries `Layout.leftMargin: -24`. `SettingItem`'s row has `spacing: 16`, and
+    with the label column collapsed RinUI's zero-width filler `Item` still counts as a neighbour
+    beside our content, so the item's own inset (58) plus that spacing (16) lands the circle at 74 —
+    deeper than the expander header's title. Cancelling 24 of it puts the circle at 75 against the
+    header title's 77 (measured, page coordinates): aligned, and the residual 2px is RinUI's own
+    label-inset (58) versus header-title (52) mismatch.
+  * The click calls `selected()` **and** restores the `checked` binding
+    (`checked = Qt.binding(() => root.checked)`), because Qt writes `checked` itself on the way
+    through; the caller just writes its setting in `onSelected`.
+  The rows go **directly** into the expander body, not behind another layout: `SettingItem` reads
+  `parent.roundContentEdgeItems` for its corner rounding, so an extra `ColumnLayout` in between logs
+  `Unable to assign [undefined] to bool` (SettingItem.qml:15) once per row. A `Repeater` dropped there
+  is a layout child like any other and would spend `spacing` on itself before the first row, so it
+  carries `visible: false`; its delegates are separate children and stay visible.
+  `QtQuick.Controls` and `RinUI` both export `RadioButton`, so a page that uses RinUI's own controls
+  unqualified must watch for the clash — `SettingsPage` imports `RinUI as Rin` for its `Rin.ScrollBar`
+  and `RadioSettingRow` imports only `RinUI`, which keeps its `RadioButton` unambiguous; qmllint
+  reports the page's other unqualified RinUI types as unresolved, an artifact of the paired imports
+  (`HistoryPage` carries the same pair) rather than a runtime problem.
 - **The History page deliberately does not use a `ListView`.** It is a `Flickable` + `Column` +
   `Repeater`, with the title row as an ordinary child of the content — the same shape as the Log and
   Settings pages — and that is a decision, not an accident. The list's `header` slot cost three
@@ -301,6 +320,25 @@ scratch/                        # Preserved experiments — NOT part of the app 
   formula with only 8px under it has the arrows sitting on its feet. That clearance belongs to
   `MathStrip` (`barRoom`), not to each page — two hand-written copies of that arithmetic is what
   clipped the Calculator's formula.
+- **A page loaded outside `MainWindow.qml` renders RinUI's control text and icons blank.** Driving
+  a page from a test harness (`Loader { source: "pages/SettingsPage.qml" }`) skips `FluentWindow`,
+  which is where RinUI's icon fonts and typography are set up: every `Button`, `RadioButton` and
+  `SettingItem` label comes out invisible, which reads as a page bug and is not one. Load the page
+  inside a `FluentWindow` root instead (`FluentWindow { Loader { anchors.fill: parent; source: … } }`)
+  and the text renders — the code-font labels and rendered LaTeX are unaffected either way, so a
+  geometry check can pass while every control looks empty.
+- **A harness that drives the app must isolate the settings store, or it writes the developer's own
+  config.** `SettingsStore` is portable only when **`<root>/data` exists**, so `prepare(tmp)` with
+  `tmp` being a bare temp dir falls back to the OS config directory and the run reads *and writes*
+  the real `%APPDATA%/Symplify/config.yaml` — a probe that clicks a radio silently changed
+  `appearance.code_theme` once. Pass a temp directory that *contains* `data/`
+  (`root = mkdtemp(); (root / "data").mkdir()`), and print `runtime.settings.path` at the start of
+  the run so the isolation is visible rather than assumed.
+- **`findChildren` from Python does not see `Repeater`-created delegates.** Measured on the History
+  cards and the settings rows: QML's `repeater.itemAt(0)` returns the created `ItemDelegate`, while
+  `window.findChildren(QObject)` from PySide6 does not reach it (nor the `Image` inside its
+  `MathStrip`). A harness that needs their geometry has to ask from QML — walk `children` and match
+  on `objectName`, as `qml/components/…` hooks like `sendBtn` and `codeThemeRows` exist for.
 - **Never resize a RinUI window while it is being created and then maximize it.** The window fills
   the screen but its content stays drawn in the pre-resize rectangle, surrounded by a white border,
   and later resizes never repair it — while Qt reports the correct window state *and* content size,

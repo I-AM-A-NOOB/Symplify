@@ -177,229 +177,41 @@ Item {
                         color: Theme.currentTheme.colors.textSecondaryColor
                     }
 
-                    // The choices sit side by side, one cell per family:
-                    // the radio, the name, and a line about it. A `Flow`,
-                    // so a narrow window wraps them instead of overflowing.
-                    Flow {
-                        Layout.fillWidth: true
-                        Layout.topMargin: 4
-                        Layout.bottomMargin: 2
-                        spacing: 8
+                    // One `SettingItem` per family, dropped straight into the
+                    // expander's body as the gallery does — RinUI's corner and
+                    // divider bookkeeping counts them through their *parent*, so
+                    // they must not sit behind an extra layout. The radio leads
+                    // each row's own content and there are no dividers.
+                    Repeater {
+                        objectName: "codeThemeRows"
 
-                        // A plain `Column`, not a `ColumnLayout`: a `Flow` is a
-                        // positioner, so `Layout.*` on the cells would be ignored
-                        // and the widest line would size them.
-                        Column {
-                            width: 130
-                            spacing: 0
+                        // Ids and blurbs only: the display names come from
+                        // `code_themes.FAMILIES` through the viewmodel, so the
+                        // palette table stays their one home. `visible: false` so
+                        // the layout does not spend spacing on the repeater
+                        // itself before the first item.
+                        visible: false
 
-                            Rin.RadioButton {
-                                id: oneRadio
+                        model: [
+                            { key: "one", blurb: qsTr("The one everyone copies. Warm greys, honest colours.") },
+                            { key: "default", blurb: qsTr("The classics — what your muscle memory already sees.") },
+                            { key: "modern", blurb: qsTr("The same taste as Dark+, on a quieter background.") },
+                            { key: "2026", blurb: qsTr("The new kid: more contrast, more glow.") },
+                            { key: "solarized", blurb: qsTr("Low contrast on purpose, and its own bracket colours.") },
+                            { key: "highcontrast", blurb: qsTr("For when you would rather the code just shout.") }
+                        ]
 
-                                // A RadioButton unchecks its SIBLINGS, and these
-                                // sit in cells of their own, so exclusivity is
-                                // driven by the setting instead: `checked` follows
-                                // it, and the click puts the binding back after Qt
-                                // wrote `checked` itself.
-                                autoExclusive: false
-                                text: qsTr("Atom One")
-                                checked: settingsVM.codeTheme === "one"
-                                onClicked: {
-                                    settingsVM.codeTheme = "one"
-                                    checked = Qt.binding(() => settingsVM.codeTheme === "one")
-                                }
-                            }
+                        //: One `RadioSettingRow` per family, dropped straight into
+                        //: the expander's body (RinUI's corner and divider
+                        //: bookkeeping reads the *parent*, so they must not sit
+                        //: behind an extra layout).
+                        delegate: RadioSettingRow {
+                            required property var modelData
 
-                            Text {
-                                width: parent.width
-                                // The radio indents its own label past the
-                                // circle (`indicator.width + spacing`, 20 + 8).
-                                leftPadding: 28
-                                typography: Typography.Caption
-                                color: Theme.currentTheme.colors.textSecondaryColor
-                                wrapMode: Text.Wrap
-                                text: qsTr("The one everyone copies. Warm greys, honest colours.")
-                            }
-                        }
-
-                        // A plain `Column`, not a `ColumnLayout`: a `Flow` is a
-                        // positioner, so `Layout.*` on the cells would be ignored
-                        // and the widest line would size them.
-                        Column {
-                            width: 130
-                            spacing: 0
-
-                            Rin.RadioButton {
-                                id: defaultRadio
-
-                                // A RadioButton unchecks its SIBLINGS, and these
-                                // sit in cells of their own, so exclusivity is
-                                // driven by the setting instead: `checked` follows
-                                // it, and the click puts the binding back after Qt
-                                // wrote `checked` itself.
-                                autoExclusive: false
-                                text: qsTr("Dark+ / Light+")
-                                checked: settingsVM.codeTheme === "default"
-                                onClicked: {
-                                    settingsVM.codeTheme = "default"
-                                    checked = Qt.binding(() => settingsVM.codeTheme === "default")
-                                }
-                            }
-
-                            Text {
-                                width: parent.width
-                                // The radio indents its own label past the
-                                // circle (`indicator.width + spacing`, 20 + 8).
-                                leftPadding: 28
-                                typography: Typography.Caption
-                                color: Theme.currentTheme.colors.textSecondaryColor
-                                wrapMode: Text.Wrap
-                                text: qsTr("The classics — what your muscle memory already sees.")
-                            }
-                        }
-
-                        // A plain `Column`, not a `ColumnLayout`: a `Flow` is a
-                        // positioner, so `Layout.*` on the cells would be ignored
-                        // and the widest line would size them.
-                        Column {
-                            width: 130
-                            spacing: 0
-
-                            Rin.RadioButton {
-                                id: modernRadio
-
-                                // A RadioButton unchecks its SIBLINGS, and these
-                                // sit in cells of their own, so exclusivity is
-                                // driven by the setting instead: `checked` follows
-                                // it, and the click puts the binding back after Qt
-                                // wrote `checked` itself.
-                                autoExclusive: false
-                                text: qsTr("Dark Modern")
-                                checked: settingsVM.codeTheme === "modern"
-                                onClicked: {
-                                    settingsVM.codeTheme = "modern"
-                                    checked = Qt.binding(() => settingsVM.codeTheme === "modern")
-                                }
-                            }
-
-                            Text {
-                                width: parent.width
-                                // The radio indents its own label past the
-                                // circle (`indicator.width + spacing`, 20 + 8).
-                                leftPadding: 28
-                                typography: Typography.Caption
-                                color: Theme.currentTheme.colors.textSecondaryColor
-                                wrapMode: Text.Wrap
-                                text: qsTr("The same taste as Dark+, on a quieter background.")
-                            }
-                        }
-
-                        // A plain `Column`, not a `ColumnLayout`: a `Flow` is a
-                        // positioner, so `Layout.*` on the cells would be ignored
-                        // and the widest line would size them.
-                        Column {
-                            width: 130
-                            spacing: 0
-
-                            Rin.RadioButton {
-                                id: twenty26Radio
-
-                                // A RadioButton unchecks its SIBLINGS, and these
-                                // sit in cells of their own, so exclusivity is
-                                // driven by the setting instead: `checked` follows
-                                // it, and the click puts the binding back after Qt
-                                // wrote `checked` itself.
-                                autoExclusive: false
-                                text: qsTr("Dark 2026")
-                                checked: settingsVM.codeTheme === "2026"
-                                onClicked: {
-                                    settingsVM.codeTheme = "2026"
-                                    checked = Qt.binding(() => settingsVM.codeTheme === "2026")
-                                }
-                            }
-
-                            Text {
-                                width: parent.width
-                                // The radio indents its own label past the
-                                // circle (`indicator.width + spacing`, 20 + 8).
-                                leftPadding: 28
-                                typography: Typography.Caption
-                                color: Theme.currentTheme.colors.textSecondaryColor
-                                wrapMode: Text.Wrap
-                                text: qsTr("The new kid: more contrast, more glow.")
-                            }
-                        }
-
-                        // A plain `Column`, not a `ColumnLayout`: a `Flow` is a
-                        // positioner, so `Layout.*` on the cells would be ignored
-                        // and the widest line would size them.
-                        Column {
-                            width: 130
-                            spacing: 0
-
-                            Rin.RadioButton {
-                                id: solarizedRadio
-
-                                // A RadioButton unchecks its SIBLINGS, and these
-                                // sit in cells of their own, so exclusivity is
-                                // driven by the setting instead: `checked` follows
-                                // it, and the click puts the binding back after Qt
-                                // wrote `checked` itself.
-                                autoExclusive: false
-                                text: qsTr("Solarized")
-                                checked: settingsVM.codeTheme === "solarized"
-                                onClicked: {
-                                    settingsVM.codeTheme = "solarized"
-                                    checked = Qt.binding(() => settingsVM.codeTheme === "solarized")
-                                }
-                            }
-
-                            Text {
-                                width: parent.width
-                                // The radio indents its own label past the
-                                // circle (`indicator.width + spacing`, 20 + 8).
-                                leftPadding: 28
-                                typography: Typography.Caption
-                                color: Theme.currentTheme.colors.textSecondaryColor
-                                wrapMode: Text.Wrap
-                                text: qsTr("Low contrast on purpose, and its own bracket colours.")
-                            }
-                        }
-
-                        // A plain `Column`, not a `ColumnLayout`: a `Flow` is a
-                        // positioner, so `Layout.*` on the cells would be ignored
-                        // and the widest line would size them.
-                        Column {
-                            width: 130
-                            spacing: 0
-
-                            Rin.RadioButton {
-                                id: highcontrastRadio
-
-                                // A RadioButton unchecks its SIBLINGS, and these
-                                // sit in cells of their own, so exclusivity is
-                                // driven by the setting instead: `checked` follows
-                                // it, and the click puts the binding back after Qt
-                                // wrote `checked` itself.
-                                autoExclusive: false
-                                text: qsTr("High Contrast")
-                                checked: settingsVM.codeTheme === "highcontrast"
-                                onClicked: {
-                                    settingsVM.codeTheme = "highcontrast"
-                                    checked = Qt.binding(() => settingsVM.codeTheme === "highcontrast")
-                                }
-                            }
-
-                            Text {
-                                width: parent.width
-                                // The radio indents its own label past the
-                                // circle (`indicator.width + spacing`, 20 + 8).
-                                leftPadding: 28
-                                typography: Typography.Caption
-                                color: Theme.currentTheme.colors.textSecondaryColor
-                                wrapMode: Text.Wrap
-                                text: qsTr("For when you would rather the code just shout.")
-                            }
+                            label: settingsVM.codeThemeLabel(modelData.key)
+                            hint: modelData.blurb
+                            checked: settingsVM.codeTheme === modelData.key
+                            onSelected: settingsVM.codeTheme = modelData.key
                         }
                     }
                 }

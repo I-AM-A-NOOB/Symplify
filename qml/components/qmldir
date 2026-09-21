@@ -16,6 +16,10 @@ MathStrip 1.0 MathStrip.qml
 PageHeader 1.0 PageHeader.qml
 PageHeaderRow 1.0 PageHeaderRow.qml
 PageScaffold 1.0 PageScaffold.qml
+# RadioSettingRow is a `SettingItem` whose radio leads its own label — the shape a
+# short list of choices takes, and the one bare `SettingItem` children cannot
+# express (they land on the right).
+RadioSettingRow 1.0 RadioSettingRow.qml
 SearchBar 1.0 SearchBar.qml
 SegmentedItem 1.0 SegmentedItem.qml
 SelectorBarItem 1.0 SelectorBarItem.qml
