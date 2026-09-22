@@ -23,7 +23,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PYPROJECT = ROOT / "pyproject.toml"
 VERSION_PY = ROOT / "python" / "version.py"
+UV_LOCK = ROOT / "uv.lock"
 TAG_RE = re.compile(r'^version\s*=\s*"([^"]+)"', re.MULTILINE)
+#: The lock records the project's own version next to its dependencies.
+LOCK_RE = re.compile(r'(name = "symplify"\nversion = )"([^"]+)"')
 
 
 def read_version() -> tuple:
@@ -47,6 +50,25 @@ def write_version_py(version: str) -> None:
         f'__version__ = "{version}"\n',
         encoding="utf-8",
     )
+
+
+def write_uv_lock(version: str) -> bool:
+    """Point the lock's own project entry at ``version``.
+
+    The authoritative version is in pyproject, but a lockfile carries a copy for
+    the project itself — and one that is left behind is not merely stale: the
+    next ``uv run`` rewrites it, showing up as a change nobody made. Returns
+    False when there is no lock or it does not have the expected shape; a lock is
+    a build artifact and not worth failing a release over.
+    """
+    if not UV_LOCK.is_file():
+        return False
+    text = UV_LOCK.read_text(encoding="utf-8")
+    replaced = LOCK_RE.sub(rf'\g<1>"{version}"', text, count=1)
+    if replaced == text:
+        return False
+    UV_LOCK.write_text(replaced, encoding="utf-8")
+    return True
 
 
 def bump(major: int, minor: int, patch: int, part: str) -> tuple:
@@ -87,16 +109,20 @@ def main() -> int:
     version_str = ".".join(str(p) for p in new)
     write_pyproject(version_str)
     write_version_py(version_str)
-    print(f"Bumped {'.'.join(map(str, cur))} -> {version_str}")
+    lock_updated = write_uv_lock(version_str)
+    print(f"Bumped {'.'.join(map(str, cur))} -> {version_str}"
+          + (" (uv.lock too)" if lock_updated else ""))
 
     if args.tag:
         tag = f"v{version_str}"
-        subprocess.run(["git", "add", str(PYPROJECT), str(VERSION_PY)], cwd=ROOT, check=True)
+        files = [str(PYPROJECT), str(VERSION_PY)]
+        if lock_updated:
+            files.append(str(UV_LOCK))
+        subprocess.run(["git", "add", *files], cwd=ROOT, check=True)
         # Explicit pathspec: commit only the version files, never whatever else
         # the caller happened to have staged.
         subprocess.run(
-            ["git", "commit", "-m", f"Bump version to {version_str}", "--",
-             str(PYPROJECT), str(VERSION_PY)],
+            ["git", "commit", "-m", f"Bump version to {version_str}", "--", *files],
             cwd=ROOT, check=True,
         )
         subprocess.run(["git", "tag", tag], cwd=ROOT, check=True)
