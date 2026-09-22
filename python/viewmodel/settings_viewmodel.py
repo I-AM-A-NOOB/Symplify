@@ -813,6 +813,33 @@ class SettingsViewModel(QObject):
         return {"background": background, "ink": ink, "placeholder": placeholder}
 
     codeTheme = Property(str, _get_code_theme, _set_code_theme, notify=changed)
+
+    def _get_bracket_mode(self) -> str:
+        return self._store.get("appearance.bracket_mode")
+
+    def _set_bracket_mode(self, mode: str) -> None:
+        if mode == self._get_bracket_mode():
+            return
+        self._store.set("appearance.bracket_mode", mode)
+        self.changed.emit()
+
+    def _get_bracket_colors(self) -> str:
+        """The custom palette, as stored (normalised by the store)."""
+        return self._store.get("appearance.bracket_colors")
+
+    def _set_bracket_colors(self, colors: str) -> None:
+        """Store a custom palette; unusable entries are dropped, not rejected.
+
+        The field binds back to this, so what it shows after a commit is what
+        will actually be painted.
+        """
+        if colors == self._get_bracket_colors():
+            return
+        self._store.set("appearance.bracket_colors", colors)
+        self.changed.emit()
+
+    bracketMode = Property(str, _get_bracket_mode, _set_bracket_mode, notify=changed)
+    bracketColors = Property(str, _get_bracket_colors, _set_bracket_colors, notify=changed)
     # `accent` is the colour in effect (mode resolved) and read-only: the modes
     # above decide it, `customAccent` is the only part the user picks directly.
     accent = Property(str, _get_accent, notify=changed)

@@ -30,13 +30,16 @@ python/
     lexer.py                    #   tokenize(text, scope) -> [(start, length, kind)]: what each run
                                 #   of characters IS — never whether it is valid. Python's own
                                 #   identifier/decimal rules, so it agrees with the parser.
-  brackets.py                   # Rainbow bracket pairing + nesting layers (zero Qt). Ported from
-                                # the v1 QWidget app's RainbowBracketsHighlighter.
+  brackets.py                   # Rainbow bracket pairing + nesting layers + parse_colors() for
+                                # the custom palette (zero Qt). Ported from the v1 QWidget app's
+                                # RainbowBracketsHighlighter.
   code_style.py                 # spans(text, scope): the ONE colour-span list, merging lexer.py
                                 # with brackets.py; theme(family, dark) -> (styles, brackets);
                                 # to_rich_text() for the read-only Text items.
-  code_themes.py                # The colour families (a dark + a light member each), extracted from
-                                # the themes VSCode ships; FAMILIES / DEFAULT_FAMILY / THEMES. Zero Qt.
+  code_themes.py                # The colour families (a dark + a light member each), from VS Code's
+                                # themes, GitHub's, Atom One and Catppuccin, plus
+                                # VSCODE_BRACKET_COLORS (the bracket defaults VSCode registers for the
+                                # kinds that name none). FAMILIES / DEFAULT_FAMILY / THEMES. Zero Qt.
   settings.py                   # Settings store: config dir resolution (portable data/ or the
                                 # OS convention), atomic YAML read/write, validation. Zero Qt.
   rinui_bootstrap.py            # Takes RinUI's own config directory over and injects our
@@ -99,8 +102,9 @@ docs/
 scripts/
   build_windows.py              # Nuitka standalone build
   release.py                    # SemVer bump (pyproject + python/version.py), optional tag
-  extract_themes.py             # Regenerates code_themes.THEMES from VS Code's bundled themes (the
-                                # five it ships — Atom One's data is baked in from its own files)
+  extract_themes.py             # Regenerates code_themes.THEMES from upstream (VS Code's five,
+                                # GitHub's four, Atom One, Catppuccin — three source kinds, see the
+                                # theme bullet under Rendering)
   cheat-sheet.md                # Human quick reference
 scratch/                        # Preserved experiments — NOT part of the app and not
                                 # maintained with it: test_plot.py is the SymPy->GLSL GPU
@@ -242,6 +246,11 @@ scratch/                        # Preserved experiments — NOT part of the app 
     deeper than the expander header's title. Cancelling 24 of it puts the circle at 75 against the
     header title's 77 (measured, page coordinates): aligned, and the residual 2px is RinUI's own
     label-inset (58) versus header-title (52) mismatch.
+  * It carries `background: null`, because the base is a `Frame` and Qt's Basic style paints its
+    **own** 1px `palette.mid` border — `border.color: "transparent"`, which the base sets, does not
+    reach it. With the divider off, that outline is what still reads as a separator between rows
+    (measured on the real window: a hairline across every row boundary); a radio row sits on the
+    expander body's own colour instead, like the rows in Windows' own settings.
   * The click calls `selected()` **and** restores the `checked` binding
     (`checked = Qt.binding(() => root.checked)`), because Qt writes `checked` itself on the way
     through; the caller just writes its setting in `onSelected`.
@@ -476,9 +485,16 @@ scratch/                        # Preserved experiments — NOT part of the app 
   exactly what broke: both pages carried `y: (parent.height - height - 16) / 2`, the image's parent
   was the strip on one page and an inner content `Item` on the other, and on the Calculator that
   resolved to -8 — the formula's top was clipped. It takes `naturalWidth/naturalHeight/source` and
-  collapses to zero height when there is no artwork; it carries **no** empty-state text (the
-  Calculator's failure and hint live on its outcome line, the History card's failure on its result
-  line). `barRoom` (16) is the height of RinUI's overlay bar along the strip's bottom edge — a 6px
+  collapses to zero height when there is no artwork; it carries **no** empty-state text of its own —
+  what the area shows is the viewmodel's decision (`CalculatorViewModel._refresh_strip`), which is
+  either the result's artwork, the typeset placeholder, or nothing at all. The Calculator's empty
+  state is that placeholder: `PLACEHOLDER_LATEX = r"\text{result} \in \LaTeX"`, rendered through the
+  same `latex_to_svg` path as a result (so it follows the LaTeX font, size and theme colour), which
+  makes it "notation" rather than a sentence that would need a translation per locale — and it keeps
+  the area's height steady, so the plot area below does not jump between states. A *failure*, and a
+  value that has no LaTeX of its own, are reported on the outcome line instead and leave the area
+  empty (a placeholder under a value would read as a statement about that value).
+  `barRoom` (16) is the height of RinUI's overlay bar along the strip's bottom edge — a 6px
   thumb inside a 12px control, plus the 16px arrow `ToolButton`s that overhang it — and is
   deliberately hardcoded against a third party's internals, in this one place.
 - History renders each entry's LaTeX **lazily, per row, on approach**, and the pieces of that are
@@ -538,7 +554,7 @@ One lexer, one span list, two renderers. Anything that colours code contributes 
   behind the same function, never a second painter. The read-only labels use the
   second renderer: `vm.highlighted(text, dark)` returns the markup and the pages
   bind it into a `Text` with `textFormat: Text.RichText` — the Calculator's outcome
-  line (value, failure text or hint), the History card's two lines, and the
+  line (the value, or a failure), the History card's two lines, and the
   Variables table's cells (the last two inside delegate bindings, so only the rows
   a view actually has out are rendered, and a theme change re-evaluates them).
   The formula area itself is not one of these: it is an image (`MathStrip`).
@@ -570,33 +586,51 @@ One lexer, one span list, two renderers. Anything that colours code contributes 
   reads the implicit width.
 - **The colours come from a theme *family*, not from a single theme.** `python/code_themes.py` holds
   one entry per family — Atom One, VS Code Dark+/Light+, Dark/Light Modern, Dark/Light 2026,
-  Solarized, High Contrast — and **every family has a dark and a light member**, so
+  Solarized, High Contrast, GitHub Dark/Light together with its Default, Colorblind and High
+  Contrast variants, and Catppuccin (Mocha on a dark UI, Latte on a light one) — and **every
+  family listed in `FAMILIES` has a dark and a light member**, so
   `code_style.theme(family, dark)` always answers: it returns `(styles, bracket_colors)` for the
   half that matches the UI. `appearance.code_theme` names the family and the *page* passes
   `Theme.isDark()`, so the two compose — the family says which colours, the UI theme says which half
   of it. A family that could answer for only one side would leave the code bare the moment the UI
   flipped, which is the point of pairing them.
   The data is **baked into the repository** — the app reads neither a VS Code install nor the network
-  at run time. `scripts/extract_themes.py` regenerates **every** family from raw files on GitHub,
-  pinned to a tag or a commit: VS Code's five paired themes from `microsoft/vscode` (at `VSCODE_REF`,
-  the release whose editor the colours are meant to match), Atom One Dark/Light from
-  `akamud/vscode-theme-onedark` and its light counterpart. Pinning is what makes it reproducible —
-  the same ref always yields the same table, and the script reproduces the committed one exactly,
-  family by family — so bumping a pin is a reviewable change rather than a background drift. Two
-  things come with reading upstream files rather than an installed editor: they are **JSONC**
-  (`//` comments and trailing commas, which VS Code's own build strips from the copies it ships), and
-  their `include` chains have to be followed by hand. Both are handled in the script; a fetch that
-  cannot reach GitHub fails loudly, and the committed data is unaffected.
+  at run time. `scripts/extract_themes.py` regenerates **every** family, each side pinned to what
+  upstream actually offers, and it knows **three kinds of source** because upstreams differ in what
+  they commit: `("raw", repo, ref, path)` for a theme file committed in a repository — VS Code's five
+  paired themes from `microsoft/vscode` at `VSCODE_REF`, Atom One Dark/Light from the two `akamud`
+  repositories; `("npm", package, version, path)` for Catppuccin, whose theme files are build
+  artifacts published in `@catppuccin/vscode` (jsDelivr serves a package file as plain text, so this
+  needs no unpacking); and `("vsix", publisher, extension, version, member)` for GitHub's, whose
+  repository commits only the generator, whose npm package carries no themes and whose releases carry
+  no assets — the published extension archive is the only pinnable form of the built JSON, so that
+  one source is a zip the script reads with the stdlib (one download per version, cached for the
+  run). Pinning is what makes it reproducible — the same ref always yields the same table, and a
+  re-extraction reproduces the committed one family by family — so bumping a pin is a reviewable
+  change rather than a background drift. Two things come with reading upstream files rather than an
+  installed editor: they are **JSONC** (`//` comments and trailing commas, which VS Code's own build
+  strips from the copies it ships), and their `include` chains have to be followed by hand (only
+  `raw` sources can include others). Both are handled in the script; a fetch that cannot reach the
+  network fails loudly, and the committed data is unaffected.
+  The table also carries three entries that are **unused material** — `githubdimmed`,
+  `catppuccinfrappe` and `catppuccinmacchiato` — flavours that exist on one side only (each has a
+  `dark` layer and no `light` one), kept for later and deliberately left out of `FAMILIES`, which is
+  both the list the page offers and the one the store validates against, so nothing can select
+  them.
   `OVERRIDES` there records the one place the app does not take a theme's word for it: Atom One names
   the literal colour `white` for `invalid`, invisible on its own light background and
   indistinguishable from text on its dark one.
   Scopes map onto our kinds — `constant.numeric` for numbers, `constant.language`/`variable.language`
   for SymPy constants, `entity.name.function`/`support.function` for callables, `variable.other` for
-  stored variables, `keyword.operator` for operators. A style a family omits is simply not painted,
-  and the families differ in what they omit and in what they paint alike: Solarized names no
-  keyword operator, so its operators keep the control's own ink, where Light+'s are its `#ee0000`;
-  Atom One paints a stored variable with the theme's own foreground, so there it reads like any
-  other text. A free symbol is never coloured. `DEFAULT_STYLES` is the fallback when the family is
+  stored variables, `keyword.operator` for operators. **Selectors match by prefix in both
+  directions**, which is how TextMate and VS Code read them: a theme selector `constant` selects our
+  `constant.numeric` just as a selector `constant.numeric.decimal` would, and specificity is the
+  selector's own segment count with later entries winning ties. Getting that wrong is what once left
+  every number in GitHub's themes unpainted (they name `constant`, never `constant.numeric`) and
+  Solarized's operators bare: with the rule applied, the only kind still omitted anywhere is
+  Catppuccin's `invalid`. A style a family omits is simply not painted — Atom One paints a stored
+  variable with the theme's own foreground, so there it reads like any other text — and a free symbol
+  is never coloured. `DEFAULT_STYLES` is the fallback when the family is
   unknown (a config naming one this build no longer has): `theme()` returns it rather than raising.
 - **The page passes `Theme.isDark()` along with the document.** RinUI resolves `Auto` against the
   OS, so the *effective* theme decides, not the setting. `attachCodeHighlighting` reads the family
@@ -611,28 +645,46 @@ One lexer, one span list, two renderers. Anything that colours code contributes 
   the log and the feature quietly does nothing — which is how the code colouring once broke with
   every palette test still green. `test_attaching_the_colouring_paints_the_named_family` covers that
   seam: it fails with the store call and passes with the property.
-- **Brackets take the family's colours when it names any, and the rainbow when it does not.**
-  Solarized is the one family here that carries an `editorBracketHighlight`, and only its *dark*
-  half does — every other family, and Solarized light, gets `brackets.DEFAULT_COLORS` (the v1
-  rainbow). So an empty tuple from `theme()` means "this family has nothing to say about brackets",
-  not "no brackets"; the renderer supplies the rainbow in that case. `color_for` is where that
-  substitution happens — it owns both fallbacks (`None`/empty → the default palette or the rainbow),
-  so the highlighter and `to_rich_text` cannot disagree about it. Reading the empty tuple as "a
-  palette of zero colours" is what once divided by zero there, and because it blew up inside the
-  highlighter's recompute — *before* `rehighlight()` — the input kept the **previous** text's
-  formats: left brackets underlined as unmatched, right ones bare, and every later refresh (typing,
-  pasting, a theme switch) dying the same way. `to_rich_text` was a live trap too: it is what the
-  History cards use, and it asks the same function.
-  `test_a_family_with_no_bracket_colours_paints_the_rainbow` and
-  `test_an_empty_bracket_palette_means_no_opinion` hold that down.
+- **Bracket colours have two modes, and both follow VS Code's rule rather than one of ours.**
+  `appearance.bracket_mode` is `theme` (the default) or `custom`; `appearance.bracket_colors` is the
+  custom list, comma-separated `#rrggbb`, one per nesting level and cycled. `MainViewModel._palette`
+  is the only place the choice is made, and all three renderers (the highlighter, `highlighted`,
+  `highlightedElided`) go through it. The precedence is: a *usable* custom list when the mode asks
+  for one, otherwise the code theme.
+  Following the theme means, exactly as in VS Code: the family's own
+  `editorBracketHighlight.foreground1..6` when it states any (Solarized, Catppuccin and all four
+  GitHub families do; the rest do not), and otherwise **VS Code's registered defaults** for the kind —
+  `code_themes.VSCODE_BRACKET_COLORS`, dark `#ffd700`/`#da70d6`/`#179fff`, light
+  `#0431fa`/`#319331`/`#7b3814`, which is where VS Code registers those three (its `4..6` are
+  registered transparent). The nesting levels cycle through whatever the list holds
+  (`colorValues[level % colorValues.length]`, up to 30 levels, in VS Code's
+  `colorizedBracketPairsDecorationProvider.ts`), which is the modulo our `color_for` already does —
+  so a family that names nothing keeps colourising brackets, the way it does in the editor.
+  A custom list is read by `brackets.parse_colors`: entries that are not `#rrggbb` are **dropped**,
+  not rejected (a list someone is still typing keeps what is usable), and the store keeps the
+  normalised string, which the text field binds back to — so the field shows exactly what will be
+  painted. The list's **default and repair value is the v1 rainbow**
+  (`brackets.DEFAULT_COLORS`, joined), so picking Custom paints the palette the app used before this
+  setting existed and clearing the field returns to it; a list that keeps nothing is repaired to it
+  rather than stored as `""`, because an empty custom palette has no meaning — Custom never silently
+  turns into "follow the theme". The tuple is kept in the canonical spelling `parse_colors` produces
+  (lower-case hex), so the settings default, the stored string and the palette are the same value
+  rather than three spellings of it.
+  `color_for` keeps its own last-resort palette for a caller that passes none at all, which is the
+  seam `test_the_renderers_still_supply_a_palette_that_is_passed_none` guards — reading an empty
+  sequence as "a palette of zero colours" is what once divided by zero there, and because it blew up
+  inside the highlighter's recompute — *before* `rehighlight()` — the input kept the **previous**
+  text's formats: left brackets underlined as unmatched, right ones bare, and every later refresh
+  (typing, pasting, a theme switch) dying the same way. `to_rich_text` was a live trap too: it is
+  what the History cards use, and it asks the same function.
 - **The input's surface is the family's too.** `code_style.surface(family, dark)` answers
   `(background, ink)` — the theme's `editor.background` and `editor.foreground` — and
   `settingsVM.codeSurface(dark)` hands QML the `{background, ink}` map the page binds to.
   `qml/components/CodeSurface.qml` replaces the text area's `background:` (RinUI's chrome redrawn in
   that colour: rounded to `buttonRadius`, bordered, accent underline while focused, clipped to the
   rounding through an OpacityMask), and the page paints the control's `color` with the ink so text
-  the palette leaves unpainted stays legible on it — Solarized has no `keyword.operator`, so its
-  operators are exactly that case. The **placeholder** is the theme's too:
+  the palette leaves unpainted stays legible on it — with the prefix-matching fix above, the only
+  kind any family leaves unpainted is Catppuccin's `invalid`. The **placeholder** is the theme's too:
   `input.placeholderForeground` where the theme names one (Solarized's carry an
   alpha), and otherwise VSCode's own derivation of it — `transparent(foreground,
   0.5)`, `0.7` in high contrast, with VSCode's default `foreground` when the theme
@@ -653,7 +705,8 @@ One lexer, one span list, two renderers. Anything that colours code contributes 
   stand in, the same rule the bracket palette follows.
   Verified from the rendered pixels: Solarized on a dark UI gives the box `#002b36` with `#839496`
   text and `#cdcdcd` brackets, and on a light UI `#fdf6e3` (its cream) with the rainbow brackets,
-  since that half carries no `editorBracketHighlight`.
+  since that half states no `editorBracketHighlight` (which now means it follows VS Code's
+  registered bracket defaults — see the bracket bullet above).
 - **Cost**: the whole document is re-scanned and rehighlighted on every change, because pairing
   spans lines. Fine for an input of a few hundred characters; do **not** attach it to the Log
   (appended to constantly, grows without bound) or to anything long that changes often. Markup for a
@@ -717,7 +770,7 @@ backdrop floats up from 10px below while fading in, and carries the page's own t
   validation live in `python/settings.py` (`DEFAULTS`): unknown keys survive a rewrite, invalid
   values fall back or clamp, writes are atomic (temp file + `os.replace`), and a read-only location
   degrades to in-memory values with a warning the page displays. Keys:
-  `appearance.theme|backdrop|code_theme|accent|accent_mode|accent_shading|accent_os_shading`,
+  `appearance.theme|backdrop|code_theme|bracket_mode|bracket_colors|accent|accent_mode|accent_shading|accent_os_shading`,
   `fonts.code_family|code_size|keyboard_family|keyboard_size|latex_font|latex_size`,
   `window.remember|width|height|x|y|maximized`. The page groups them under the subtitles
   **Interface / Typography / Language / Settings file / About**. Layout follows RinUI's own gallery

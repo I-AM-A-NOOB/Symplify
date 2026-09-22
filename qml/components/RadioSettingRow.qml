@@ -51,6 +51,13 @@ SettingItem {
     showDivider: false
     Layout.fillWidth: true
 
+    // No background at all: the base is a `Frame`, and Qt's Basic style paints
+    // its *own* 1px `palette.mid` border — `border.color: "transparent"` does not
+    // reach it — so with the divider off that outline is what still reads as a
+    // separator between rows. A radio row is a row of one list, and the list has
+    // none: it sits on the expander body's own colour.
+    background: null
+
     ColumnLayout {
         //: `SettingItem`'s row carries `spacing: 16`, and with the label column
         //: collapsed RinUI's zero-width filler `Item` still counts as a

@@ -15,10 +15,11 @@ from PySide6.QtCore import (
     Slot,
 )
 from PySide6.QtGui import QFontMetricsF, QGuiApplication, QKeyEvent
-from typing import Optional
+from typing import Mapping, Optional, Tuple
 
 from .. import log_capture
-from ..code_style import to_rich_text, theme
+from ..brackets import parse_colors
+from ..code_style import Style, to_rich_text, theme
 from ..model.calculator import Calculator
 from ..model.variable import VariableManager
 from ..settings import SettingsStore
@@ -158,6 +159,22 @@ class MainViewModel(QObject):
         """Copy ``text`` to the system clipboard."""
         QGuiApplication.clipboard().setText(text)
 
+    def _palette(self, dark: bool) -> Tuple[Mapping[Style, str], Tuple[str, ...]]:
+        """The code palette and bracket colours every renderer paints with.
+
+        The bracket half is the settings' choice: ``theme`` follows the code
+        theme (``code_style.theme``, which itself answers with VS Code's
+        registered defaults for the families that name none), and ``custom`` uses
+        the user's list. The store keeps that list non-empty — it starts as, and
+        is repaired to, the rainbow — and it is the same palette ``color_for``
+        falls back to for a palette it is handed none of, so the two agree even
+        if one ever arrived empty.
+        """
+        styles, brackets = theme(self._settings.codeTheme, dark)
+        if self._settings.bracketMode == "custom":
+            return styles, parse_colors(self._settings.bracketColors)
+        return styles, brackets
+
     @Slot(QObject, bool)
     def attachCodeHighlighting(self, text_document: QObject, dark: bool) -> None:
         """Colour a QML code input (see ``viewmodel/highlighter.py``).
@@ -175,7 +192,7 @@ class MainViewModel(QObject):
         symbol — whether the palette paints that difference is the palette's
         business (Atom One gives both its own foreground).
         """
-        styles, bracket_colors = theme(self._settings.codeTheme, dark)
+        styles, bracket_colors = self._palette(dark)
         attach(text_document, self._variable_manager.list_all, styles, bracket_colors)
 
     @Slot(str, bool, result=str)
@@ -194,7 +211,7 @@ class MainViewModel(QObject):
         The scope is resolved here, once: ``to_rich_text`` takes a mapping, where
         the highlighter takes the *provider* so it can ask again on every keystroke.
         """
-        styles, bracket_colors = theme(self._settings.codeTheme, dark)
+        styles, bracket_colors = self._palette(dark)
         return to_rich_text(text, self._variable_manager.list_all(), styles, bracket_colors)
 
     @Slot(str, float, bool, result=str)
@@ -221,7 +238,7 @@ class MainViewModel(QObject):
         plain = QFontMetricsF(self._settings.codeFont).elidedText(
             text, Qt.TextElideMode.ElideRight, width
         )
-        styles, bracket_colors = theme(self._settings.codeTheme, dark)
+        styles, bracket_colors = self._palette(dark)
         # The elision mark stays *outside* the spans, so it inherits the label's
         # own colour instead of the last token's — a truncated number would
         # otherwise end in a pink/red `…` whatever it truncates.

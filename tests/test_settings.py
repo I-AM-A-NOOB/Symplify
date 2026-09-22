@@ -13,6 +13,7 @@ directory is never touched.
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -21,6 +22,8 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from PySide6.QtCore import QObject, Qt, Signal  # noqa: E402
+
+from python.brackets import DEFAULT_COLORS  # noqa: E402
 
 from python.settings import (  # noqa: E402
     CONFIG_FILENAME,
@@ -102,6 +105,49 @@ def test_set_persists_and_round_trips():
     assert store.set("appearance.theme", "Dark") == "Dark"
     assert path.is_file()
     assert store_at(path).get("appearance.theme") == "Dark"
+
+
+def test_bracket_settings_round_trip_and_repair_what_cannot_be_painted():
+    path = temp_dir() / CONFIG_FILENAME
+    store = store_at(path)
+    assert store.get("appearance.bracket_mode") == "theme"
+    # The custom list starts as the rainbow the app has always used, so the mode
+    # is usable the moment it is picked.
+    assert store.get("appearance.bracket_colors") == ",".join(DEFAULT_COLORS)
+
+    # A mode that is not one of the two choices falls back instead of sticking.
+    assert store.set("appearance.bracket_mode", "rainbow") == "theme"
+    assert store.set("appearance.bracket_mode", "custom") == "custom"
+
+    # The list keeps only what can be painted, normalised — so the field shows
+    # back exactly what the renderer will use.
+    assert store.set("appearance.bracket_colors", " #FF0000 , nope, #00ff00 ") == \
+        "#ff0000,#00ff00"
+    assert store_at(path).get("appearance.bracket_colors") == "#ff0000,#00ff00"
+
+    # A list that keeps nothing is repaired to the default rather than to "",
+    # because an empty custom palette has no meaning.
+    assert store.set("appearance.bracket_colors", "nope, also nope") == \
+        ",".join(DEFAULT_COLORS)
+    assert store.set("appearance.bracket_colors", "") == ",".join(DEFAULT_COLORS)
+
+
+def test_the_settings_page_offers_exactly_the_families_the_data_has():
+    """The page lists the families itself (ids and blurbs; the display names come
+    from `code_themes.FAMILIES` through the viewmodel), so the two lists can
+    drift: a family added to the data but not to the page is selectable through
+    the config and invisible in the UI — which is exactly what happened when
+    GitHub's and Catppuccin's families were added. `FAMILIES` is the contract;
+    this holds the page to it, in order."""
+    from python.code_themes import family_ids
+
+    page = (REPO_ROOT / "qml" / "pages" / "SettingsPage.qml").read_text(encoding="utf-8")
+    # The page has other `model: [...]` blocks (the appearance combos); the one
+    # that holds `key:` entries is the code-theme list.
+    model = next(block for block in re.findall(r"model:\s*\[(.*?)\]", page, re.S)
+                 if "key:" in block)
+    listed = re.findall(r'key:\s*"([^"]+)"', model)
+    assert listed == family_ids(), listed
 
 
 def test_unknown_keys_survive_a_write():

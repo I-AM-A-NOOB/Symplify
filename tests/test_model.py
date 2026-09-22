@@ -27,11 +27,11 @@ from sympy import Integer, Matrix, Rational, Symbol
 from PySide6.QtCore import QObject
 from PySide6.QtGui import QTextDocument
 
-from python.brackets import DEFAULT_COLORS, spans
+from python.brackets import DEFAULT_COLORS, parse_colors, spans
 from python.code_style import DEFAULT_STYLES, CodeSpan, Style, color_for, surface, theme
 from python.code_style import spans as code_spans
 from python.code_style import to_rich_text
-from python.code_themes import FAMILIES
+from python.code_themes import FAMILIES, VSCODE_BRACKET_COLORS
 from python.model.lexer import TokenKind, tokenize
 from python.model.calculator import (
     Assignment,
@@ -642,19 +642,20 @@ def test_a_theme_family_colours_the_kinds():
     assert solarized[Style.CONSTANT] == "#b58900"
 
 
-def test_a_family_that_names_bracket_colours_replaces_the_rainbow():
-    """Solarized brings its own editorBracketHighlight; its light half does not."""
+def test_a_family_that_names_its_own_bracket_colours_keeps_them():
+    """Solarized brings its own editorBracketHighlight; its light half does not,
+    and that half then follows VS Code the same way the rest of them do."""
     _, dark = theme("solarized", True)
     assert dark == ("#cdcdcd", "#b58900", "#d33682")
     _, light = theme("solarized", False)
-    assert light == ()          # nothing to say: the renderer keeps the rainbow
+    assert light == VSCODE_BRACKET_COLORS["light"]
 
 
 def test_an_unknown_family_falls_back_instead_of_raising():
     """A config file can name a family this build does not have."""
     styles, brackets = theme("not-a-family", True)
     assert styles == DEFAULT_STYLES
-    assert brackets == ()
+    assert brackets == VSCODE_BRACKET_COLORS["dark"]
 
 
 def test_the_family_reaches_the_renderer():
@@ -662,7 +663,9 @@ def test_the_family_reaches_the_renderer():
     dark, _ = theme("default", True)
     assert '<span style="color:#b5cea8;">1</span>' in to_rich_text("1", styles=dark)
     assert "<span" not in to_rich_text("x", styles=dark)        # a free symbol
-    assert "<span" not in to_rich_text("+", styles=theme("solarized", True)[0])
+    # Catppuccin names no `invalid`, so an unknown token stays the control's own.
+    styles, brackets = theme("catppuccin", True)
+    assert color_for(CodeSpan(0, 1, Style.UNKNOWN, None), styles, brackets) is None
 
 
 class StubTextDocument(QObject):
@@ -710,12 +713,13 @@ def test_attaching_the_colouring_paints_the_named_family():
     assert "#d33682" in colors, colors          # the digit
 
 
-def test_a_family_with_no_bracket_colours_paints_the_rainbow():
-    """The other half of that seam: a family that names no bracket colours.
+def test_a_family_with_no_bracket_colours_follows_vscode():
+    """A family that names no bracket colours still colourises brackets.
 
     Atom One is the default family and carries no ``editorBracketHighlight``, so
-    its ``theme()`` tuple is empty. The highlighter has to fall back to the v1
-    rainbow — and it must not raise, because it recomputes *before*
+    following the code theme means VS Code's *registered defaults* for the kind —
+    which is what VS Code itself does there — rather than a palette of our own.
+    The seam must also not raise, because the highlighter recomputes *before*
     ``rehighlight()``: an exception there leaves the document painted with the
     previous text's formats and kills every later refresh (typing, pasting, a
     theme switch), which is exactly how the app lost its bracket colours and its
@@ -724,26 +728,58 @@ def test_a_family_with_no_bracket_colours_paints_the_rainbow():
     store = SettingsStore(temp_dir() / "config.yaml")
     store.load()
     assert store.get("appearance.code_theme") == "one"      # the default family
+    assert store.get("appearance.bracket_mode") == "theme"
     vm = MainViewModel(store)
 
     target = StubTextDocument("((1))")
     vm.attachCodeHighlighting(target, True)
 
+    expected = VSCODE_BRACKET_COLORS["dark"]
     colors = target.colors()
     # Both ends of a pair share a colour, and the nesting steps the layer.
-    assert colors[:2] == [DEFAULT_COLORS[0], DEFAULT_COLORS[1]], colors
-    assert colors[-2:] == [DEFAULT_COLORS[1], DEFAULT_COLORS[0]], colors
+    assert colors[:2] == [expected[0], expected[1]], colors
+    assert colors[-2:] == [expected[1], expected[0]], colors
 
 
-def test_an_empty_bracket_palette_means_no_opinion():
-    """An empty ``bracket_colors`` is "this family says nothing about brackets",
-    not "no brackets": *both* renderers have to supply the rainbow, because both
-    ask ``color_for``. Reading its length as a palette of zero colours is the
+def test_the_renderers_still_supply_a_palette_that_is_passed_none():
+    """``color_for`` keeps a last-resort palette for a caller that passes none.
+
+    ``theme()`` always answers with colours now (the family's own, or VS Code's
+    defaults), so this is the seam a *direct* caller can still fall through — and
+    reading an empty sequence as "a palette of zero colours" is the
     ZeroDivisionError that took the whole refresh path down with it."""
     styles, brackets = theme("one", True)
-    assert brackets == ()                    # Atom One has no bracket colours
-    assert color_for(CodeSpan(0, 1, Style.BRACKET, 0), styles, brackets) == DEFAULT_COLORS[0]
-    assert DEFAULT_COLORS[0] in to_rich_text("(a)", styles=styles, bracket_colors=brackets)
+    assert brackets == VSCODE_BRACKET_COLORS["dark"]
+    assert color_for(CodeSpan(0, 1, Style.BRACKET, 0), styles, ()) == DEFAULT_COLORS[0]
+    assert DEFAULT_COLORS[0] in to_rich_text("(a)", styles=styles, bracket_colors=())
+
+
+def test_a_custom_bracket_list_overrides_the_theme_and_keeps_only_what_it_can_use():
+    """The setting's two modes, and what happens to a list that is half-typed."""
+    vm = new_vm()
+    assert parse_colors(" #FF0000 , nope, #00ff00 ,") == ("#ff0000", "#00ff00")
+
+    # Following the code theme is the default; the family names none, so this is
+    # VS Code's dark set.
+    assert VSCODE_BRACKET_COLORS["dark"][0] in vm.highlighted("()", True)
+
+    vm.settings.bracketMode = "custom"
+    vm.settings.bracketColors = "#FF0000, nope, #00ff00"
+    # The store normalises what it keeps, so the field shows what will be painted.
+    assert vm.settings.bracketColors == "#ff0000,#00ff00"
+
+    painted = vm.highlighted("(())", True)
+    assert "#ff0000" in painted and "#00ff00" in painted
+    assert VSCODE_BRACKET_COLORS["dark"][0] not in painted
+
+    # A list that keeps nothing is repaired to the default palette — the same
+    # rainbow `color_for` falls back to — so Custom never silently turns into
+    # "follow the theme", and the field shows what is painted.
+    vm.settings.bracketColors = "junk"
+    assert vm.settings.bracketColors == ",".join(DEFAULT_COLORS)
+    painted = vm.highlighted("(())", True)
+    assert DEFAULT_COLORS[0] in painted and DEFAULT_COLORS[1] in painted
+    assert VSCODE_BRACKET_COLORS["dark"][0] not in painted
 
 
 def test_the_code_theme_setting_is_written_and_remembered():

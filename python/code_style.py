@@ -75,22 +75,32 @@ def theme(family: str, dark: bool) -> Tuple[Mapping[Style, str], Tuple[str, ...]
     Light on a light one.
 
     Returns:
-        ``(styles, bracket_colors)``. An empty ``bracket_colors`` means the theme
-        says nothing about ``editorBracketHighlight``, and the renderer keeps
-        ``brackets.DEFAULT_COLORS``. An unknown family falls back to
+        ``(styles, bracket_colors)``. The bracket colours are the family's own
+        ``editorBracketHighlight`` list, or — when it names none, which is the
+        case for most of them — VS Code's registered defaults for that kind, so
+        "follow the code theme" behaves the way it does in VS Code rather than
+        dropping to a palette of our own. The list is always non-empty, and the
+        nesting levels cycle through it (``brackets.parse_colors`` reads a
+        *custom* list; ``code_style.color_for`` owns the last-resort fallback for
+        callers that pass no palette at all). An unknown family falls back to
         :data:`DEFAULT_STYLES` rather than raising: a settings file can name a
         family this build does not have.
     """
     layer = code_themes.THEMES.get(family, {}).get("dark" if dark else "light")
     if layer is None:
-        return DEFAULT_STYLES, ()
+        return DEFAULT_STYLES, code_themes.VSCODE_BRACKET_COLORS[
+            "dark" if dark else "light"
+        ]
 
     styles = {
         _STYLE_BY_NAME[name]: color
         for name, color in layer["styles"].items()
         if name in _STYLE_BY_NAME
     }
-    return styles, tuple(layer["brackets"])
+    brackets = tuple(layer["brackets"]) or code_themes.VSCODE_BRACKET_COLORS[
+        "dark" if dark else "light"
+    ]
+    return styles, brackets
 
 
 def surface(family: str, dark: bool) -> Tuple[str, str, str]:

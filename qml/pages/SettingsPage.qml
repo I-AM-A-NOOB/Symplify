@@ -30,6 +30,11 @@ Item {
     readonly property var accentModeValues: ["default", "system", "custom"]
     readonly property bool customAccent: settingsVM.accentMode === "custom"
 
+    // The bracket setting's two choices, named once: the expander's header shows
+    // the one in effect and the rows below are them.
+    readonly property string bracketThemeLabel: qsTr("Follow the code theme")
+    readonly property string bracketCustomLabel: qsTr("Custom")
+
     // System fonts that can actually render math (they carry an OpenType MATH
     // table — ziamath fails on any other font instead of substituting one), from
     // python/fonts.py. The dropdown prepends the built-in default, so the values
@@ -198,7 +203,12 @@ Item {
                             { key: "modern", blurb: qsTr("The same taste as Dark+, on a quieter background.") },
                             { key: "2026", blurb: qsTr("The new kid: more contrast, more glow.") },
                             { key: "solarized", blurb: qsTr("Low contrast on purpose, and its own bracket colours.") },
-                            { key: "highcontrast", blurb: qsTr("For when you would rather the code just shout.") }
+                            { key: "highcontrast", blurb: qsTr("For when you would rather the code just shout.") },
+                            { key: "github", blurb: qsTr("The classic GitHub pair, from the Primer theme.") },
+                            { key: "githubdefault", blurb: qsTr("GitHub's current default — what the site and the editor ship today.") },
+                            { key: "githubcolorblind", blurb: qsTr("GitHub's default pair, retuned for colour blindness.") },
+                            { key: "githubhighcontrast", blurb: qsTr("GitHub's high-contrast pair, for the most separation.") },
+                            { key: "catppuccin", blurb: qsTr("Soothing pastels: Mocha on a dark UI, Latte on a light one.") }
                         ]
 
                         //: One `RadioSettingRow` per family, dropped straight into
@@ -212,6 +222,72 @@ Item {
                             hint: modelData.blurb
                             checked: settingsVM.codeTheme === modelData.key
                             onSelected: settingsVM.codeTheme = modelData.key
+                        }
+                    }
+                }
+
+                // Brackets are coloured separately from the code theme's own
+                // spans: the layers come from the theme (or VS Code's defaults
+                // when it names none), or from a list of the user's own.
+                ExpanderRow {
+                    id: bracketsExpander
+
+                    Layout.fillWidth: true
+                    title: qsTr("Bracket colouring")
+                    description: qsTr("Colours the nesting levels of brackets and parentheses in expressions.")
+                    icon.name: "ic_fluent_braces_20_regular"
+
+                    // The header carries the current choice; the rows below are
+                    // the control — the same shape as the code theme above.
+                    content: Text {
+                        text: settingsVM.bracketMode === "custom"
+                            ? page.bracketCustomLabel : page.bracketThemeLabel
+                        color: Theme.currentTheme.colors.textSecondaryColor
+                    }
+
+                    RadioSettingRow {
+                        label: page.bracketThemeLabel
+                        hint: qsTr("The code theme's own bracket colours — VS Code's defaults when the family names none.")
+                        checked: settingsVM.bracketMode === "theme"
+                        onSelected: settingsVM.bracketMode = "theme"
+                    }
+
+                    RadioSettingRow {
+                        id: bracketCustomRow
+
+                        label: page.bracketCustomLabel
+                        hint: qsTr("Your own colours, one per nesting level and cycled, as comma-separated #rrggbb.")
+                        checked: settingsVM.bracketMode === "custom"
+                        onSelected: settingsVM.bracketMode = "custom"
+
+                        TextField {
+                            id: bracketColorsField
+
+                            // The field sits in the row's action slot, the way
+                            // the font rows' fields do, and takes about two
+                            // thirds of it — the label column keeps the rest,
+                            // which is what the wrapped hint needs. Live only
+                            // while this option is the one in use.
+                            Layout.preferredWidth: bracketCustomRow.width * 2 / 3
+                            Layout.minimumWidth: bracketCustomRow.width * 2 / 3
+                            enabled: settingsVM.bracketMode === "custom"
+                            placeholderText: qsTr("e.g. #ff6b6b, #ff9f43, #ffd93d")
+                            text: settingsVM.bracketColors
+                            Component.onCompleted: cursorPosition = 0
+                            onEditingFinished: {
+                                settingsVM.bracketColors = text
+                                // The store normalises what it keeps (invalid
+                                // entries are dropped), so show that back.
+                                text = Qt.binding(() => settingsVM.bracketColors)
+                                cursorPosition = 0
+                            }
+                            ToolTip {
+                                delay: 500
+                                visible: bracketColorsField.hovered
+                                text: settingsVM.bracketColors.length > 0
+                                    ? settingsVM.bracketColors
+                                    : qsTr("One colour per nesting level, cycled")
+                            }
                         }
                     }
                 }

@@ -441,33 +441,26 @@ Item {
                             // text's width, so the row would grow past the
                             // panel instead of squeezing this label. Zero it.
                             Layout.minimumWidth: 0
-                            // The one line that reports the outcome, and the
-                            // only home for the failure and the hint (the LaTeX
-                            // strip below carries no empty-state text): the value
+                            // The one line that reports the outcome: the value
                             // — markup, coloured by the same span list the input
                             // uses, and elided by the viewmodel because
-                            // `Text.elide` is ignored for rich text; a failure —
-                            // prose, in the critical colour, the substitution the
-                            // History card's result line also makes; or the hint
-                            // before the first calculation. Prose is plain text,
-                            // so Qt's own elide covers it.
-                            readonly property bool isProse:
-                                calcVM.isError || calcVM.resultText === ""
+                            // `Text.elide` is ignored for rich text; or a failure
+                            // — prose, in the critical colour, the substitution
+                            // the History card's result line also makes. The empty
+                            // state is not here: the formula area below carries a
+                            // typeset placeholder, which needs no translation.
+                            readonly property bool isProse: calcVM.isError
                             font: settingsVM.codeFont
                             textFormat: isProse ? Text.PlainText : Text.RichText
                             wrapMode: Text.NoWrap
                             elide: isProse ? Text.ElideRight : Text.ElideNone
                             color: calcVM.isError
                                 ? Theme.currentTheme.colors.systemCriticalColor
-                                : calcVM.resultText === ""
-                                  ? Theme.currentTheme.colors.textSecondaryColor
-                                  : Theme.currentTheme.colors.textColor
+                                : Theme.currentTheme.colors.textColor
                             text: calcVM.isError
                                 ? calcVM.errorMessage
-                                : calcVM.resultText !== ""
-                                  ? vm.highlightedElided(calcVM.resultText, width,
-                                                         Theme.isDark())
-                                  : qsTr("Enter an expression, then press Ctrl+Return to calculate.")
+                                : vm.highlightedElided(calcVM.resultText, width,
+                                                       Theme.isDark())
                         }
 
                         Button {

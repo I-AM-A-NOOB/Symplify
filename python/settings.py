@@ -38,6 +38,8 @@ from typing import Any, Dict, Optional, Tuple
 
 import yaml
 
+from .brackets import DEFAULT_COLORS as DEFAULT_BRACKET_COLORS
+from .brackets import parse_colors
 from .code_themes import DEFAULT_FAMILY as DEFAULT_CODE_THEME
 from .code_themes import family_ids
 from .fonts import DEFAULT_CODE_FAMILY, DEFAULT_KEYBOARD_FAMILY
@@ -70,6 +72,17 @@ DEFAULTS: Dict[str, Any] = {
         # light member and follows the UI theme, so this names a STYLE rather
         # than a colour scheme (see python/code_themes.py).
         "code_theme": DEFAULT_CODE_THEME,
+        # How the bracket colours are chosen. `theme` follows the code theme (its
+        # own editorBracketHighlight, or VS Code's registered defaults when the
+        # family names none — see code_themes.VSCODE_BRACKET_COLORS); `custom`
+        # uses the list below instead.
+        "bracket_mode": "theme",  # theme | custom
+        # The custom list: comma-separated #rrggbb, one per nesting level,
+        # cycled. Only read with `bracket_mode == "custom"` — and it starts as,
+        # and is repaired to, the rainbow the app has always used for brackets
+        # (`brackets.DEFAULT_COLORS`), so clearing the field returns to it rather
+        # than silently leaving the mode with nothing to paint.
+        "bracket_colors": ",".join(DEFAULT_BRACKET_COLORS),
     },
     "fonts": {
         # A comma-separated PREFERENCE list, resolved to the first family the
@@ -97,6 +110,7 @@ _CHOICES = {
     "appearance.backdrop": ("mica", "acrylic", "tabbed", "none"),
     "appearance.accent_mode": ("default", "system", "custom"),
     "appearance.code_theme": tuple(family_ids()),
+    "appearance.bracket_mode": ("theme", "custom"),
 }
 
 #: Keys clamped into a numeric range.
@@ -119,6 +133,8 @@ _KNOWN_KEYS = (
     "appearance.accent_shading",
     "appearance.accent_os_shading",
     "appearance.code_theme",
+    "appearance.bracket_mode",
+    "appearance.bracket_colors",
     "fonts.code_family",
     "fonts.code_size",
     "fonts.keyboard_family",
@@ -347,6 +363,16 @@ class SettingsStore:
         if key == "fonts.latex_font":
             # A family name from the dropdown, or "" for ziamath's own font.
             return value.strip() if isinstance(value, str) else default
+        if key == "appearance.bracket_colors":
+            # A list of colours, one per nesting level. Entries that are not
+            # `#rrggbb` are dropped rather than rejecting the line, and what is
+            # stored is the normalised list — so the field shows what will be
+            # painted, and a half-typed entry simply does not colour anything. A
+            # list that keeps nothing falls back to the default palette rather
+            # than to "": an empty custom palette has no meaning, and the field
+            # then shows the rainbow that is about to be painted.
+            entries = parse_colors(value if isinstance(value, str) else "")
+            return ",".join(entries) if entries else default
         if key in ("window.x", "window.y"):
             if value is None:
                 return None

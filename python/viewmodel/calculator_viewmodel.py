@@ -37,6 +37,11 @@ class CalculatorViewModel(QObject):
     resultChanged = Signal()
     warningOccurred = Signal(str, str)
 
+    #: What the formula area shows while there is no result: typeset notation, so
+    #: the empty state reads as part of the language instead of as a sentence that
+    #: would need a translation per locale.
+    PLACEHOLDER_LATEX = r"\text{result} \in \LaTeX"
+
     def __init__(
         self,
         calculator: Calculator,
@@ -74,6 +79,9 @@ class CalculatorViewModel(QObject):
         self._latex_size = 24
         #: Path to the LaTeX font file; '' uses ziamath's bundled font.
         self._latex_font = ""
+        # A fresh page shows the placeholder, so the empty formula area says what
+        # it is for from the first frame.
+        self._refresh_strip()
 
     def _get_input_mode(self) -> int:
         """Current input mode as a stable int (InputMode.CODE.value)."""
@@ -150,13 +158,34 @@ class CalculatorViewModel(QObject):
             font=self._latex_font,
         )
         if not svg:
-            self._latex_svg_url = ""
-            self._latex_width = 0
-            self._latex_height = 0
+            self._clear_latex()
             return ""
         self._latex_svg_url = "data:image/svg+xml;charset=utf-8," + quote(svg, safe="")
         self._latex_width, self._latex_height = svg_size(svg)
         return self._latex_svg_url
+
+    def _clear_latex(self) -> None:
+        """Empty the formula area's artwork."""
+        self._latex_svg_url = ""
+        self._latex_width = 0
+        self._latex_height = 0
+
+    def _refresh_strip(self) -> None:
+        """Decide what the formula area holds, and render it.
+
+        The result's own LaTeX when it has one; the typeset placeholder while
+        there is no result at all — so the empty area says what it is for, in
+        notation rather than in a sentence that would need translating. A value
+        that has no LaTeX of its own leaves the area empty: it is on the outcome
+        line already, and the placeholder under it would read as a statement
+        about *that* value.
+        """
+        if self._result_latex:
+            self._build_latex_url(self._result_latex)
+        elif self._result_text:
+            self._clear_latex()
+        else:
+            self._build_latex_url(self.PLACEHOLDER_LATEX)
 
     @Slot(str)
     def set_latex_color(self, color: str) -> None:
@@ -172,9 +201,8 @@ class CalculatorViewModel(QObject):
         if normalized == self._latex_color:
             return
         self._latex_color = normalized
-        if self._result_latex:
-            self._build_latex_url(self._result_latex)
-            self.resultChanged.emit()
+        self._refresh_strip()
+        self.resultChanged.emit()
 
     @Slot(int)
     def set_latex_size(self, size: int) -> None:
@@ -187,9 +215,8 @@ class CalculatorViewModel(QObject):
         if size == self._latex_size:
             return
         self._latex_size = size
-        if self._result_latex:
-            self._build_latex_url(self._result_latex)
-            self.resultChanged.emit()
+        self._refresh_strip()
+        self.resultChanged.emit()
 
     @Slot(str)
     def set_latex_font(self, font: str) -> None:
@@ -202,9 +229,8 @@ class CalculatorViewModel(QObject):
         if font == self._latex_font:
             return
         self._latex_font = font
-        if self._result_latex:
-            self._build_latex_url(self._result_latex)
-            self.resultChanged.emit()
+        self._refresh_strip()
+        self.resultChanged.emit()
 
     inputMode = Property(
         int, _get_input_mode, _set_input_mode, notify=inputModeChanged
@@ -229,14 +255,12 @@ class CalculatorViewModel(QObject):
 
     @Slot()
     def clear_result(self) -> None:
-        """Clear the result display area."""
+        """Clear the result display area (which then shows the placeholder)."""
         self._result_text = ""
         self._result_latex = ""
         self._is_error = False
         self._error_message = ""
-        self._latex_svg_url = ""
-        self._latex_width = 0
-        self._latex_height = 0
+        self._refresh_strip()
         self.resultChanged.emit()
 
     def _apply_result(self, result: Result) -> None:
@@ -246,15 +270,12 @@ class CalculatorViewModel(QObject):
             self._result_latex = result.latex
             self._is_error = False
             self._error_message = ""
-            self._latex_svg_url = self._build_latex_url(result.latex)
         else:
             self._result_text = ""
             self._result_latex = ""
             self._is_error = True
             self._error_message = self._format_failure(result)
-            self._latex_svg_url = ""
-            self._latex_width = 0
-            self._latex_height = 0
+        self._refresh_strip()
         self.resultChanged.emit()
 
     @staticmethod

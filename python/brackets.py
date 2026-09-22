@@ -11,21 +11,46 @@ output with what ``model/lexer.py`` says the text is, and the renderers work
 from those merged spans.
 """
 
+import re
 from typing import Dict, List, Optional, Sequence, Tuple
 
 #: Bracket pairs — the ones the v1 app highlighted. Single characters: the
 #: pairing below walks the string one character at a time.
 DEFAULT_PAIRS: Dict[str, str] = {"(": ")", "[": "]", "{": "}"}
 
-#: One colour per nesting depth, cycled. The v1 palette.
+#: One colour per nesting depth, cycled. The v1 palette, and also what the
+#: ``custom`` bracket mode starts from and is repaired to. Kept in the canonical
+#: form ``parse_colors`` produces (lower case hex), so the settings default, the
+#: stored string and this tuple are the same value rather than three spellings of
+#: it.
 DEFAULT_COLORS: Tuple[str, ...] = (
     "#ff6b6b",
     "#ff9f43",
     "#ffd93d",
-    "#6bcB77",
+    "#6bcb77",
     "#4d96ff",
     "#9b5de5",
 )
+
+#: One entry of a custom palette: ``#rrggbb``.
+_HEX_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+def parse_colors(text: str) -> Tuple[str, ...]:
+    """The custom palette in ``text``: comma-separated ``#rrggbb``, normalised.
+
+    Entries that are not a ``#rrggbb`` colour are dropped rather than rejecting
+    the whole line, so a list someone is still typing keeps whatever is usable;
+    an empty result means "no usable colours", which the caller reads as "no
+    opinion" and falls back from.
+    """
+    if not text:
+        return ()
+    return tuple(
+        entry.strip().lower()
+        for entry in text.split(",")
+        if _HEX_COLOR.match(entry.strip())
+    )
 
 #: What an unmatched bracket is painted with.
 ERROR_COLOR = "#ff0000"
