@@ -529,15 +529,21 @@ Item {
             }
         }
 
-        Text {
-            anchors.centerIn: parent
-            visible: cards.count === 0
-            typography: Typography.Body
-            color: Theme.currentTheme.colors.textSecondaryColor
-            text: historyFilter.searchText !== "" && historyVM.count > 0
-                ? qsTr("No calculations match this search.")
-                : qsTr("No calculations yet. Results will appear here.")
-        }
+    }
+
+    // The empty state centres on the *viewport*, so it sits beside the body
+    // rather than inside it: a `Flickable`'s children are parented to its content
+    // item, whose height is the content's — with nothing loaded that is the title
+    // row alone, so the text used to land on the title instead of in the middle
+    // of the page, exactly as it does on Log.
+    Text {
+        anchors.centerIn: parent
+        visible: cards.count === 0
+        typography: Typography.Body
+        color: Theme.currentTheme.colors.textSecondaryColor
+        text: historyFilter.searchText !== "" && historyVM.count > 0
+            ? qsTr("No calculations match this search.")
+            : qsTr("No calculations yet. Results will appear here.")
     }
 
     // The frame: title, actions, floating bar, window-edge scroll bar. The
@@ -560,13 +566,20 @@ Item {
             }
         }
 
-        Button {
-            text: qsTr("Clear history")
+        ToolButton {
             icon.name: "ic_fluent_delete_20_regular"
+            icon.color: enabled
+                ? Theme.currentTheme.colors.textColor
+                : Theme.currentTheme.colors.textDisabledColor
             flat: true
             // The source count on purpose: an active search must not disable
             // clearing the history.
             enabled: historyVM.count > 0
+            ToolTip {
+                delay: 500
+                visible: parent.hovered
+                text: qsTr("Clear history")
+            }
             onClicked: historyVM.clear()
         }
     }

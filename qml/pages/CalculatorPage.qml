@@ -23,8 +23,6 @@ Item {
         // palette follows the ACTIVE theme — RinUI resolves Auto against the OS,
         // so ask it rather than the setting.
         vm.attachCodeHighlighting(codeArea.textArea.textDocument, Theme.isDark())
-        // The Assign value is the other place an expression gets typed.
-        vm.attachCodeHighlighting(assignValueField.textDocument, Theme.isDark())
         codeInput.forceActiveFocus()
     }
 
@@ -124,16 +122,27 @@ Item {
 
             ToolSeparator {}
 
-            Button {
-                text: qsTr("Calculate")
+            //: Every action in this bar is an icon and its tooltip: the bar is
+            //: narrow, and the title already says what the page is.
+            ToolButton {
                 icon.name: "ic_fluent_calculator_20_regular"
-                highlighted: true
+                icon.color: enabled
+                    ? Theme.currentTheme.colors.textColor
+                    : Theme.currentTheme.colors.textDisabledColor
+                flat: true
+                ToolTip {
+                    delay: 500
+                    visible: parent.hovered
+                    text: qsTr("Calculate")
+                }
                 onClicked: runCalculation()
             }
-
             ToolButton {
                 icon.name: "ic_fluent_clear_formatting_20_regular"
-                icon.color: Theme.currentTheme.colors.textColor
+                icon.color: enabled
+                    ? Theme.currentTheme.colors.textColor
+                    : Theme.currentTheme.colors.textDisabledColor
+                flat: true
                 ToolTip {
                     delay: 500
                     visible: parent.hovered
@@ -143,7 +152,10 @@ Item {
             }
             ToolButton {
                 icon.name: "ic_fluent_arrow_undo_20_regular"
-                icon.color: Theme.currentTheme.colors.textColor
+                icon.color: enabled
+                    ? Theme.currentTheme.colors.textColor
+                    : Theme.currentTheme.colors.textDisabledColor
+                flat: true
                 ToolTip {
                     delay: 500
                     visible: parent.hovered
@@ -153,7 +165,10 @@ Item {
             }
             ToolButton {
                 icon.name: "ic_fluent_arrow_redo_20_regular"
-                icon.color: Theme.currentTheme.colors.textColor
+                icon.color: enabled
+                    ? Theme.currentTheme.colors.textColor
+                    : Theme.currentTheme.colors.textDisabledColor
+                flat: true
                 ToolTip {
                     delay: 500
                     visible: parent.hovered
@@ -164,8 +179,19 @@ Item {
 
             Item { Layout.fillWidth: true }
 
+            //: Same treatment for the menu: an icon opens it, the tooltip names
+            //: it. The chevron RinUI appends still marks it as a menu.
             DropDownButton {
-                text: qsTr("Examples")
+                icon.name: "ic_fluent_math_formula_20_regular"
+                icon.color: enabled
+                    ? Theme.currentTheme.colors.textColor
+                    : Theme.currentTheme.colors.textDisabledColor
+                flat: true
+                ToolTip {
+                    delay: 500
+                    visible: parent.hovered
+                    text: qsTr("Examples")
+                }
 
                 MenuItem {
                     text: "diff(x**2, x)"
@@ -305,26 +331,15 @@ Item {
                             visible: calcVM.inputMode === 1
                             spacing: 8
 
-                            TextField {
+                            // The shared code field (surface, ink, code font), the
+                            // same one the Variables page renames with.
+                            CodeField {
                                 id: assignNameField
 
                                 Layout.preferredWidth: 130
                                 Layout.alignment: Qt.AlignVCenter
                                 text: calcVM.assignName
                                 placeholderText: qsTr("name")
-                                font: settingsVM.codeFont
-                                // Same surface as the two expression boxes — this is
-                                // part of the Assign row the code theme dresses — and
-                                // the same ink on it. Nothing highlights a name, so this
-                                // is plain text colour; an empty family answer leaves the
-                                // UI theme's colour in place, as it does for them.
-                                background: CodeSurface {
-                                    focused: assignNameField.activeFocus
-                                }
-                                color: page.codeSurface.ink
-                                    || Theme.currentTheme.colors.textColor
-                                placeholderTextColor: page.codeSurface.placeholder
-                                    || Theme.currentTheme.colors.textSecondaryColor
                                 onTextChanged: calcVM.assignName = text
 
                                 // Smart navigation: an operator typed at the end of
@@ -362,12 +377,10 @@ Item {
                                 onActivated: (index) => calcVM.assignOperator = model[index]
                             }
 
-                            // A TextArea, not a TextField: only TextArea/TextEdit
-                            // expose `textDocument`, which is what the code
-                            // highlighter attaches to. It keeps the field's
-                            // manners — Enter still calculates (see below) — and
-                            // wraps, so a long expression stays readable.
-                            TextArea {
+                            // The shared highlighted code area — it wraps, so a
+                            // long expression stays readable, and it keeps the
+                            // field's manners: Enter still calculates (below).
+                            CodeArea {
                                 id: assignValueField
 
                                 Layout.fillWidth: true
@@ -376,20 +389,6 @@ Item {
                                 text: calcVM.assignValue
                                 placeholderText: qsTr("expression")
                                 wrapMode: TextEdit.Wrap
-                                // Plain text: expressions hold < and &, which
-                                // the rich text auto-detection would swallow.
-                                textFormat: TextEdit.PlainText
-                                font: settingsVM.codeFont
-                                // Same surface as the Code box: an expression is
-                                // typed here too, and it is coloured by the same
-                                // highlighter.
-                                background: CodeSurface {
-                                    focused: assignValueField.activeFocus
-                                }
-                                color: page.codeSurface.ink
-                                    || Theme.currentTheme.colors.textColor
-                                placeholderTextColor: page.codeSurface.placeholder
-                                    || Theme.currentTheme.colors.textSecondaryColor
                                 onTextChanged: calcVM.assignValue = text
 
                                 Keys.onPressed: (event) => {

@@ -83,6 +83,10 @@ qml/
   pages/                        # Calculator / Variables / History / Log / Settings
   components/                   # Reusable pieces (+ qmldir):
                                 #   CodeSurface (a code input's box, in the code theme's colours),
+                                #   CodeField / CodeArea (the two code inputs themselves — font,
+                                #     surface, ink, and the highlighter on the area's document — so
+                                #     the calculator's Assign row and the Variables editors cannot
+                                #     drift apart; each page keeps its own keys),
                                 #   ExpanderRow / ExpanderPanel (RinUI expanders that keep
                                 #     their content's text cursors),
                                 #   PageScaffold (the frame every page shares: title, actions and
@@ -165,6 +169,38 @@ scratch/                        # Preserved experiments — NOT part of the app 
 - RinUI's `TableView` sets `acceptedButtons: Qt.NoButton`, which kills its built-in
   edit triggers; the Variables page overrides it back to `Qt.LeftButton` and wires real editing
   (`flags()` `ItemIsEditable` + `model.setData`). Its `itemAtCell(a, b)` is `(column, row)`.
+  The page also brings its **own** `TableView.editDelegate`, because the base delegate's editor is a
+  bare `QQC2.TextField` and a `TextField` has **no `textDocument`** — only `TextArea`/`TextEdit` do,
+  which is what the code highlighter attaches to (the calculator's Assign value is a `TextArea` for
+  the same reason). Five things about that slot, each measured:
+  * The editing delegate is a child of the cell delegate, so it inherits its context: `model.display`
+    reads *and writes* the cell (through the search proxy, so the page's proxy-index rule still
+    applies), and `row`/`column`/`cell.editing` are in reach. Branching between two editors on
+    `column` with `visible`/`focus: visible` is enough — no `Loader` needed.
+  * **`editing = false` is what closes the session**, and a `TextArea` never raises it: the base
+    delegate's `TextField` has `editingFinished` (fired on Return *and* on focus loss) and the
+    framework used to end the edit with it, but `TextArea` has no such signal. Both editors
+    therefore commit themselves — Return (via `Keys.onPressed`, the same way the calculator's inputs
+    keep Enter from inserting a newline), Escape abandons, and a focus watch commits when the editor
+    is left. The commit is **once-only** (a flag), because closing the editor takes focus away and
+    would otherwise commit twice — visible when the model's re-parse is not idempotent in its
+    warnings.
+  * Both fields are the shared components (`CodeField`, `CodeArea`), which is also where the
+    highlighter comes from: one per edit session, on the editor's own document. (The page-level
+    `vm.attachCodeHighlighting` for the Assign value is gone with it — two highlighters on one
+    document would colour it twice and keep two theme listeners.)
+  * **An editor floats in the cell — it must not be stretched to it.** `anchors.fill` on a 40px row
+    gave a 40px box whose text sat at the top: RinUI's own fields are **30px** tall at the code font
+    (a *bare* `QQC2.TextField` reports 40, because Qt's Basic style hardcodes that into its
+    background — the number that made the old Assign row's name field tower over its value field).
+    So the editors take their own height on the cell's centre line, inset 4px from the column edges,
+    with equal vertical insets and `verticalAlignment: AlignVCenter`: the box reads as a field, and
+    its text lands exactly where the read-only label's sits, so nothing jumps when it opens.
+  * Clicking a cell commits. The editor registers itself on the page (`page.activeEditor`, cleared
+    on destruction) and the delegate's `onClicked` calls `commitVisible()` before selecting — the
+    click already selected the row (the view does that on press, and `selectionModel.select` writes
+    the selection) while the commit is ours. A click *outside* the table commits too, but through
+    the focus watch, which is why that watch stays even though clicking a cell is handled here.
 - RinUI's `Indicator` (selected-item accent bar) lives in the `components/` dir, but the URI
   `RinUI.AdvancedComponents` **is not importable** (module URIs resolve by directory name here, so
   app code needs `import RinUI.components`; the root `RinUI` module does not export `Indicator`).
@@ -471,6 +507,40 @@ scratch/                        # Preserved experiments — NOT part of the app 
   two-scroll-bars bullet above). Attaching RinUI's bar is what the pages do now; it also means the
   bar is not part of `PageScaffold`, which draws only what must not scroll.
 
+- **RinUI's `ToolButton` is not flat, and a flat button does not dim when disabled.** `flat: true`
+  is *commented out* in `components/BasicInput/ToolButton.qml`, so the control keeps `Button`'s
+  raised chrome; every toolbar button therefore says `flat: true` itself. And the icon colour
+  resolves `highlighted ? flat ? enabled ? textAccentColor : textColor : … : textColor` — the flat,
+  non-highlighted branch never looks at `enabled`, so a disabled toolbar button paints its normal
+  ink and reads as clickable. Each one binds its own colour (`enabled ? textColor :
+  textDisabledColor`), which is also why they all spell it out rather than inherit.
+  **The convention for a page toolbar: an icon-only flat button, its meaning in a `ToolTip`.** The
+  title names the page, so a text button in the bar is a line the bar has to earn; the tooltip is
+  what makes the icon discoverable, and it is the only place a disabled button can explain itself.
+  The exception is a pane's own action row (the result panel's "Copy result"/"Copy LaTeX"): those
+  two share one icon, so their labels are what tells them apart.
+- **A `Flickable`'s children are parented to its content item, whose size is the content's.** An
+  empty-state `Text { anchors.centerIn: parent }` living inside a page's flickable was centring on
+  that content item — with nothing loaded, a title row tall — so it appeared on the title instead of
+  in the middle of the page. The Log page's empty state, declared beside the flickable on the page
+  itself, was always right; History's now sits there too.
+- **`QQuickTableView` puts `columnSpacing` between columns, and the provider has to pay for it.**
+  The Variables page's fixed columns plus its flexible one summed to `width - 4` — four pixels short
+  of the view, you would think — but the view adds 4px between each of the three columns, so the
+  content came out 4px *wider* than the view and RinUI's bar answered with a horizontal scroll bar
+  across the bottom of the table. The provider now subtracts `columnSpacing * (columns - 1)` as well
+  as the two fixed widths. Note the vertical bar *overlays* the content rather than taking room from
+  it (RinUI's bars are overlays throughout), so the last column's right edge sits under it once the
+  rows overflow — harmless for the left-aligned type text, and the price of a bar that never
+  reflows the table.
+- **`ItemSelectionModel.currentIndex` is the view's, not the selection's.** `selectionModel.select(…)`
+  — the delegate's own click handler, `page.selectRow` — writes `selectedIndexes` (and every table
+  highlight follows) while `currentIndex` keeps whatever the *view* last set, which in a headless
+  harness is nothing at all. The Variables page read `selectedRow` off `currentIndex`, so every
+  row-dependent toolbar action (delete, edit expression, rename) stayed disabled however the user
+  clicked; it reads the first entry of `selectedIndexes` now. A real mouse click hides this, because
+  the view acts on the press — one more reason the harness drives the model path and not the mouse.
+
 ## Rendering / display
 
 - LaTeX: `Success.latex` (`Calculator.render_latex`, sympy) → VM builds a percent-encoded SVG
@@ -682,7 +752,11 @@ One lexer, one span list, two renderers. Anything that colours code contributes 
   `settingsVM.codeSurface(dark)` hands QML the `{background, ink}` map the page binds to.
   `qml/components/CodeSurface.qml` replaces the text area's `background:` (RinUI's chrome redrawn in
   that colour: rounded to `buttonRadius`, bordered, accent underline while focused, clipped to the
-  rounding through an OpacityMask), and the page paints the control's `color` with the ink so text
+  rounding through an OpacityMask). The whole dressing — font, surface, ink, placeholder colour, and
+  for the area the highlighter on its own document — is `qml/components/CodeField.qml` (a
+  `TextField`; nothing highlights a name) and `qml/components/CodeArea.qml` (a `TextArea`; a
+  `TextField` has no `textDocument` to attach a highlighter to). Both pages build their code inputs
+  from those two, and the page paints the control's `color` with the ink so text
   the palette leaves unpainted stays legible on it — with the prefix-matching fix above, the only
   kind any family leaves unpainted is Catppuccin's `invalid`. The **placeholder** is the theme's too:
   `input.placeholderForeground` where the theme names one (Solarized's carry an

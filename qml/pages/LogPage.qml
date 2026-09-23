@@ -128,20 +128,34 @@ Item {
         flickable: logScroll
         inlineRow: headerRow
 
-        Button {
-            text: qsTr("Copy")
+        ToolButton {
             icon.name: "ic_fluent_copy_20_regular"
+            icon.color: enabled
+                ? Theme.currentTheme.colors.textColor
+                : Theme.currentTheme.colors.textDisabledColor
             flat: true
             // The plain rendering, for the clipboard: the page shows markup.
             enabled: logVM.formattedLogs !== ""
+            ToolTip {
+                delay: 500
+                visible: parent.hovered
+                text: qsTr("Copy log")
+            }
             onClicked: vm.copyText(logVM.formattedLogs)
         }
 
-        Button {
-            text: qsTr("Clear")
+        ToolButton {
             icon.name: "ic_fluent_delete_20_regular"
+            icon.color: enabled
+                ? Theme.currentTheme.colors.textColor
+                : Theme.currentTheme.colors.textDisabledColor
             flat: true
             enabled: logVM.formattedLogs !== ""
+            ToolTip {
+                delay: 500
+                visible: parent.hovered
+                text: qsTr("Clear log")
+            }
             onClicked: logVM.clear()
         }
     }
