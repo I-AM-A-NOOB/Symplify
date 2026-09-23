@@ -1,6 +1,6 @@
 [project]
 name = "symplify"
-version = "0.4.0"
+version = "0.4.1"
 description = "A modern symbolic calculator built with SymPy and PySide6 (QML)."
 readme = "README.md"
 requires-python = ">=3.11"
