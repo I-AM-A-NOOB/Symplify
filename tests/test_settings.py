@@ -522,7 +522,11 @@ def test_the_picked_colour_updates_at_once_but_writes_lazily():
 
 
 def test_the_os_finetuning_option_states_its_conditions():
-    """Windows only, system accent, shading on — and it needs captured values."""
+    """Windows only, system accent, shading on — and it needs captured values.
+
+    Including the round trip: switching the option off must leave its own row
+    usable.
+    """
     from python.viewmodel.settings_viewmodel import SettingsViewModel
 
     store = store_at(temp_dir() / CONFIG_FILENAME)
@@ -543,6 +547,19 @@ def test_the_os_finetuning_option_states_its_conditions():
     vm.accentShading = True
     # The stored preference itself is independent of availability.
     assert vm.accentOsShading is True                # on by default
+
+    # With the OS values captured the option is usable whenever System and
+    # shading are on — and switching it off keeps its own row usable. It used to
+    # ask `_system_scheme_accent`, which answers "" while the option is off, so
+    # the row disabled itself and the option could only ever be turned off.
+    vm._system_accents = {"light": "#0078d4", "dark": "#005a9e"}
+    assert vm.accentOsShadingAvailable is True
+    vm.accentOsShading = False
+    assert store.get("appearance.accent_os_shading") is False
+    assert vm.accentOsShadingAvailable is True       # the row stays live
+    vm.accentOsShading = True
+    assert vm.accentForScheme(False) == "#0078d4"    # and the OS values apply
+    assert vm.accentForScheme(True) == "#005a9e"
     vm.accentOsShading = False
     assert store.get("appearance.accent_os_shading") is False
 

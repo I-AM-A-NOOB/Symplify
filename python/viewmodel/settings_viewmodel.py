@@ -448,6 +448,13 @@ class SettingsViewModel(QObject):
         on (with it off nothing is finetuned at all). The settings row states
         these, since a disabled switch otherwise looks broken. The OS values must
         also have been captured, or there is nothing to prefer.
+
+        The captured values are read straight out of ``self._system_accents`` and
+        never through ``_system_scheme_accent``: that one answers ``""`` while
+        this very option is *off* — it is where the opt-out lives — so asking it
+        here made the row's availability depend on the switch already being on.
+        Turning the option off disabled the row that turns it back on, and the
+        option became one-way.
         """
         if not self._get_accent_os_shading_supported():
             return False
@@ -455,7 +462,7 @@ class SettingsViewModel(QObject):
             return False
         if not self._get_accent_shading():
             return False
-        return bool(self._system_scheme_accent(True) and self._system_scheme_accent(False))
+        return bool(self._system_accents.get("light") and self._system_accents.get("dark"))
 
     def _get_latex_font(self) -> str:
         return self._store.get("fonts.latex_font")

@@ -958,6 +958,16 @@ backdrop floats up from 10px below while fading in, and carries the page's own t
     accent `SettingExpander` (`Shade per theme`, no icon) rather than as a card of its own: it only
     affects the accent. The row below it is the OS-finetuning option described above. Its setter emits `accentChanged` as well as `changed`, because turning it off
     changes the applied colour — that is what makes the window re-apply without a theme switch.
+  - **Never ask an opt-out whether the option it opts out of is available.** `accentOsShadingAvailable`
+    (which is the settings row's `enabled`) first asked `_system_scheme_accent` whether the OS had
+    reported both accents — but that method answers `""` while `appearance.accent_os_shading` is
+    *off*, since it is exactly where the opt-out lives. Availability therefore depended on the switch
+    already being on: turning `Use Windows accent finetuning` off disabled its own row, and the
+    option was one-way (the row read `enabled=false`, so a click on the disabled switch did nothing
+    and there was no way back on). It reads the captured values off `_system_accents` directly now.
+    The three stated conditions — Windows, `system` accent, shading on — plus "Windows reported both
+    accents at startup" are what enable the row; the test walks the round trip, because the failure
+    mode is invisible to a test that only checks the conditions with the option left on.
   - **The picked colour is written lazily.** A `ColorPicker` drag emits a change per mouse move, so
     `_set_custom_accent` stores the value in `_pending_accent` and restarts a 400 ms timer instead of
     writing the config each time; `_get_custom_accent` returns the pending value first, because
