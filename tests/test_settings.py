@@ -357,23 +357,68 @@ def test_open_prefers_the_system_dir_without_a_data_dir():
 # The accent: mode in effect vs. the colour the user picked
 # --------------------------------------------------------------------------
 
-def test_the_accents_variants_are_rgb_blends():
-    """Ported from the C# ThemeColorCalculator: blends, not HSL steps."""
-    from python.accent import (BLEND_FACTOR, black_blend, secondary, tertiary,
-                               white_blend)
+def test_the_accent_ramp_reproduces_the_recorded_vectors():
+    """The port against the ramps Windows published, as recorded by the reference.
 
-    # The blend definitions themselves.
-    assert white_blend(0.0, 0.0, 0.0, 0.25) == (0.25, 0.25, 0.25)
-    assert white_blend(1.0, 1.0, 1.0, 0.5) == (1.0, 1.0, 1.0)
-    assert white_blend(0.2, 0.4, 0.6, 0.0) == (0.2, 0.4, 0.6)
-    assert black_blend(0.8, 0.4, 0.2, 0.5) == (0.4, 0.2, 0.1)
-    assert black_blend(0.0, 0.0, 0.0, 0.9) == (0.0, 0.0, 0.0)
-    # The pair the palette is built from.
-    assert secondary(0.2, 0.4, 0.6) == white_blend(0.2, 0.4, 0.6, BLEND_FACTOR)
-    assert tertiary(0.2, 0.4, 0.6) == black_blend(0.2, 0.4, 0.6, BLEND_FACTOR)
+    `tests/golden_accent_palettes.json` is a documented sample of
+    `windowsthemefinetuner`'s corpus: accent colour in, the seven-entry
+    `AccentPalette` ramp the shell wrote out, read back after the colour was pushed
+    through its accent preference. Both pipelines are in the sample, because both
+    quantise differently and each has its own way of being wrong.
+    """
+    from python.accent import palette
+
+    fixture = json.loads(
+        (Path(__file__).parent / "golden_accent_palettes.json").read_text(encoding="utf-8")
+    )
+    vectors = fixture["vectors"]
+    assert len(vectors) == 63                      # the sample, not the whole corpus
+
+    def errors(case):
+        want = tuple(tuple(shade) for shade in case["palette"])
+        return [abs(a - b) for w, h in zip(want, palette(tuple(case["rgb"])))
+                for a, b in zip(w, h)]
+
+    # Lab path: byte-exact, with the reference project's one-unit budget for the
+    # colours whose channel lands within an ulp of a .5 boundary — measured there
+    # as about one colour in a hundred, and never twice in one colour.
+    lab = [case for case in vectors if case["pipeline"] == "lab"]
+    total = sum(sum(errors(case)) for case in lab)
+    worst = max(max(errors(case)) for case in lab)
+    assert total <= len(lab) // 100 + 1 and worst <= 1
+
+    # HSL path: the same shape, but its last bit is not reachable at all — the
+    # quantiser there truncates where the Lab path rounds, and the shell's own
+    # arithmetic lands a unit either side.
+    hsl = [case for case in vectors if case["pipeline"] == "hsl"]
+    assert max(max(errors(case)) for case in hsl) <= 1
+
+
+def test_the_shell_picks_the_ramp_path_per_colour():
+    """Lab for ordinary colours; the ends of the range and near-neutrals go HSL."""
+    from python.accent import uses_lab_pipeline
+
+    assert uses_lab_pipeline((0x00, 0x78, 0xD4)) is True
+    assert uses_lab_pipeline((0x25, 0x82, 0x92)) is True
+    assert uses_lab_pipeline((255, 255, 255)) is False     # L outside the window
+    assert uses_lab_pipeline((0, 0, 0)) is False
+    assert uses_lab_pipeline((128, 128, 128)) is False     # no saturation at all
+
+
+def test_the_two_shades_windows_paints_with_are_the_ones_we_use():
+    """Light mode paints the ramp's ``dark1``, dark mode its ``light2``.
+
+    ``#258292`` is the case the reference project started from, quoted from the
+    shell: these are the two colours it reports for that accent.
+    """
+    from python.accent import for_scheme
+
+    assert for_scheme("#258292", dark=False) == "#1d6978"
+    assert for_scheme("#258292", dark=True) == "#71d4db"
 
 
 def test_the_variant_trio_is_ordered_darkest_to_lightest():
+    """``(light-mode shade, the accent, dark-mode shade)`` — the ramp's three."""
     from python.accent import variants
     from python.viewmodel.settings_viewmodel import SettingsViewModel
 
@@ -397,35 +442,22 @@ def test_the_variant_trio_is_ordered_darkest_to_lightest():
     assert all(l >= p for l, p in zip(*up)) and any(l > p for l, p in zip(*up))
 
 
-def test_the_tinted_gray_ramp_keeps_the_frameworks_properties():
-    """Four of the C# suite's assertions, ported."""
-    from python.accent import TINTED_GRAY_KEYS, tinted_grays
-
-    grays = tinted_grays(0.0, 120 / 255, 215 / 255)
-    assert len(grays) == 11 and tuple(grays) == TINTED_GRAY_KEYS
-    # Monotonically darkening, lightest first, all channels in range.
-    levels = [sum(grays[k]) for k in TINTED_GRAY_KEYS]
-    assert levels == sorted(levels, reverse=True)
-    assert all(0.0 <= c <= 1.0 for v in grays.values() for c in v)
-    # A black accent gives genuinely neutral steps.
-    neutral = tinted_grays(0.0, 0.0, 0.0)
-    assert all(max(v) - min(v) < 0.01 for v in neutral.values())
-    # Different hues tint the ramp differently.
-    assert tinted_grays(0.0, 0.0, 1.0)["500"] != tinted_grays(1.0, 0.0, 0.0)["500"]
-
-
 def test_accent_shading_clamps_and_tolerates_bad_input():
     from python.accent import for_scheme, variants
 
-    assert for_scheme("#ffffff", dark=False) == "#bfbfbf"   # -25% blend
-    assert for_scheme("#ffffff", dark=True) == "#ffffff"    # already white
-    assert for_scheme("#000000", dark=False) == "#000000"
+    # White and black are outside the HSL lightness window, so their own lightness
+    # is clamped into it first and the shades spread from there — neither can come
+    # back unchanged.
+    assert for_scheme("#ffffff", dark=False) == "#b2b2b2"
+    assert for_scheme("#ffffff", dark=True) == "#d8d8d8"
+    assert for_scheme("#000000", dark=False) == "#333333"
+    assert for_scheme("#000000", dark=True) == "#595959"
     assert for_scheme("not a colour", dark=True) == "not a colour"
     assert variants("not a colour") == ("not a colour",)
 
 
 def test_shading_follows_one_rule_for_every_mode():
-    """The same blend for default/system/custom, on any platform."""
+    """The same derivation for default/system/custom, on any platform."""
     from python.accent import for_scheme
     from python.viewmodel.settings_viewmodel import SettingsViewModel
 
@@ -475,7 +507,7 @@ def test_the_preview_strip_shows_the_variant_trio_or_the_flat_colour():
     store.update({"appearance.accent_mode": "custom", "appearance.accent": "#0078d4"})
     vm = SettingsViewModel(store)
     assert vm.accentPreview == list(variants("#0078d4"))
-    assert len(vm.accentPreview) == 3          # tertiary, primary, secondary
+    assert len(vm.accentPreview) == 3          # light-mode, base, dark-mode
 
     vm.accentShading = False
     assert vm.accentPreview == ["#0078d4"]     # one flat swatch

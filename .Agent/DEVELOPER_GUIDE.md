@@ -64,8 +64,8 @@ python/
     log_viewmodel.py            #   LogViewModel (formattedLogs)
     highlighter.py              #   CodeHighlighter (QSyntaxHighlighter) for TextArea.textDocument;
                                 #   paints code_style spans, knows nothing about the rules
-  accent.py                     # WinUI-style accent shading: RGB blends, ported from the
-                                # I-Synergy ThemeColorCalculator (MIT), zero Qt
+  accent.py                     # The accent shades Windows derives (Lab/HSL ramp), ported
+                                # from windowsthemefinetuner; zero Qt
   latex_render.py               # latex_to_svg(latex, size=, color=, font=) + svg_size — theme-aware ziamath
   fonts.py                      # Font discovery: preference-list resolution, the
                                 # MATH-capable fonts, .ttc extraction (zero Qt)
@@ -75,6 +75,7 @@ python/
 tests/
   test_model.py                 # Behaviour contract of the model + viewmodels
   test_settings.py              # Settings store, config paths, RinUI bootstrap
+  golden_accent_palettes.json   # 63 recorded accent ramps for the port (see README)
   __main__.py                   # `uv run python -m tests` runs every module
 qml/
   MainWindow.qml                # FluentWindow + navigationItems (middle items + Log/Settings
@@ -878,24 +879,35 @@ backdrop floats up from 10px below while fading in, and carries the page's own t
     the accent**, and `MainWindow.qml` is its **single owner** (`applyAccent()`): the window
     outlives the pages, and applying it has to happen at startup, on every change, *and* after every
     theme switch, which a page cannot do. Pages must not touch it.
-  - **The accent's variants are RGB blends, ported from the C# `ThemeColorCalculator`**
-    (I-Synergy Framework, `ThemeColorCalculatorTests.cs`). `white_blend(c, f)` mixes towards white,
-    `black_blend(c, f)` towards black, and the palette is the trio **`tertiary`** (darker, −25%) /
-    **primary** / **`secondary`** (lighter, +25%). The scheme mapping follows the framework's own
-    semantics: **light takes `tertiary`, dark takes `secondary`**. Both blends are monotonic and
-    self-clamping, which is why that framework's tests assert properties rather than values. This
-    replaced an HSL-step family (`SHADE_STEPS` + WinUI's `Light1..3` formula).
-  - The framework's other half, **`tinted_grays`** (an 11-step neutral ramp carrying the accent's
-    hue, which that framework feeds to Background/Surface/Control per theme), is ported and tested
-    but **not wired**: RinUI owns this app's neutrals, so using it would mean overriding RinUI's
-    colour roles wholesale.
+  - **The accent's variants are the shades Windows itself derives** (`python/accent.py`, ported
+    from `windowsthemefinetuner`; see *Accent shading* in `README.md` for the provenance and
+    `tests/golden_accent_palettes.json` for the recorded vectors). Windows turns the accent into a
+    seven-entry ramp — `light3 … light1`, the accent, `dark1 … dark3` — and paints **light mode with
+    `dark1`, dark mode with `light2`**, so the shape is still "darker on light, lighter on dark" but
+    the values are the shell's own rather than an approximation.
+    Two pipelines exist and the shell picks per colour: **Lab** where `HSL L` is inside `0.25..0.75`
+    and saturation at least `0.15` (`L*` clamped into `49..50` for the base, three sRGB lerps up to
+    the `L* = 100` anchor and three down to `L* = 0`, each rebuilt through HSL with the base's
+    saturation as a floor), **HSL** otherwise (hue and saturation verbatim, `L` moved by
+    `0.68 / 0.40 / 0.20` of its distance from mid-grey). **The two paths quantise differently** —
+    the Lab path rounds halves up, the HSL path truncates — and that is the shell's behaviour, not a
+    tidy-up waiting to happen: truncating reproduces 99 of its 161 recorded HSL ramps, rounding 88.
+    Fidelity as measured in the reference project: the Lab path byte-exact (624/624 live), the HSL
+    path within one unit, and roughly one channel in 1700 lands within an ulp of a `.5` boundary —
+    which is why the vector test carries a one-unit budget for the Lab path instead of plain
+    equality, and a hard `<= 1` for the HSL path.
+    This replaces a port of I-Synergy's `ThemeColorCalculator`: its 25% blend towards black or white
+    scored a **combined CIE-Lab distance of 51.7** against Windows over two accents, and the
+    observations that killed it are now the description of the real rule — Windows **preserves HSL
+    saturation exactly** (teal `59.6 → 59.6`) where a blend towards white desaturates it (33.1),
+    and its dark accent sits at a fixed lightness (`(max+min)/2 ≈ 65%`).
   - **What `accentForScheme(dark)` applies**, with shading on:
 
     | mode | accent |
     |---|---|
-    | `default`, `custom` | the blend of the base — dark takes `secondary`, light `tertiary` |
+    | `default`, `custom` | the ramp's shade for that scheme — light takes `dark1`, dark `light2` |
     | `system`, Windows | **the OS's own accent for that scheme**, straight from the palette |
-    | `system`, elsewhere | the blend, like the other modes |
+    | `system`, elsewhere | the same ramp, like the other modes |
 
     With shading off every mode uses its base verbatim in both schemes. The bases are:
 
@@ -905,9 +917,9 @@ backdrop floats up from 10px below while fading in, and carries the page's own t
     | `custom` | the stored colour |
     | `default` | RinUI's own `#605ed2` |
   - **`system` can use the OS's tuned accents on Windows, and that is an option**
-    (`appearance.accent_os_shading`, default on). The blends cannot reproduce them (table below), and
-    Windows is the one platform that *has* a real answer, so the shell's own value can win over our
-    derivation there. `_system_scheme_accent` is gated on `sys.platform == "win32"` rather than on
+    (`appearance.accent_os_shading`, default on). Our derivation reproduces them to within the
+    measured tolerance, and Windows is still the authority on its own ramp — it is the thing that
+    wrote the values — so the shell's own wins when that option is on. `_system_scheme_accent` is gated on `sys.platform == "win32"` rather than on
     "the palette provided something": elsewhere the palette's accent is not scheme-specific, or is
     not the user's theme colour at all. `default`/`custom` always blend — those are colours the OS
     knows nothing about. Three properties drive the settings row and are worth keeping in step:
@@ -927,30 +939,19 @@ backdrop floats up from 10px below while fading in, and carries the page's own t
     is loaded, so those switches are never visible.
     Falls back to the live palette when the platform cannot switch schemes, and to RinUI's colour
     when there is no palette at all (headless tests). `Explorer\Accent\AccentPalette` is *not* a
-    usable source — it held oranges and a stray blue for both accents.
-  - **How close each path gets to Windows, measured** (CIE Lab distance, two accents). `system` on
-    Windows is *exact* by construction now (the OS's own numbers), so this table is about the blends
-    — `default`/`custom`, and `system` off Windows:
-
-    | accent | role | Windows | port | dE | earlier HSL family | dE |
-    |---|---|---|---|---|---|---|
-    | teal `#258292` | light | `#1d6978` | `#1c626e` | 3.4 | `#1d6978` | 0.0 |
-    | teal | dark | `#71d4db` | `#5ca1ad` | **19.2** | `#3797aa` | 23.0 |
-    | blue `#0078d4` | light | `#0067c0` | `#005a9f` | 12.5 | `#0067c0` | 0.0 |
-    | blue | dark | `#4cc2ff` | `#409adf` | **16.6** | `#1a8ef3` | 32.5 |
-    | | | | **51.7** | | | 55.5 |
-
-    The port wins overall and by a lot on the dark variant. The old family's perfect light column
-    was not a formula result: that version used the OS's *light-scheme* accent as its base, so light
-    mode echoed the OS while its dark variant (HSL `+15 L / −10 S`) landed much further out. Trading
-    that echo for deriving both variants from the true base is what improves the total — and it is
-    the same trade that makes the behaviour identical off Windows.
-  - Neither is exact, and a second accent shows why no formula over the base will be: Windows
-    **preserves HSL saturation exactly** (teal `59.6 → 59.6`, blue `100 → 100` for its dark accent)
-    where any blend towards white **desaturates** (teal's secondary falls to S 33.1), its dark accent
-    sits at a **fixed lightness** of ~65% for both accents (`(max+min)/2` = 166.0 and 165.5 of 255),
-    and its light accent follows no shared target, delta, ratio or contrast level (dL −6.7 vs −3.9).
-    Reproducing it would mean fitting an undocumented rule to a couple of samples.
+    source for the *app*: it is where the shell keeps the ramp, and the reference project reads it
+    to record vectors, but this app reads Qt's palette instead — the model layer takes no Win32
+    dependency for a value Qt already exposes, and the two entries the schemes paint with agree
+    either way. (An earlier round here called that registry key unusable outright; it holds eight
+    quads of which the last is unrelated to the ramp, and the shell only rewrites it when the accent
+    changes — read without setting one first, it says nothing about the accent in front of you.)
+  - **A note on the ramp's own numbers**, since they are easy to over-read: the pipeline choice is
+    per colour, so a colour already outside the lightness window (white, black, a near-neutral) is
+    clamped into it first and neither of its shades can come back unchanged — `#ffffff` yields
+    `#b2b2b2` / `#d8d8d8`. And a colour the OS itself already tuned is not a reproduction target:
+    pushing `#0078d4` through the derivation gives `#005fb7` / `#60cdff`, one step further down the
+    same ramp, because that colour is itself a derived shade rather than a base accent. The recorded
+    vectors (`tests/golden_accent_palettes.json`) are what the port is held to, not remembered pairs.
   - **That capture is re-entrant**: `setColorScheme` itself emits `paletteChanged`, which is what
     calls it back, so `_capturing_accents` guards it. `_on_palette_changed` re-captures (the OS
     accent can change at any time) and then emits `accentChanged`.
@@ -1216,7 +1217,10 @@ behaviour, and a "harmless" transform swap can change parsing across the whole a
 `test_settings.py` runs the config-directory rules against injected environments and temporary
 directories (the real user config is never touched), and runs the RinUI bootstrap in a **subprocess**
 (its effect is import-time, so it needs a fresh interpreter): no `./RinUI/`, values migrated, writes
-disabled.
+disabled. It also holds the accent ramp to the recorded vectors — an offline check, because the
+shell cannot be asked anything in a test; when the derivation changes, re-verify against
+`windowsthemefinetuner` (which owns the full 484-vector corpus and the live comparator) and
+re-sample `tests/golden_accent_palettes.json` from it rather than editing the numbers by hand.
 
 When changing QML pages, a short manual/app-launch check plus scanning the startup console for QML
 warnings is still the baseline; GUI smoke scripts stay throwaway (kept out of git). Remember the

@@ -281,7 +281,7 @@ class SettingsViewModel(QObject):
         scheme switches are never visible:
 
         * ``base`` — ``Highlight`` under the **dark** scheme, the OS's untuned
-          accent. The blends derive from this, so it must not be a
+          accent. Both shades derive from this, so it must not be a
           scheme-specific value or the result would be tuned twice.
         * ``light`` / ``dark`` — ``Accent`` under each scheme, i.e. the OS's own
           tuned accents. On Windows these are what the shell itself uses, so
@@ -323,9 +323,10 @@ class SettingsViewModel(QObject):
         """The OS's own accent for that scheme, or ``''`` when there is none.
 
         Windows ships a tuned accent per colour scheme and uses it itself, so for
-        ``system`` mode that value beats anything we could blend. Restricted to
+        ``system`` mode that value beats our own derivation of it. Restricted to
         Windows on purpose: elsewhere the palette's accent is not scheme-specific
-        (or not the user's theme colour at all), and the blends stay predictable.
+        (or not the user's theme colour at all), and the derivation stays
+        predictable.
         Also off when ``appearance.accent_os_shading`` is off, which is how the
         behaviour is opted out of.
         """
@@ -340,10 +341,13 @@ class SettingsViewModel(QObject):
         """The accent to apply for a theme of the given lightness.
 
         ``default`` and ``custom`` are colours the OS knows nothing about, so they
-        take the blends (``for_scheme``: darker for light, lighter for dark) —
-        the same for every platform. ``system`` on Windows uses the OS's own
-        tuned accent for the scheme instead, since the shell uses it too and no
-        blend reproduces it; on any other platform ``system`` blends as well.
+        take the derivation (``for_scheme``: the shell's own shade for the scheme
+        — the darker ``dark1`` on light, the lighter ``light2`` on dark) — the
+        same on every platform. ``system`` on Windows uses the value the OS
+        reports for the scheme instead: our derivation reproduces the shell's ramp
+        to within a unit, but the shell is the one that wrote it, so its own value
+        wins when the OS-shading option is on; with it off, ``system`` derives
+        like everything else.
 
         Shading off means no per-scheme finetuning at all: the base verbatim.
         """
@@ -362,7 +366,7 @@ class SettingsViewModel(QObject):
         A preview, not a control: it follows the accent the UI is using (not the
         stored custom colour the dropdown next to it edits), and it shows the
         palette actually in play — the OS's dark/base/light trio in ``system``
-        mode on Windows, our blended trio otherwise, and a single flat swatch
+        mode on Windows, our derived trio otherwise, and a single flat swatch
         when shading is off.
         """
         base = self._get_accent()

@@ -65,7 +65,7 @@ DEFAULTS: Dict[str, Any] = {
         # for every mode. Off uses each colour exactly as it is.
         "accent_shading": True,
         # Use the OS's own tuned accent per scheme where it has one (Windows)
-        # instead of the built-in blend. Only meaningful with the system accent
+        # instead of deriving it. Only meaningful with the system accent
         # and shading on; see SettingsViewModel.accentOsShadingAvailable.
         "accent_os_shading": True,
         # Which family the code colouring uses. Every family has a dark and a

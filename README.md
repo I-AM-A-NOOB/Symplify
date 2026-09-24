@@ -100,7 +100,7 @@ python/
   rinui_bootstrap.py           # Takes RinUI's own config directory over (see the guide)
   latex_render.py              # LaTeX -> SVG via ziamath (theme-colored, sized)
   keyboard_config.py           # Keyboard layout from keyboard_config.yaml
-  accent.py                    # Accent shading (RGB blends, ported from I-Synergy)
+  accent.py                    # The accent shades Windows derives (see License)
   fonts.py                     # Font discovery + OpenType MATH-table scan (zero Qt)
   version.py                   # Runtime version copy (kept in sync with pyproject)
 qml/
@@ -172,7 +172,7 @@ Theme mode, background effect (Windows 11), accent colour, result font size and 
 
 The code and keyboard rows take a **comma-separated list of families**, tried in order the way a font stack works in a browser: if the first font has no glyph for a character — `∛` in a mono face, say — it is drawn from the next one that does, rather than showing a blank box. The last entry is usually a generic word such as `monospace` or `serif`, which is matched against a list of real fonts, so the same configuration works on Windows, macOS and Linux. Expand a row to see what it starts with, how many fallbacks back it up, and a warning in the rare case that *none* of the listed fonts can draw something. The LaTeX row is a dropdown instead, because a font can only typeset maths if it carries an OpenType math table: the list holds the ones installed here, with the built-in font first (it is the only choice that needs no system font at all).
 
-The accent colour has three modes: **Default** (RinUI's own purple), **System** (the OS accent colour) and **Custom** (one of a set of presets; the colour you last chose is kept when you switch away). System takes Windows' own light and dark accents when you are on Windows, so it matches the rest of the system exactly; every other mode — and System on other platforms — gets its light and dark variants from one algorithm: the same RGB blend scheme the I-Synergy framework's ThemeColorCalculator uses: a 25% blend towards black for light themes and towards white for dark ones, so the result does not depend on what each toolkit happens to expose and behaves identically on Windows, macOS and Linux. Turn **Shade per theme** (inside the accent section) off to use each colour exactly as it is. Under it, **Use Windows accent finetuning** picks where the light and dark variants come from on Windows — the accents Windows derives itself (the default) or the built-in blend; it is only enabled with the System accent selected and Shade per theme on, and only appears on Windows. The section previews the accent as one rounded swatch — split into the light/current/dark segments when shading is on, a single field when it is off — and the button beside it opens a full colour picker for choosing any colour. The colour row previews the palette: the darker/primary/lighter trio when shading is on, a single flat swatch when it is off.
+The accent colour has three modes: **Default** (RinUI's own purple), **System** (the OS accent colour) and **Custom** (one of a set of presets; the colour you last chose is kept when you switch away). System takes Windows' own light and dark accents when you are on Windows, so it matches the rest of the system exactly; every other mode — and System on other platforms — gets its light and dark variants from the very derivation Windows uses: the accent goes into a seven-shade ramp, and the light theme paints with one of its darker entries while the dark theme paints with a lighter one. That derivation is reproduced exactly rather than approximated (see *Accent shading* under License), so the result does not depend on what each toolkit happens to expose and behaves identically on Windows, macOS and Linux. Turn **Shade per theme** (inside the accent section) off to use each colour exactly as it is. Under it, **Use Windows accent finetuning** picks where the light and dark variants come from on Windows — the value the OS reports itself (the default) or the reproduced derivation; it is only enabled with the System accent selected and Shade per theme on, and only appears on Windows. The section previews the accent as one rounded swatch — split into the light/current/dark segments when shading is on, a single field when it is off — and the button beside it opens a full colour picker for choosing any colour. The colour row previews the palette: the darker/primary/lighter trio when shading is on, a single flat swatch when it is off.
 
 The location is chosen at launch:
 
@@ -206,7 +206,23 @@ Prioritized directions:
 
 Symplify is licensed under [GPLv3](LICENSE).
 
-Third-party attribution: the accent shading in `python/accent.py` is ported from
-the [`ThemeColorCalculator`](https://dev.azure.com/i-synergy/I-Synergy.Framework/_git/I-Synergy.Framework?path=%2Ftests%2FISynergy.Framework.UI.Tests%2FUtilities%2FThemeColorCalculatorTests.cs)
-in the I-Synergy Framework, used under the
-[MIT License](https://dev.azure.com/i-synergy/_git/I-Synergy.Framework?path=/LICENSE).
+### Accent shading
+
+`python/accent.py` reproduces how Windows derives its accent shades.
+
+**Provenance.** The behaviour is Windows-specific and was characterised
+*observationally*: colours were pushed through the shell's accent preference
+(`uxtheme.dll` ordinals 120/122) and the seven-entry ramp the shell published in
+`HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Accent!AccentPalette`
+was read back — a few thousand times, of which 484 are pinned as recorded vectors;
+a documented 63-vector sample of those ships in `tests/golden_accent_palettes.json`
+so the tests can check the port offline.
+
+**No Microsoft source code, binary or resource is reproduced or redistributed.**
+The arithmetic is published standards — sRGB per IEC 61966-2-1, CIELAB per CIE 15
+under the D65 white point — plus numeric parameters that are the observed
+behaviour of an interface rather than copied expression. The port is of
+[`windowsthemefinetuner`](https://github.com/I-AM-A-NOOB/WindowsThemeFinetuner),
+this project's author's own reconstruction of that behaviour, which holds the full
+corpus, the live comparator against the shell, and the fidelity measurements the
+code comments quote.
