@@ -257,7 +257,7 @@ wheels = [
 
 [[package]]
 name = "symplify"
-version = "0.5.0"
+version = "0.5.1"
 source = { virtual = "." }
 dependencies = [
     { name = "fonttools" },
