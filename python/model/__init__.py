@@ -15,9 +15,8 @@ from .calculator import (
     Failure,
     Result,
     Success,
-    render_latex,
-    render_latex_definition,
 )
+from .latex import render_latex, render_latex_definition
 from .variable import (
     VariableEntry,
     VariableManager,

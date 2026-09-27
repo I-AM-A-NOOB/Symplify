@@ -18,14 +18,13 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Any, List, Mapping, Optional, Union
 
-from sympy import Symbol, latex
 from sympy.parsing.sympy_parser import (
     convert_xor,
     implicit_multiplication,
     parse_expr,
     standard_transformations,
 )
-
+from .latex import render_latex, render_latex_definition
 from .variable import is_sympy_name, sympy_callables, validate_name
 
 
@@ -121,35 +120,6 @@ ASSIGN_OPS = frozenset({"="}) | frozenset(AUGMENTED_OPS)
 
 #: ``name(`` — a call, as opposed to juxtaposition like ``2(x + 1)``.
 _CALL_RE = re.compile(r"(?<![\w.])([^\W\d]\w*)\s*\(")
-
-
-def render_latex_definition(name: str, value: Any) -> str:
-    """LaTeX for ``name = value``, with the name typeset as a symbol.
-
-    sympy's naming is the point: ``alpha``, ``rho`` and friends have their own
-    TeX forms, so the name goes through ``Symbol`` and comes out the way the
-    value's own LaTeX spells them. A value sympy cannot render takes the whole
-    line with it — there is nothing to print beside an empty right-hand side.
-    """
-    rendered = render_latex(value)
-    if not rendered:
-        return ""
-    try:
-        return f"{latex(Symbol(name))} = {rendered}"
-    except Exception:                  # a name sympy refuses to read as a symbol
-        return ""
-
-
-def render_latex(value: Any) -> str:
-    """LaTeX for ``value``, or ``''`` when sympy cannot render it.
-
-    Deliberately outside the evaluation path: a rendering problem must never be
-    reported as a calculation failure.
-    """
-    try:
-        return latex(value)
-    except Exception:
-        return ""
 
 
 class Calculator:

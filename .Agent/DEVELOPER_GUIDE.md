@@ -24,7 +24,13 @@ python/
   model/                        # PURE PYTHON, must never import Qt. The Model owns what an
                                 # input MEANS (syntax, name resolution, failure kinds).
     calculator.py               #   Calculator.evaluate(expr, scope) / .assign(Assignment, scope)
-                                #   -> Success | Failure; Assignment; ErrorKind; render_latex
+                                #   -> Success | Failure; Assignment; ErrorKind; the parse
+                                #   transformations. Answers with a value *and* its TeX spelling.
+    latex.py                    #   render_latex(value) / render_latex_definition(name, value): how a
+                                #   value is spelled in TeX (sympy's printer). Pure representation,
+                                #   so it is a peer of lexer.py rather than part of the evaluator —
+                                #   and the definition line already has a second caller (the
+                                #   Variables table). '' for "sympy cannot typeset it", never a raise.
     variable.py                 #   VariableManager (VariableEntry snapshots), validate_name,
                                 #   is_sympy_name + sympy name table, classify_type
     lexer.py                    #   tokenize(text, scope) -> [(start, length, kind)]: what each run
@@ -551,7 +557,7 @@ scratch/                        # Preserved experiments — NOT part of the app 
 
 ## Rendering / display
 
-- LaTeX: `Success.latex` (`Calculator.render_latex`, sympy) → **`render_data_url(latex, style)`**
+- LaTeX: `Success.latex` (`python/model/latex.py`'s `render_latex` / `render_latex_definition`, sympy) → **`render_data_url(latex, style)`**
   (`python/latex_render.py`) returns `(data URL, width, height)` — a percent-encoded SVG data URL
   plus the natural size `LatexImage` (qml/components) needs to render crisp by scaling `sourceSize`
   by `devicePixelRatio`. `('', 0, 0)` means "nothing to draw": that is the one contract every
@@ -1334,7 +1340,7 @@ fields, and duplicates or deletes the row. Three things about it are worth keepi
 - **It shows one LaTeX line, not a name beside an expression.** sympy typesets the *name* too —
   `alpha` is `\alpha` — so a plain-text name next to a Greek expression reads as two different
   variables. `VariablesModel.latexAt` therefore renders the whole definition
-  (`python/model/calculator.py`'s `render_latex_definition`: `latex(Symbol(name)) = render_latex(obj)`)
+  (`python/model/latex.py`'s `render_latex_definition`: `latex(Symbol(name)) = render_latex(obj)`)
   and answers `""` for an invalid entry or a value sympy cannot render, which is the panel's cue to
   show the raw entry instead (in the critical colour). The SVG is rendered on demand by
   `VariablesFilterModel.latexFor(row, color, size, font)` — no cache: one row, re-asked whenever the
