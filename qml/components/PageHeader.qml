@@ -40,54 +40,51 @@ Item {
     readonly property int pad: 12
     readonly property real actionsWidth: actionRow.implicitWidth
 
-    //: The inner box, which is what everything aligns to.
-    readonly property real innerHeight: Math.max(titleLabel.implicitHeight,
-                                                 actionRow.implicitHeight)
+    //: RinUI's own control height (`Button`: `max(text + 12, 32)`), and the floor for
+    //: everything below. A page with no actions sizes its action row to 0 and its bar
+    //: to its title alone, which made the same bar stand shorter — and centre its
+    //: title 2px lower — on that page than on every other.
+    readonly property int controlHeight: Math.max(titleLabel.implicitHeight, 32)
+    //: What gets centred: one control's height, whatever the page put in the row. A
+    //: page with no actions would otherwise size the bar to its title alone, which
+    //: made the same bar stand shorter there than everywhere else.
+    readonly property real containedHeight: Math.max(barRow.implicitHeight,
+                                                     controlHeight)
+    //: What the backdrop is drawn at, which is the same thing.
+    readonly property real innerHeight: containedHeight
 
     //: Where the inline row's top sits in the *content*, before any scrolling.
     //: `mapToItem` answers with the position as it is on screen — the flickable's
     //: scroll included — and `inlineRowPageY` takes the scroll off again, so the
-    //: scroll has to come back off here first. Without that the actions moved at
-    //: twice the scroll rate and drifted away from the row they belong beside, and
-    //: the drift stayed after the gesture ended. Not `inlineRow.y` either: that is
+    //: scroll has to come back off here first. Not `inlineRow.y` either: that is
     //: inside the content, and the content is itself inset.
     readonly property real inlineRowY: header.inlineRow && header.flickable
         ? header.inlineRow.mapToItem(header.flickable, 0, 0).y + header.flickable.contentY
         : header.y
 
-    //: Where the inline row's top is on the page right now.
+    //: Where the inline row's top is on the page right now. The bar does not follow
+    //: it — the row below is parked — but the backdrop still needs to know when the
+    //: content has reached the bar.
     readonly property real inlineRowPageY: header.inlineRowY
         - (header.flickable ? header.flickable.contentY : 0)
 
-    //: The actions' resting place, relative to this header — centred in the box.
+    //: The row's resting place, relative to this header — centred in the box. Any
+    //: slack the actions leave (a page with none, or with short ones) is split above
+    //: and below instead of being added below, which is what used to put each page's
+    //: title at a different height.
     readonly property real restingY: header.pad
-        + (header.innerHeight - actionRow.implicitHeight) / 2
-    //: The same, in page coordinates, which is what the clamp compares against.
-    readonly property real restingPageY: header.y + header.restingY
-
-    //: Where the actions would be if nothing stopped them: the inline row's
-    //: current page position, centred on the row. `contentY` is used as it comes,
-    //: negative overscroll included, so the actions ride the bounce with the rest
-    //: of the content.
-    readonly property real travellingY: header.flickable
-        ? header.inlineRowPageY
-          + (header.inlineRow ? (header.inlineRow.height - actionRow.implicitHeight) / 2 : 0)
-        : header.restingPageY
-
-    //: True once the inline row has scrolled out above the bar, which is when the
-    //: bar takes over from it — the equivalent of the Microsoft Store's title
-    //: disappearing under the bar as you scroll.
+        + (header.innerHeight - barRow.implicitHeight) / 2
+    //: True once the inline row has scrolled up to the bar, which is when the
+    //: backdrop may appear: the reserve is exactly as tall as the bar, so the moment
+    //: its top passes the bar's top is the moment whatever follows it is already
+    //: behind the bar.
     //:
-    //: Both of the tempting shorter tests are wrong. "The actions have stopped
-    //: travelling" is true the instant the page opens, because the row's inset and
-    //: the bar's resting place are within a few pixels of each other. "The row has
-    //: scrolled into the bar's band" is *also* true at rest: the band is 8..68 and
-    //: the row starts at 24 and is 28 tall, so it begins inside the band. Either
-    //: one leaves the backdrop covering the very title it exists to replace, and
-    //: the page looks scrolled while it is still at the top.
+    //: Not "once the row is gone from view": a page's `bottomGap` is air *below* the
+    //: reserve, and counting it would hold the backdrop back long after the content
+    //: had started sliding under the bar.
     readonly property bool barShown: header.flickable !== null
         && header.inlineRow !== null
-        && header.inlineRowPageY + header.inlineRow.height <= header.y
+        && header.inlineRowPageY <= header.y
 
     x: header.margin
     y: header.margin
@@ -130,36 +127,68 @@ Item {
         }
     }
 
-    Text {
-        id: titleLabel
+    // The title, the spacer and the actions are one row, moving on one `y` binding.
+    // They used to be two free-floating items — title anchored left, actions
+    // anchored right — which drew over each other as the window narrowed, and two
+    // copies of the title travelling by different rules (one in the content, one
+    // here) came apart the moment the reader scrolled. One row, one control, one
+    // scroll: the title and the buttons cannot separate, and what yields when the
+    // row runs short is the title, then the search field.
+    RowLayout {
+        id: barRow
 
+        //: Parked, not travelling. It used to ride the inline row and then stick, back
+        //: when the title lived in the content as well; now that the bar carries the
+        //: only title, riding bought nothing and cost consistency — each page insets
+        //: its content differently, so the same bar sat at a different height, and
+        //: with different padding round its title, on every page.
+        y: header.restingY
         anchors {
             left: parent.left
+            right: parent.right
             // `inset` is measured from the page edge, so inside the bar — which is
             // already inset by the margin — it has to lose that much.
             leftMargin: header.inset - header.margin
-            verticalCenter: parent.verticalCenter
+            rightMargin: header.inset - header.margin
         }
-        opacity: header.barShown ? 1 : 0
-        visible: opacity > 0
-        typography: Typography.Subtitle
-        text: header.title
+        spacing: header.pad
 
-        Behavior on opacity {
-            NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
+        Text {
+            id: titleLabel
+
+            //: `fillWidth` takes the slack when there is any and gives it back when
+            //: there is not; `minimumWidth: 0` + `elide` turn "not enough room" into
+            //: an ellipsis rather than a clash with the search box.
+            //:
+            //: No `Layout.maximumWidth: implicitWidth` here, tempting as it looks. It
+            //: caps the width at *exactly* the text's advance width, and because that
+            //: is fractional, the rounded width Qt hands back is a hair under it:
+            //: `Text.truncated` goes true at full width and the title renders as
+            //: "Histo…" with the whole row empty beside it. Measured on History/Log/
+            //: Settings (w == implicit, truncated == true) while Variables, whose
+            //: width happens to land on a whole pixel, was fine.
+            Layout.fillWidth: true
+            Layout.minimumWidth: 0
+            Layout.alignment: Qt.AlignVCenter
+            elide: Text.ElideRight
+            // RinUI's `Text` wraps by default, which would grow the bar instead.
+            wrapMode: Text.NoWrap
+            //: The one page title, in the bar beside the actions — the same face as
+            //: the Calculator page's command-bar title, so every page reads alike.
+            typography: Typography.Subtitle
+            text: header.title
         }
-    }
 
-    RowLayout {
-        id: actionRow
+        // The gap that keeps the title's text off the actions when the two halves
+        // meet. Fixed, not flexible: the title is the flexible piece, so the actions
+        // stay pinned right through it.
+        Item { Layout.preferredWidth: header.pad }
 
-        // Rides the content, then sticks. `travellingY` is in page coordinates, so
-        // the header's own offset comes back off here.
-        y: header.flickable && header.inlineRow
-            ? Math.max(header.restingPageY, header.travellingY) - header.y
-            : header.restingY
-        anchors.right: parent.right
-        anchors.rightMargin: header.inset - header.margin
-        spacing: 8
+        RowLayout {
+            id: actionRow
+
+            Layout.alignment: Qt.AlignVCenter
+            spacing: 8
+        }
     }
 }

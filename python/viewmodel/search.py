@@ -16,6 +16,8 @@ query matches everything, so clearing the box restores the full list.
 
 from enum import Enum
 
+from urllib.parse import quote
+
 from PySide6.QtCore import (
     Property,
     QModelIndex,
@@ -25,6 +27,7 @@ from PySide6.QtCore import (
     Slot,
 )
 
+from ..latex_render import latex_to_svg, svg_size
 from .history_viewmodel import HistoryModel
 
 
@@ -157,6 +160,40 @@ class VariablesFilterModel(SearchFilterModel):
     def nameAt(self, row: int) -> str:
         """Return the visible variable name at ``row`` (or an empty string)."""
         return self.cellAt(row, 0)
+
+    @Slot(int, result=str)
+    def latexAt(self, row: int) -> str:
+        """Return the visible row's expression as LaTeX ("" when it has none)."""
+        if not 0 <= row < self.rowCount():
+            return ""
+        return self.sourceModel().latexAt(self.mapToSource(self.index(row, 0)).row())
+
+    @Slot(int, str, int, str, result="QVariantMap")
+    def latexFor(self, row: int, color: str, size: int, font: str) -> dict:
+        """Return ``{url, width, height}`` for the visible row's expression.
+
+        Rendered on demand and not cached: the details panel shows one row, and
+        asks again whenever the selection, the theme or the LaTeX settings change,
+        so there is nothing to invalidate. The calculator and the history keep
+        caches because they render a *list*, each entry lazily and once.
+        """
+        empty = {"url": "", "width": 0, "height": 0}
+        latex = self.latexAt(row)
+        if not latex:
+            return empty
+        try:
+            svg = latex_to_svg(latex, size=size or None, color=color or None,
+                               font=font or None)
+        except Exception:              # a shape ziamath cannot typeset
+            return empty
+        if not svg:
+            return empty
+        width, height = svg_size(svg)
+        return {
+            "url": "data:image/svg+xml;charset=utf-8," + quote(svg, safe=""),
+            "width": width,
+            "height": height,
+        }
 
 
 class HistoryFilterModel(SearchFilterModel):

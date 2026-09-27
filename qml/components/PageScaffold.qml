@@ -34,12 +34,23 @@ Item {
     //: The page's content inset. Bodies must lay their content out with the same.
     property int inset: 24
 
+    //: When set, the frame stops there. A page with a panel beside it wants the
+    //: floating bar over the content only — otherwise it would ride across the
+    //: panel, and the actions would leave the surface they act on.
+    property Item rightBoundary: null
+
     default property alias actions: pageHeader.actions
 
     //: What the body's row has to reserve. One-way on purpose.
     readonly property real actionsWidth: pageHeader.actionsWidth
+    //: The bar's height, for the same reason: the body reserves it so its first row
+    //: starts below the bar rather than under it.
+    readonly property real headerHeight: pageHeader.height
 
-    anchors.fill: parent
+    anchors.top: parent.top
+    anchors.bottom: parent.bottom
+    anchors.left: parent.left
+    anchors.right: rightBoundary ? rightBoundary.left : parent.right
 
     PageHeader {
         id: pageHeader

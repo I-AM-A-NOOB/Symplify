@@ -802,6 +802,20 @@ and `Dialog.qml:21/23 … TypeError: Cannot read property 'width'/'height' of nu
 visible in the page now, invisible before. The Qt handler must not re-enter itself (it ends in a
 signal emission that can make Qt print again), so a module flag drops nested calls.
 
+**And it has to survive shutdown.** Qt keeps printing while the interpreter tears its modules down —
+RinUI's native event filter is still running when `__moduleShutdown` reaches it — and the log
+viewmodel is destroyed in the same sweep. A message handled at that point was routed into that
+deleted QObject, and the `RuntimeError` came back out *through Qt's own event filter*, which reports
+it as a nest of "Error calling Python override" frames; on Python 3.14 the whole wall is printed
+where earlier interpreters showed nothing at all. Two things close it: `aboutToQuit` detaches the
+handler (`qInstallMessageHandler(None)`, so anything later is a plain Qt message again — Qt's output
+during teardown is not the app's to route), and both the handler and the excepthook drop whatever
+raises underneath them. The pages guard the same moment on their side (`vm ? vm.highlightedElided(…)
+: ""`): Qt evaluates a binding once more while the context properties are being torn down, and
+without the guard the last evaluation raises "of null" out of a deleted QML object.
+`scratch/_exit_probe.py` reproduces the whole thing — it runs the composition root, quits, and prints
+whatever comes out of shutdown.
+
 **Everything also goes to the terminal**, through `LogViewModel.entryAdded` — one signal, so the page
 and the terminal cannot drift apart. Levels are routed: DEBUG/INFO to stdout, WARNING/ERROR to
 stderr, written through `sys.__stdout__`/`sys.__stderr__` (the streams the interpreter started with)
@@ -1195,6 +1209,123 @@ Data-file pitfalls for frozen builds (update this list when you add data-reading
 - `main` — RinUI + PySide6/QML (current)
 - `v3-fluentwinui3-qml` — third route, FluentWinUI3-styled QML
 - `v1-qfluentwidget`, `v2-qfluentwidget` — early QWidget (qfluentwidgets) prototypes
+
+## The Variables page
+
+The page scrolls as a *page* — `PageScaffold` + a `Flickable` whose attached `Rin.ScrollBar` sits at
+the window edge — and the table is given `height: contentHeight`, so it shows every row and owns no
+scroll of its own. Two measured things make that work:
+
+- **Sized to its content, the view's own bars draw nothing** (both report `size == 1.0`) and the
+  wheel passes straight through to the page's flickable (`contentY` 0 → 216 on one notch), so the
+  page carries exactly one scroll bar, at the window edge, like Log and History.
+- **The view keeps its own mouse handling** (`acceptedButtons: Qt.LeftButton` plus the double-click
+  edit trigger), so clicks select, a double click edits the cell and F2 edits from the keyboard —
+  all as before. A *drag* that starts on a row does not scroll the page; the wheel, the edge bar and
+  a drag beside the table all do. History's cards behave the same, so this belongs to the pages'
+  content rather than to this page.
+
+The trade is that a view sized to its content cannot recycle: it builds **a delegate per row**. That
+is accepted here — this list is a handful of variables, not thousands — and it is why no other page
+does it. The page drives the scroll itself: `reveal(row)` (History's shape, in this table's row
+pitch) runs after adding a variable and whenever the selection's current row changes, because
+`positionViewAtIndex` moves nothing once the view has no extent.
+
+The sticky part is `PageScaffold`'s: the title row and the toolbar ride up into the floating bar. The
+table has no card around it — no outline, no rounding, no plate behind the rows; their own tint is
+the table, and the page inset is 12 rather than the usual 24 (`PageScaffold.inset` is set to match,
+or the floating title would sit off its inline self). What holds the table is a plain `Item` sized to
+`max(table, what the viewport leaves)`, which is also what the empty state centres in.
+
+**The bar's title and its actions are one row, with a spacer between them.** They used to be two
+independent items — the title anchored left, the actions anchored right — and a narrow window (or the
+details panel, which takes 320px) let the search box draw straight over the title. That is a layout
+collision, so changing the typeface or the size cannot fix it: the title has to be *in* the same
+layout to give way. `barRow` is that layout, and what yields is the title (`elide`,
+`Layout.minimumWidth: 0`), then the search field.
+
+**Never cap a `Text` at `Layout.maximumWidth: implicitWidth`.** It reads as the tidy way to say
+"natural width when there is room, shrink when there is not", and it breaks: `implicitWidth` is a
+fractional advance width, so the rounded width the layout hands back is a hair *under* it —
+`Text.truncated` flips true at full width and the title renders as `Histo…` with the whole row empty
+beside it. Measured: History/Log/Settings all `truncated == true` with `width == implicitWidth`
+(74/74, 37/37, 82/82), while Variables — whose width happened to land on a whole pixel — was fine.
+Leave the title uncapped and let it carry the slack; the spacer is a fixed gap, and the actions stay
+pinned right through it.
+
+**The bar is parked, not travelling, and its box is one control tall.** It used to ride the inline
+row and then stick, from when the title also lived in the content; with one title in one control,
+riding bought nothing and cost consistency, because every page insets its content differently — the
+same bar sat at a different height, with different padding round its title, on every page. `barRow`
+now sits at `restingY` always, and `restingY` centres it in a box of RinUI's own control height
+(`Button`: `max(text + 12, 32)`); without that floor a page with no actions (Settings) sized the bar
+to its title alone and stood 52 tall against every other page's 56, with its title 2px lower.
+Measured after: four pages, both window widths, title at y=22 and the bar 56 tall, every time.
+
+**`SearchBar`'s field is the piece that gives way, not the whole box.** Its children were both fixed
+(190 + 118), so squeezing the *component* below what they need pushed the mode selector out over the
+next toolbar button — visible as "Fuzzy" sitting on the trash icon. The field now carries
+`Layout.fillWidth: true` + `Layout.minimumWidth: 90`, so the component's own implicit minimum is its
+real limit; the pages cap it with `Layout.maximumWidth: implicitWidth` (grow to natural, shrink when
+short) and must not impose a smaller floor of their own. The front window's minimum is 860px
+(`MainWindow.qml`) and the panel takes 320, so the tight case is real: at 860 with the panel open the
+row has ~516px for a title, the field, the mode selector and four buttons.
+
+**There is exactly one page title, and it lives in the bar beside the actions.** `PageHeader`'s
+`titleLabel` is `Typography.Subtitle` — the same face as the Calculator page's command-bar title, so
+every page's title looks alike whichever bar carries it — and it is always visible, not faded in when
+`barShown` turns true.
+
+It used to be drawn *twice*: once here and once in `PageHeaderRow`, inside the content. That could not
+work, and the mid-scroll state showed why: the content's copy scrolls with the page while the bar's
+copy sticks, so the moment the reader scrolled, the title and the toolbar visibly came apart — one
+sliding up, the other already at rest — and the bar's copy was still hidden, so there was nothing to
+hand over to. Two copies of one title travelling by different rules cannot be kept in step; one title
+in one control can. `PageHeaderRow` now reserves only space (`reservedWidth`/`reservedHeight`), and
+the page's first row starts below the bar instead of under it.
+
+The same reasoning retired the smaller mismatch before it: with the *bar's* copy alone changed to
+`Typography.Body` (20/`DemiBold` → 14/normal), the two copies simply wore different faces and the
+handoff looked like a different element arriving.
+
+**An assignment's LaTeX is the whole definition** (`x = …`), not just its value:
+`Calculator.assign` renders it with `render_latex_definition`, so the calculator's result pane and the
+history card both show one line that reads on its own. The history card's value line therefore loses
+its `name = ` prefix for assignments — the LaTeX carries it — while code entries keep it, since their
+LaTeX is a bare result. Augmented assignments report what they made (`x += 1` prints as `x = …`),
+which is the honest reading and keeps one shape for the card.
+
+**The panel is a boundary, not an overlay.** `PageScaffold.rightBoundary` stops the floating bar at
+the panel's left edge, so the title, the actions and the AcrylicBrush stay over the table they act on
+instead of riding across the panel; unset, the frame spans the page as before. The body itself is
+already anchored to `details.left`.
+
+**Two traps that only show up with the panel open.** The column widths come from the view's own width
+(`QQuickTableView.columnWidthProvider`), and the view does *not* re-ask when that width changes — the
+panel narrows the table and the columns stayed as wide as before, which is a horizontal scroll bar over
+content that all fits. `onWidthChanged: varTable.forceLayout()` is what re-runs the provider.
+And `page.selectedRow` reads the *selection* first, falling back to the view's `currentIndex.row`: a
+click sets the selection, but the arrow keys move only the current row, which RinUI's delegate paints as
+selected too, so without the fallback the panel ignored the keyboard.
+
+**The details panel** (a toolbar toggle, closed by default) shows the selected variable and its two
+fields, and duplicates or deletes the row. Three things about it are worth keeping:
+
+- **It shows one LaTeX line, not a name beside an expression.** sympy typesets the *name* too —
+  `alpha` is `\alpha` — so a plain-text name next to a Greek expression reads as two different
+  variables. `VariablesModel.latexAt` therefore renders the whole definition
+  (`python/model/calculator.py`'s `render_latex_definition`: `latex(Symbol(name)) = render_latex(obj)`)
+  and answers `""` for an invalid entry or a value sympy cannot render, which is the panel's cue to
+  show the raw entry instead (in the critical colour). The SVG is rendered on demand by
+  `VariablesFilterModel.latexFor(row, color, size, font)` — no cache: one row, re-asked whenever the
+  selection, the theme or the LaTeX settings change.
+- **Its bindings name `page.dataRevision`.** The line is read through functions (`latexFor`,
+  `cellAt`), and a call in a binding creates no dependency of its own, so without that the line kept
+  showing the value an edit had replaced. The counter is bumped from the proxy's `dataChanged`.
+- **`TableView` has no `selectRow` in this RinUI build.** The call failed silently: `+` added a
+  variable without selecting it and duplicate threw. `page.selectRow(row)` — the selection model,
+  the same expression the delegate's click handler uses — is the only door, and it is used by all
+  three callers now.
 
 ## Testing
 

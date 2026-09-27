@@ -98,8 +98,8 @@ Item {
 
                 width: parent.width
                 reservedWidth: frame.actionsWidth
-                title: qsTr("Log")
-            }
+                reservedHeight: frame.headerHeight
+                }
 
             Text {
                 id: logText

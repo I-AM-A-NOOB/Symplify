@@ -16,6 +16,7 @@ from .calculator import (
     Result,
     Success,
     render_latex,
+    render_latex_definition,
 )
 from .variable import (
     VariableEntry,
@@ -35,6 +36,7 @@ __all__ = [
     "Result",
     "Success",
     "render_latex",
+    "render_latex_definition",
     "VariableEntry",
     "VariableManager",
     "classify_type",

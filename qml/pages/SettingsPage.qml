@@ -136,8 +136,8 @@ Item {
 
                 Layout.fillWidth: true
                 reservedWidth: frame.actionsWidth
-                title: qsTr("Settings")
-            }
+                reservedHeight: frame.headerHeight
+                }
 
             // ---- Interface ----
             ColumnLayout {

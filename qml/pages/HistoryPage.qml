@@ -110,10 +110,10 @@ Item {
 
                 width: parent.width
                 reservedWidth: frame.actionsWidth
+                reservedHeight: frame.headerHeight
                 //: Air between the title row and the first card.
                 bottomGap: 12
-                title: qsTr("History")
-            }
+                }
 
             Repeater {
                 id: cards
@@ -224,9 +224,14 @@ Item {
             readonly property string inputPrefix:
                 card.mode === "Assign" ? `${card.name} ${card.op} ` : "> "
             readonly property string resultPrefix:
-                card.isError ? "" : "&nbsp;".repeat(card.name.length + 1) + "= "
+                //: For an assignment the LaTeX is the whole definition (`x = …`),
+                //: so the prefix the value-line aligns under would print the name a
+                //: second time. Errors have no LaTeX — hence no prefix either.
+                card.isError || card.mode === "Assign"
+                    ? "" : "&nbsp;".repeat(card.name.length + 1) + "= "
             readonly property string resultPrefixPlain:
-                card.isError ? "" : "\u00A0".repeat(card.name.length + 1) + "= "
+                card.isError || card.mode === "Assign"
+                    ? "" : "\u00A0".repeat(card.name.length + 1) + "= "
             TextMetrics {
                 id: inputPrefixMetrics
                 font: settingsVM.codeFont
@@ -261,9 +266,10 @@ Item {
                         // string, to what remains of the line beside the prefix.
                         textFormat: QQ.Text.RichText
                         text: card.inputPrefix
-                            + vm.highlightedElided(card.expression,
-                                                   width - inputPrefixMetrics.width,
-                                                   Theme.isDark())
+                            + (vm ? vm.highlightedElided(
+                                        card.expression,
+                                        width - inputPrefixMetrics.width,
+                                        Theme.isDark()) : "")
                     }
 
                     // Always visible and enabled -- only the opacity
@@ -326,9 +332,10 @@ Item {
                     text: card.isError
                         ? card.error
                         : card.resultPrefix
-                          + vm.highlightedElided(card.result,
-                                                 width - resultPrefixMetrics.width,
-                                                 Theme.isDark())
+                          + (vm ? vm.highlightedElided(
+                                      card.result,
+                                      width - resultPrefixMetrics.width,
+                                      Theme.isDark()) : "")
                 }
 
                 // Rendered result, horizontally scrollable (see `MathStrip`
@@ -559,6 +566,11 @@ Item {
             id: searchBar
 
             Layout.alignment: Qt.AlignVCenter
+            //: The bar's one flexible piece: when the window — or the details panel —
+            //: leaves the row short, the field gives way before the title has to
+            //: disappear, and never past a usable width.
+            Layout.fillWidth: true
+            Layout.maximumWidth: implicitWidth
             modeLabels: [qsTr("Fuzzy"), qsTr("Expression"), qsTr("Result")]
             onSearchRequested: (text, mode) => {
                 historyFilter.searchText = text

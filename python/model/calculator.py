@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Any, List, Mapping, Optional, Union
 
-from sympy import latex
+from sympy import Symbol, latex
 from sympy.parsing.sympy_parser import (
     convert_xor,
     implicit_multiplication,
@@ -123,6 +123,23 @@ ASSIGN_OPS = frozenset({"="}) | frozenset(AUGMENTED_OPS)
 _CALL_RE = re.compile(r"(?<![\w.])([^\W\d]\w*)\s*\(")
 
 
+def render_latex_definition(name: str, value: Any) -> str:
+    """LaTeX for ``name = value``, with the name typeset as a symbol.
+
+    sympy's naming is the point: ``alpha``, ``rho`` and friends have their own
+    TeX forms, so the name goes through ``Symbol`` and comes out the way the
+    value's own LaTeX spells them. A value sympy cannot render takes the whole
+    line with it — there is nothing to print beside an empty right-hand side.
+    """
+    rendered = render_latex(value)
+    if not rendered:
+        return ""
+    try:
+        return f"{latex(Symbol(name))} = {rendered}"
+    except Exception:                  # a name sympy refuses to read as a symbol
+        return ""
+
+
 def render_latex(value: Any) -> str:
     """LaTeX for ``value``, or ``''`` when sympy cannot render it.
 
@@ -223,7 +240,11 @@ class Calculator:
             value = parsed.value
         else:
             value = AUGMENTED_OPS[op](variables[target], parsed.value)
-        return Success(request, value, render_latex(value))
+        # The definition, not just the value: the calculator's result pane and the
+        # history card both show this LaTeX on its own, and a bare number beside the
+        # name they already print reads as two answers to the same question. The
+        # operator is not repeated — `x += 1` is reported as the `x = …` it made.
+        return Success(request, value, render_latex_definition(target, value))
 
     def unknown_calls(self, expression: str, scope: Mapping[str, Any]) -> List[str]:
         """Names used as calls that resolve to no function, in order of use.

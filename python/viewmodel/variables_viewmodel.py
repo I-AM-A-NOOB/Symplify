@@ -20,13 +20,13 @@ from PySide6.QtCore import (
     Slot,
 )
 
+from ..model import render_latex_definition
 from ..model.calculator import (
     Assignment,
     Calculator,
     ErrorKind,
     Failure,
     Result,
-    Success,
 )
 from ..model.variable import VariableManager
 from .log_viewmodel import LogViewModel
@@ -217,6 +217,21 @@ class VariablesModel(QAbstractTableModel):
             entry = self._manager.entry(self._keys[row])
             if entry:
                 return (entry.name, entry.expr_str, entry.type_label)[column]
+        return ""
+
+    @Slot(int, result=str)
+    def latexAt(self, row: int) -> str:
+        """Return ``name = expression`` for the row as one LaTeX line ("" when none).
+
+        The whole definition, not just the value: sympy typesets the *name* too, so
+        ``alpha`` and its Greek expression have to be rendered together or the two
+        halves read as different variables. An invalid entry, or a value sympy
+        cannot render, answers "" — the caller's cue to show the raw entry instead.
+        """
+        if 0 <= row < len(self._keys):
+            entry = self._manager.entry(self._keys[row])
+            if entry is not None and entry.valid:
+                return render_latex_definition(entry.name, entry.obj)
         return ""
 
     @Slot(int, result=str)

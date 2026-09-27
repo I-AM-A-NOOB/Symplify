@@ -458,8 +458,8 @@ Item {
                                 : Theme.currentTheme.colors.textColor
                             text: calcVM.isError
                                 ? calcVM.errorMessage
-                                : vm.highlightedElided(calcVM.resultText, width,
-                                                       Theme.isDark())
+                                : (vm ? vm.highlightedElided(calcVM.resultText, width,
+                                                             Theme.isDark()) : "")
                         }
 
                         Button {

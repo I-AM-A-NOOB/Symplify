@@ -26,7 +26,16 @@ RowLayout {
     TextField {
         id: searchField
 
+        //: The field is what gives way when the bar runs short — not the whole box:
+        //: squeezing this component below what its two children need pushes the mode
+        //: selector out over the toolbar's next button. `fillWidth` plus a floor here
+        //: is what turns "too narrow" into a slightly smaller field, and the mode
+        //: selector keeps the width its labels need. The component's own implicit
+        //: minimum (this floor + the selector + the spacing) is its real limit, so a
+        //: page must not impose a smaller one of its own.
+        Layout.fillWidth: true
         Layout.preferredWidth: 190
+        Layout.minimumWidth: 90
         Layout.alignment: Qt.AlignVCenter
         placeholderText: qsTr("Search...")
 
