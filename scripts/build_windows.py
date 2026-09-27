@@ -35,6 +35,13 @@ CMD = [
     # LTO off on purpose: the /GL + /LTCG link is single-threaded and is a large
     # slice of the build time, for no measurable runtime gain in a calculator.
     "--lto=no",
+    # Fewer C compilations at once, so the one that needs it can have the memory.
+    # sympy has modules whose generated C is huge — `polys.rootisolation`,
+    # `polys.polyquinticconst` — and MSVC's second pass died on them on the CI
+    # runner (`fatal error C1002: compiler is out of heap space in pass 2`) while
+    # the same files compiled here, where cl had more room. This is the flag
+    # Nuitka documents for exactly that; it costs build time, not correctness.
+    "--low-memory",
     "--windows-console-mode=disable",
     # RinUI (python package + its QML module tree)
     "--include-package=RinUI",

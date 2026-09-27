@@ -1291,8 +1291,10 @@ Data-file pitfalls for frozen builds (update this list when you add data-reading
   our usage (`TTCollection`, `TTFont`) and it pulls in `fontTools.pens` — base, filter, point,
   recording and transform pens, measured — and nothing else, so `--include-package=fontTools.ttLib`
   is both correct and smaller. `--prefer-source-code` is *not* the lever here: it picks `.py` over
-  `.pyc` and changes nothing about how much C a module generates. If a needed module ever exhausts
-  the compiler again, `--low-memory` is the flag (fewer C compilations at once).
+  `.pyc` and changes nothing about how much C a module generates. `--low-memory` is set for that
+  reason: sympy's `polys.rootisolation` and `polys.polyquinticconst` generate C big enough to exhaust
+  MSVC's second pass *on the CI runner* while compiling fine locally (measured: same commit, CI
+  `C1002`, local build clean), so the flag trades build time for a compiler that has the memory.
 - Debugging a GUI exe that exits early: rebuild with `--windows-console-mode=force` to see the traceback.
 
 ## Versioning
