@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 import QtQuick.Layouts 2.15
 import RinUI
 import RinUI as Rin
@@ -614,61 +615,40 @@ Item {
             }
         }
 
-        ToolButton {
-            icon.name: "ic_fluent_add_20_regular"
-            icon.color: enabled
-                ? Theme.currentTheme.colors.textColor
-                : Theme.currentTheme.colors.textDisabledColor
-            flat: true
-            ToolTip {
-                delay: 500
-                visible: parent.hovered
+        //: The table's own actions. Everything here may fold into the overflow
+        //: menu when the row runs short — the search box and the title have already
+        //: given what they can by then.
+        CommandBar {
+            Action {
                 text: qsTr("Add variable")
+                icon.name: "ic_fluent_add_20_regular"
+                onTriggered: addVariable()
             }
-            onClicked: addVariable()
-        }
-        ToolButton {
-            icon.name: "ic_fluent_delete_20_regular"
-            icon.color: enabled
-                ? Theme.currentTheme.colors.textColor
-                : Theme.currentTheme.colors.textDisabledColor
-            flat: true
-            enabled: page.selectedRow >= 0
-            ToolTip {
-                delay: 500
-                visible: parent.hovered
+            Action {
                 text: qsTr("Delete variable")
+                icon.name: "ic_fluent_delete_20_regular"
+                enabled: page.selectedRow >= 0
+                onTriggered: deleteVariable()
             }
-            onClicked: deleteVariable()
-        }
-        ToolButton {
-            icon.name: "ic_fluent_edit_20_regular"
-            icon.color: enabled
-                ? Theme.currentTheme.colors.textColor
-                : Theme.currentTheme.colors.textDisabledColor
-            flat: true
-            enabled: page.selectedRow >= 0
-            ToolTip {
-                delay: 500
-                visible: parent.hovered
+            Action {
                 text: qsTr("Edit expression (double-click the cell)")
+                icon.name: "ic_fluent_edit_20_regular"
+                enabled: page.selectedRow >= 0
+                onTriggered: beginEdit(1)
             }
-            onClicked: beginEdit(1)
-        }
-        ToolButton {
-            icon.name: "ic_fluent_rename_20_regular"
-            icon.color: enabled
-                ? Theme.currentTheme.colors.textColor
-                : Theme.currentTheme.colors.textDisabledColor
-            flat: true
-            enabled: page.selectedRow >= 0
-            ToolTip {
-                delay: 500
-                visible: parent.hovered
+            Action {
                 text: qsTr("Rename variable (double-click the cell)")
+                icon.name: "ic_fluent_rename_20_regular"
+                enabled: page.selectedRow >= 0
+                onTriggered: beginEdit(0)
             }
-            onClicked: beginEdit(0)
         }
+
+        //: The details toggle never folds: it is a view switch rather than one of
+        //: the table's actions, and a view switch that vanished into a menu would
+        //: read as the panel having disappeared. The separator is what says it is
+        //: not part of the group beside it.
+        ToolSeparator {}
         ToolButton {
             icon.name: page.sidebarOpen
                 ? "ic_fluent_panel_left_contract_20_regular"

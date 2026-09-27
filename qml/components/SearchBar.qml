@@ -6,16 +6,23 @@ import RinUI
 // pages. The debounce lives here, in one place: typing re-queries only after a
 // pause, while clearing the box (or pressing Esc) re-queries at once, so the
 // full list comes back immediately.
+//
+// The mode is chosen from a menu behind a flat icon button rather than from a
+// combo box. The labels are long ("Fuzzy", "Expression", "Result"), the choice is
+// made about once a session, and a combo box spent a fifth of the toolbar on
+// showing it — the toolbar is where the room is scarce (see `CommandBar`).
 RowLayout {
     id: root
 
     property var modeLabels: []
+    //: The chosen match mode, as an index into `modeLabels`.
+    property int mode: 0
 
     signal searchRequested(string text, int mode)
 
     function apply() {
         debounce.stop()
-        root.searchRequested(searchField.text, modeCombo.currentIndex)
+        root.searchRequested(searchField.text, root.mode)
     }
 
     function clear() {
@@ -50,14 +57,51 @@ RowLayout {
         Keys.onEscapePressed: root.clear()
     }
 
-    ComboBox {
-        id: modeCombo
+    ToolButton {
+        id: modeButton
 
-        Layout.preferredWidth: 118
         Layout.alignment: Qt.AlignVCenter
-        model: root.modeLabels
+        //: No `display`: RinUI's `ToolButton` is a `Button` that draws whatever
+        //: `text` it has and never consults that property, and this button has none
+        //: — the icon is all there is. (Setting it here only earned a ReferenceError:
+        //: `AbstractButton` lives in `QtQuick.Controls`, which this file does not
+        //: import, and `RinUI` does not re-export.)
+        flat: true
+        icon.name: "ic_fluent_filter_20_regular"
+        icon.color: Theme.currentTheme.colors.textColor
 
-        onActivated: root.apply()     // a mode switch applies immediately
+        //: The button says which mode is in use without spending the room a combo
+        //: box needs to say it.
+        ToolTip {
+            delay: 500
+            visible: parent.hovered
+            text: root.modeLabels.length > root.mode
+                ? root.modeLabels[root.mode] : ""
+        }
+        onClicked: modeMenu.popup(modeButton, modeButton.width / 2, modeButton.height)
+    }
+
+    Menu {
+        id: modeMenu
+
+        Repeater {
+            model: root.modeLabels
+
+            delegate: MenuItem {
+                //: Both are required: without them the delegate's `modelData` is not
+                //: defined at all (a ReferenceError per item, at runtime only).
+                required property int index
+                required property var modelData
+
+                text: modelData
+                checkable: true
+                checked: index === root.mode
+                onTriggered: {
+                    root.mode = index
+                    root.apply()          // a mode switch applies immediately
+                }
+            }
+        }
     }
 
     Timer {

@@ -548,6 +548,39 @@ scratch/                        # Preserved experiments — NOT part of the app 
   what makes the icon discoverable, and it is the only place a disabled button can explain itself.
   The exception is a pane's own action row (the result panel's "Copy result"/"Copy LaTeX"): those
   two share one icon, so their labels are what tells them apart.
+- **A page toolbar is a `CommandBar` of `Action`s, and it folds what does not fit.** Declare the
+  action, not the button: one `Action` drives either the visible `ToolButton` or a `MenuItem` in the
+  overflow menu, so the two can never disagree about what is enabled or what it does — the thing a
+  hand-written "more" menu gets wrong the first time an action gains a condition. Four traps, all of
+  them measured on the way in:
+  * **The default property must be a `list`.** `default property alias actions: repeater.model`
+    collects the declared children into a *single* value, so a bar with four actions reported one and
+    never folded anything. `default property list<QtObject> actions` + `model: root.actions` is the
+    working shape.
+  * **`fitted` has to depend on the delegates existing.** A `Repeater` builds its items
+    asynchronously, so the first evaluation sees `count` right and every item `null` — read as "only
+    one fits". `onItemAdded`/`onItemRemoved` bump a revision the fit binding reads.
+  * **Bind to the action, never assign it (`action: modelData`).** RinUI's `ToolButton` is a `Button`
+    that always draws its `text` beside the icon — it never consults `display`, so `IconOnly` does
+    nothing. Assigning the action writes the label onto the button and every one becomes as wide as
+    its sentence (measured: 136, 152, 301, 310 px against 44 for the same buttons icon-only). The
+    delegate binds `icon.name`/`enabled`/`onClicked: modelData.trigger()` and puts the label in a
+    `ToolTip`.
+  * **`MenuItem` is bound the same way, and not `checkable`.** RinUI's `MenuItem` reads
+    `action.shortcut` into a `Text`, and an action without a shortcut hands it an undefined key
+    sequence — a warning per item. Qt also writes `checked` itself on click, which would break a
+    binding; nothing in these bars is checkable yet.
+  The Variables bar's details toggle is the one action that never folds — it is a view switch, not one
+  of the table's actions, and it sits after a `ToolSeparator` to say so.
+- **Two errors that only exist at runtime, and how they hid.** Both were in `SearchBar`, both silent
+  through a five-page load check whose filter did not name them:
+  * `display: AbstractButton.IconOnly` — `AbstractButton` lives in `QtQuick.Controls` and RinUI does
+    not re-export it, so the line is a `ReferenceError` (and on RinUI's `ToolButton` it does nothing
+    anyway). Nothing needs it: that button has no `text`.
+  * A `Repeater` delegate without `required property var modelData` gets no `modelData` at all — a
+    `ReferenceError` per item, per rebuild.
+  **Filter for `ReferenceError` when smoking a page**, and load the page directly rather than through
+  `MainWindow` (which builds pages lazily, so a page you did not visit reports nothing at all).
 - **A `Flickable`'s children are parented to its content item, whose size is the content's.** An
   empty-state `Text { anchors.centerIn: parent }` living inside a page's flickable was centring on
   that content item — with nothing loaded, a title row tall — so it appeared on the title instead of
@@ -1303,14 +1336,16 @@ now sits at `restingY` always, and `restingY` centres it in a box of RinUI's own
 to its title alone and stood 52 tall against every other page's 56, with its title 2px lower.
 Measured after: four pages, both window widths, title at y=22 and the bar 56 tall, every time.
 
-**`SearchBar`'s field is the piece that gives way, not the whole box.** Its children were both fixed
-(190 + 118), so squeezing the *component* below what they need pushed the mode selector out over the
-next toolbar button — visible as "Fuzzy" sitting on the trash icon. The field now carries
-`Layout.fillWidth: true` + `Layout.minimumWidth: 90`, so the component's own implicit minimum is its
-real limit; the pages cap it with `Layout.maximumWidth: implicitWidth` (grow to natural, shrink when
-short) and must not impose a smaller floor of their own. The front window's minimum is 860px
-(`MainWindow.qml`) and the panel takes 320, so the tight case is real: at 860 with the panel open the
-row has ~516px for a title, the field, the mode selector and four buttons.
+**`SearchBar`'s field is the piece that gives way, and the mode is a menu, not a combo box.** The
+field carries `Layout.fillWidth: true` + `Layout.minimumWidth: 90`, so the component's own implicit
+minimum is its real limit; the pages cap it with `Layout.maximumWidth: implicitWidth` (grow to
+natural, shrink when short) and must not impose a smaller floor of their own. The match mode used to
+be a 118px `ComboBox` — a fifth of the toolbar, spent on a choice made about once a session, and the
+thing that used to sit on the trash icon when the row ran short. It is now a flat icon button (the
+funnel) whose tooltip names the current mode and whose menu carries the labels; the signal
+(`searchRequested(text, mode)`) did not change, so the pages did not either. The front window's
+minimum is 860px (`MainWindow.qml`) and the panel takes 320, so the tight case is real — and the
+toolbar's answer to it is the `CommandBar` fold above, not a wider row.
 
 **There is exactly one page title, and it lives in the bar beside the actions.** `PageHeader`'s
 `titleLabel` is `Typography.Subtitle` — the same face as the Calculator page's command-bar title, so

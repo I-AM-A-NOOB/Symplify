@@ -130,35 +130,23 @@ Item {
         flickable: logScroll
         inlineRow: headerRow
 
-        ToolButton {
-            icon.name: "ic_fluent_copy_20_regular"
-            icon.color: enabled
-                ? Theme.currentTheme.colors.textColor
-                : Theme.currentTheme.colors.textDisabledColor
-            flat: true
+        // A `CommandBar`, not a hand-written row: the two actions must survive a
+        // narrow window, and the bar folds whichever does not fit into its menu.
+        CommandBar {
             // The plain rendering, for the clipboard: the page shows markup.
-            enabled: logVM.formattedLogs !== ""
-            ToolTip {
-                delay: 500
-                visible: parent.hovered
+            Action {
                 text: qsTr("Copy log")
+                icon.name: "ic_fluent_copy_20_regular"
+                enabled: logVM.formattedLogs !== ""
+                onTriggered: vm.copyText(logVM.formattedLogs)
             }
-            onClicked: vm.copyText(logVM.formattedLogs)
-        }
 
-        ToolButton {
-            icon.name: "ic_fluent_delete_20_regular"
-            icon.color: enabled
-                ? Theme.currentTheme.colors.textColor
-                : Theme.currentTheme.colors.textDisabledColor
-            flat: true
-            enabled: logVM.formattedLogs !== ""
-            ToolTip {
-                delay: 500
-                visible: parent.hovered
+            Action {
                 text: qsTr("Clear log")
+                icon.name: "ic_fluent_delete_20_regular"
+                enabled: logVM.formattedLogs !== ""
+                onTriggered: logVM.clear()
             }
-            onClicked: logVM.clear()
         }
     }
 

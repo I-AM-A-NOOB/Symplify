@@ -581,21 +581,22 @@ Item {
             }
         }
 
-        ToolButton {
-            icon.name: "ic_fluent_delete_20_regular"
-            icon.color: enabled
-                ? Theme.currentTheme.colors.textColor
-                : Theme.currentTheme.colors.textDisabledColor
-            flat: true
-            // The source count on purpose: an active search must not disable
-            // clearing the history.
-            enabled: historyVM.count > 0
-            ToolTip {
-                delay: 500
-                visible: parent.hovered
+        // The page's actions, in one `CommandBar`: it draws the ones the row has
+        // room for and folds the rest into its overflow menu, so a narrow window
+        // costs a click instead of a button.
+        CommandBar {
+            // Qualified on purpose: the unqualified Controls types are not
+            // imported here, and adding them would put second copies of
+            // `ToolButton`, `Menu` and `ToolTip` beside RinUI's, which this page
+            // already uses.
+            QQC2.Action {
                 text: qsTr("Clear history")
+                icon.name: "ic_fluent_delete_20_regular"
+                // The source count on purpose: an active search must not disable
+                // clearing the history.
+                enabled: historyVM.count > 0
+                onTriggered: historyVM.clear()
             }
-            onClicked: historyVM.clear()
         }
     }
 }

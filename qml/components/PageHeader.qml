@@ -159,6 +159,13 @@ Item {
             //: width happens to land on a whole pixel, was fine.
             Layout.fillWidth: true
             Layout.minimumWidth: 0
+            //: Capped a hair above the text. Not `implicitWidth` exactly: a layout
+            //: hands back a rounded width and the advance width is fractional, so
+            //: capping at it flips `Text.truncated` on at full width and the title
+            //: renders as "Histo…" with the row empty beside it. One pixel of slack
+            //: is invisible, and it leaves the *actions* row as the flexible one —
+            //: which is what a `CommandBar` measures its overflow against.
+            Layout.maximumWidth: Math.ceil(implicitWidth) + 1
             Layout.alignment: Qt.AlignVCenter
             elide: Text.ElideRight
             // RinUI's `Text` wraps by default, which would grow the bar instead.
@@ -177,6 +184,11 @@ Item {
         RowLayout {
             id: actionRow
 
+            //: The flexible half: a `CommandBar` in here is stretched to whatever
+            //: the title left over and folds its own overflow from that width. The
+            //: pinned siblings a page adds (the details toggle) keep their own
+            //: width and stay on screen.
+            Layout.fillWidth: true
             Layout.alignment: Qt.AlignVCenter
             spacing: 8
         }

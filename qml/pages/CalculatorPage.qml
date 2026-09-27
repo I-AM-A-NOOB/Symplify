@@ -123,58 +123,34 @@ Item {
             ToolSeparator {}
 
             //: Every action in this bar is an icon and its tooltip: the bar is
-            //: narrow, and the title already says what the page is.
-            ToolButton {
-                icon.name: "ic_fluent_calculator_20_regular"
-                icon.color: enabled
-                    ? Theme.currentTheme.colors.textColor
-                    : Theme.currentTheme.colors.textDisabledColor
-                flat: true
-                ToolTip {
-                    delay: 500
-                    visible: parent.hovered
+            //: narrow, and the title already says what the page is. The bar folds
+            //: whatever does not fit behind its own "more" button, so adding an
+            //: action here costs the row nothing.
+            CommandBar {
+                //: The buttons continue the title rather than close the row, so
+                //: they hug the left edge this bar was given.
+                contentAlignment: Qt.AlignLeft
+
+                Action {
                     text: qsTr("Calculate")
+                    icon.name: "ic_fluent_calculator_20_regular"
+                    onTriggered: runCalculation()
                 }
-                onClicked: runCalculation()
-            }
-            ToolButton {
-                icon.name: "ic_fluent_clear_formatting_20_regular"
-                icon.color: enabled
-                    ? Theme.currentTheme.colors.textColor
-                    : Theme.currentTheme.colors.textDisabledColor
-                flat: true
-                ToolTip {
-                    delay: 500
-                    visible: parent.hovered
+                Action {
                     text: qsTr("Clear input")
+                    icon.name: "ic_fluent_clear_formatting_20_regular"
+                    onTriggered: clearInput()
                 }
-                onClicked: clearInput()
-            }
-            ToolButton {
-                icon.name: "ic_fluent_arrow_undo_20_regular"
-                icon.color: enabled
-                    ? Theme.currentTheme.colors.textColor
-                    : Theme.currentTheme.colors.textDisabledColor
-                flat: true
-                ToolTip {
-                    delay: 500
-                    visible: parent.hovered
+                Action {
                     text: qsTr("Undo")
+                    icon.name: "ic_fluent_arrow_undo_20_regular"
+                    onTriggered: undoInput()
                 }
-                onClicked: undoInput()
-            }
-            ToolButton {
-                icon.name: "ic_fluent_arrow_redo_20_regular"
-                icon.color: enabled
-                    ? Theme.currentTheme.colors.textColor
-                    : Theme.currentTheme.colors.textDisabledColor
-                flat: true
-                ToolTip {
-                    delay: 500
-                    visible: parent.hovered
+                Action {
                     text: qsTr("Redo")
+                    icon.name: "ic_fluent_arrow_redo_20_regular"
+                    onTriggered: redoInput()
                 }
-                onClicked: redoInput()
             }
 
             Item { Layout.fillWidth: true }
