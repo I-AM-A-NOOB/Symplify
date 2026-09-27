@@ -66,7 +66,7 @@ python/
                                 #   paints code_style spans, knows nothing about the rules
   accent.py                     # The accent shades Windows derives (Lab/HSL ramp), ported
                                 # from windowsthemefinetuner; zero Qt
-  latex_render.py               # latex_to_svg(latex, size=, color=, font=) + svg_size — theme-aware ziamath
+  latex_render.py               # LatexStyle + render_data_url(latex, style) — theme-aware ziamath
   fonts.py                      # Font discovery: preference-list resolution, the
                                 # MATH-capable fonts, .ttc extraction (zero Qt)
   keyboard_config.py            # YAML keyboard layout -> tabs; each key is
@@ -143,8 +143,15 @@ scratch/                        # Preserved experiments — NOT part of the app 
    `settingsVM`, `keyboardTabs`.
 4. **Keyboard panel keys & its SelectorBar tabs use `focusPolicy: Qt.NoFocus`** so typing stays
    in the focused input. Everywhere else leave focus policy at defaults (focus ring + Ctrl+Tab).
-5. **LaTeX is theme-aware**: render with `latex_to_svg(..., color=...)`; when the RinUI theme
-   changes, QML (Calculator/History pages) calls `calcVM.set_latex_color` / `historyVM.set_latex_color`.
+5. **LaTeX is theme-aware, through one shared `LatexStyle`** (`python/latex_render.py`): the theme
+   supplies the ink, the settings store the size and the font file, `MainViewModel` assembles both
+   into one frozen value and hands it to every surface that renders LaTeX —
+   `calcVM.set_latex_style` / `historyVM.set_latex_style` / `variablesFilter.set_latex_style`. The
+   theme ink still arrives from QML (`MainWindow.applyLatexColors` → `vm.set_latex_color`) because
+   a theme colour is translucent and has to be composited over the page background first, which only
+   the QML side can do. Each surface keeps its own **cache policy** — the calculator holds one
+   result, the history renders each entry once and drops the lot on a style change, the details
+   panel renders one row and keeps nothing — but they all render the same artwork.
 6. **Input persistence**: `calcVM.inputText / assignName / assignOperator / assignValue` persist
    across page switches.
 7. **The Variables and History pages bind to search-filtered proxies** (`variablesFilter`,
@@ -544,10 +551,17 @@ scratch/                        # Preserved experiments — NOT part of the app 
 
 ## Rendering / display
 
-- LaTeX: `Success.latex` (`Calculator.render_latex`, sympy) → VM builds a percent-encoded SVG
-  **data URL** (`latex_render.latex_to_svg`, with `size=`/`color=`), `svg_size` for natural size;
-  `LatexImage` (qml/components) renders crisp by scaling `sourceSize` by `devicePixelRatio`.
-  The font size comes from the settings page (`fonts.latex_size`), the colour from the theme.
+- LaTeX: `Success.latex` (`Calculator.render_latex`, sympy) → **`render_data_url(latex, style)`**
+  (`python/latex_render.py`) returns `(data URL, width, height)` — a percent-encoded SVG data URL
+  plus the natural size `LatexImage` (qml/components) needs to render crisp by scaling `sourceSize`
+  by `devicePixelRatio`. `('', 0, 0)` means "nothing to draw": that is the one contract every
+  surface leans on, and it is why a page can fall back to plain text instead of showing a blank
+  image.
+  The style — ink, size, font file — is a `LatexStyle`, assembled by `MainViewModel` from the theme
+  and the settings store and pushed to all three consumers at once. It used to be three fields
+  copied into each viewmodel, three near-identical setters each, the data-URL prefix string written
+  out three times, and the details panel taking the three values as call arguments; the caches were
+  the only part that genuinely differed, so they are the only part that stayed separate.
 - **`MathStrip` is the one place a rendered formula is laid out** — the Calculator's result area,
   the History card's strip, and (when the Variables page grows one) any third caller. It is an
   `HScrollView` whose content is a single `LatexImage` at natural size, and it owns both pieces of
@@ -1022,7 +1036,12 @@ backdrop floats up from 10px below while fading in, and carries the page's own t
   arrangement: RinUI's `components/ScrollBar.qml` anchors this bar to `parent.right` /
   `parent.verticalCenter`, so it inherits whatever inset its Flickable has — margins on the
   Flickable strand the bar in the page gutter, 24px from the content edge instead of hugging it.
-  `contentHeight` carries one extra inset (`+ 48`) so the last card clears the bottom edge.
+  `contentHeight` carries one extra inset (`+ frame.inset * 2`) so the last card clears the bottom
+  edge. **The inset is read back, not restated**: every page used to write `x: 24` / `y: 24` /
+  `width: scroll.width - 48` by hand next to the `inset` it passed the scaffold, so moving an inset
+  meant finding four or five literals — and Variables, whose inset is 12, had its own set. The body
+  now binds `frame.inset`, which is the same one-way hand-off as `actionsWidth`/`headerHeight` and
+  cannot drift from it.
 - **Typography** (`fonts.*`) is three faces, all applied live:
   - **Code** (`code_family`/`code_size`): the expression surfaces — the calculator's two inputs
     and its outcome line, the Variables table cells, the History card lines
@@ -1132,11 +1151,10 @@ backdrop floats up from 10px below while fading in, and carries the page's own t
   always `""` = ziamath's bundled STIX Two Math, which needs no system font; `math_font_path()`
   returns None for it and for any unknown name. Scanning is lazy: with the default (no system font
   chosen) nothing is scanned. The resolved path reaches the renderers via
-  `CalculatorViewModel.set_latex_font` / `HistoryModel.set_latex_font`, mirroring
-  `set_latex_size`, and `MainViewModel` re-applies it on every `changed` (a path is not a family
-  name, so the family changing is not the only way it can move).
-- `fonts.latex_size` reaches the renderers via `CalculatorViewModel.set_latex_size` /
-  `HistoryModel.set_latex_size` (mirroring `set_latex_color`), applied by `MainViewModel` at startup.
+  `LatexStyle.font`, and `MainViewModel` re-applies the style on every `changed` (a path is not a
+  family name, so the family changing is not the only way it can move).
+- `fonts.latex_size` is `LatexStyle.size`; both it and the font ride the same `_apply_latex_style`,
+  which also runs at startup so nothing renders before the settings are in.
 - Window geometry is remembered when `window.remember` is on: the **size** is supplied declaratively
   by `MainWindow.qml` (`settingsVM.startupWidth`/`startupHeight`, clamped to the primary screen), the
   **position** is applied by the viewmodel only if it still falls on a connected screen — and not at
@@ -1234,7 +1252,9 @@ pitch) runs after adding a variable and whenever the selection's current row cha
 The sticky part is `PageScaffold`'s: the title row and the toolbar ride up into the floating bar. The
 table has no card around it — no outline, no rounding, no plate behind the rows; their own tint is
 the table, and the page inset is 12 rather than the usual 24 (`PageScaffold.inset` is set to match,
-or the floating title would sit off its inline self). What holds the table is a plain `Item` sized to
+or the floating title would sit off its inline self — and the body reads that same value back for
+its own `x`/`y`/`width`). Its details panel is `page.panelWidth`, a named number because 320 means
+something unrelated on other pages (History's prefetch margin, the dialogs' width). What holds the table is a plain `Item` sized to
 `max(table, what the viewport leaves)`, which is also what the empty state centres in.
 
 **The bar's title and its actions are one row, with a spacer between them.** They used to be two

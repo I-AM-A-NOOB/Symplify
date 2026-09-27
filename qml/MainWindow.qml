@@ -86,9 +86,9 @@ FluentWindow {
     // colour arrived (and the arrival dropped the cache, so the second pass was
     // unavoidable). Here, with the log colours, it is set before any page is built.
     function applyLatexColors() {
-        const ink = Theme.currentTheme.colors.textColor
-        calcVM.set_latex_color(ink)
-        historyVM.set_latex_color(ink)
+        // One call: the root viewmodel owns the whole `LatexStyle` and hands it to
+        // every surface that renders LaTeX, so adding one is a Python-side change.
+        vm.set_latex_color(Theme.currentTheme.colors.textColor)
     }
 
     function applyLogColors() {

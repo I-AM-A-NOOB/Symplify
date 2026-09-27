@@ -13,12 +13,10 @@ lazily per visible row and re-tinted when the theme color changes.
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Optional
-from urllib.parse import quote
 
 from PySide6.QtCore import Property, QAbstractListModel, QModelIndex, Qt, Signal, Slot
-from PySide6.QtGui import QColor
 
-from ..latex_render import latex_to_svg, svg_size
+from ..latex_render import LatexStyle, render_data_url
 
 
 @dataclass
@@ -80,9 +78,8 @@ class HistoryModel(QAbstractListModel):
         """Initialize the history model."""
         super().__init__(parent)
         self._items: List[HistoryItem] = []
-        self._latex_color: str = "#000000"
-        self._latex_size: int = 24
-        self._latex_font: str = ""
+        #: Theme ink, font size and LaTeX font file, in one value.
+        self._latex_style = LatexStyle()
 
     def roleNames(self):
         return {
@@ -155,17 +152,9 @@ class HistoryModel(QAbstractListModel):
         """Render (once) and return the entry's SVG data URL."""
         item = self._items[row]
         if item.svg_url is None:
-            svg = latex_to_svg(
-                item.latex,
-                size=self._latex_size,
-                color=self._latex_color,
-                font=self._latex_font,
+            item.svg_url, item.natural_w, item.natural_h = render_data_url(
+                item.latex, self._latex_style
             )
-            item.svg_url = (
-                "data:image/svg+xml;charset=utf-8," + quote(svg, safe="")
-                if svg else ""
-            )
-            item.natural_w, item.natural_h = svg_size(svg)
             # Re-notify so the visible delegate re-reads the final sizes.
             self.dataChanged.emit(
                 self.index(row, 0), self.index(row, 0),
@@ -173,53 +162,17 @@ class HistoryModel(QAbstractListModel):
             )
         return item.svg_url
 
-    @Slot(str)
-    def set_latex_color(self, color: str) -> None:
-        """Re-tint all rendered entries (called on theme changes)."""
-        qcolor = QColor(color)
-        if not qcolor.isValid() or qcolor.name() == self._latex_color:
-            return
-        self._latex_color = qcolor.name()
-        if self._items:
-            for item in self._items:
-                item.svg_url = None
-            self.dataChanged.emit(
-                self.index(0, 0),
-                self.index(len(self._items) - 1, 0),
-                [self.LatexUrlRole, self.NaturalWidthRole, self.NaturalHeightRole],
-            )
+    def set_latex_style(self, style: LatexStyle) -> None:
+        """Re-render every entry in a new style (theme ink, settings).
 
-    @Slot(int)
-    def set_latex_size(self, size: int) -> None:
-        """Re-render every entry at a new font size (settings page).
-
-        Mirrors :meth:`set_latex_color`: cached SVGs are dropped so each entry is
-        rendered again on demand with the new size.
+        One entry point for the three knobs, as in the calculator: what changes
+        here is only the cache policy — the entries are rendered lazily and once,
+        so the cached SVGs are dropped and each card renders again when it next
+        comes near the viewport.
         """
-        size = int(size)
-        if size == self._latex_size:
+        if style == self._latex_style:
             return
-        self._latex_size = size
-        if self._items:
-            for item in self._items:
-                item.svg_url = None
-            self.dataChanged.emit(
-                self.index(0, 0),
-                self.index(len(self._items) - 1, 0),
-                [self.LatexUrlRole, self.NaturalWidthRole, self.NaturalHeightRole],
-            )
-
-    @Slot(str)
-    def set_latex_font(self, font: str) -> None:
-        """Re-render every entry with a different LaTeX font.
-
-        Mirrors :meth:`set_latex_size`: cached SVGs are dropped so each entry is
-        rendered again on demand. ``font`` is a font file path ('' = bundled).
-        """
-        font = font or ""
-        if font == self._latex_font:
-            return
-        self._latex_font = font
+        self._latex_style = style
         if self._items:
             for item in self._items:
                 item.svg_url = None

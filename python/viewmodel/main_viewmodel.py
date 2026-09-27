@@ -14,11 +14,12 @@ from PySide6.QtCore import (
     Signal,
     Slot,
 )
-from PySide6.QtGui import QFontMetricsF, QGuiApplication, QKeyEvent
+from PySide6.QtGui import QColor, QFontMetricsF, QGuiApplication, QKeyEvent
 from typing import Mapping, Optional, Tuple
 
 from .. import log_capture
 from ..brackets import parse_colors
+from ..latex_render import LatexStyle
 from ..code_style import Style, to_rich_text, theme
 from ..model.calculator import Calculator
 from ..model.variable import VariableManager
@@ -84,11 +85,19 @@ class MainViewModel(QObject):
         self._history_filter = HistoryFilterModel(parent=self)
         self._history_filter.setSourceModel(self._history)
 
+        #: The theme's ink for rendered LaTeX, pushed from QML: the theme colours
+        #: are translucent QColors, and turning one into the string the renderer
+        #: wants needs the page background behind it (see `MainWindow`), which only
+        #: the QML side has.
+        self._latex_color = "#000000"
+
         self._settings = SettingsViewModel(settings, theme_manager, parent=self)
-        self._settings.latexSizeChanged.connect(self._apply_latex_size)
-        self._apply_latex_size()      # apply the persisted rendering settings now
-        self._settings.changed.connect(self._apply_latex_font)
-        self._apply_latex_font()
+        self._settings.latexSizeChanged.connect(self._apply_latex_style)
+        # `changed` rather than a font-specific signal: `latexFontPath` is a
+        # filesystem path resolved by `python/fonts.py`, so it is re-read on every
+        # settings change rather than only when the family name changes.
+        self._settings.changed.connect(self._apply_latex_style)
+        self._apply_latex_style()     # apply the persisted rendering settings now
 
     def install_log_capture(self) -> None:
         """Take over Qt's and the interpreter's message streams.
@@ -102,22 +111,40 @@ class MainViewModel(QObject):
         """
         log_capture.install(self._log)
 
-    def _apply_latex_size(self) -> None:
-        """Push the configured result font size to everything that renders LaTeX."""
-        size = self._settings.latexSize
-        self._calculator_vm.set_latex_size(size)
-        self._history.set_latex_size(size)
+    def _apply_latex_style(self) -> None:
+        """Hand the assembled `LatexStyle` to every surface that renders LaTeX.
 
-    def _apply_latex_font(self) -> None:
-        """Push the configured LaTeX font file to everything that renders LaTeX.
-
-        ``latexFontPath`` is a filesystem path (resolved by ``python/fonts.py``),
-        so it is re-read on every settings change rather than only when the
-        family name changes.
+        One place owns it — the ink comes from the theme, the size and the font
+        file from the settings store — so the three consumers cannot drift apart.
+        Each keeps its own cache, because their policies differ: the calculator
+        holds one result, the history renders each entry once, and the details
+        panel renders one row and keeps nothing.
         """
-        path = self._settings.latexFontPath
-        self._calculator_vm.set_latex_font(path)
-        self._history.set_latex_font(path)
+        style = LatexStyle(
+            color=self._latex_color,
+            size=self._settings.latexSize,
+            font=self._settings.latexFontPath,
+        )
+        self._calculator_vm.set_latex_style(style)
+        self._history.set_latex_style(style)
+        self._variables_filter.set_latex_style(style)
+
+    @Slot(str)
+    def set_latex_color(self, color: str) -> None:
+        """Set the ink rendered LaTeX is drawn in (called on theme changes).
+
+        The colour is baked into the SVG when it is rendered, so this re-renders
+        rather than retinting — which is why nothing renders before this is set:
+        `MainWindow` calls it before any page is built.
+        """
+        qcolor = QColor(color)
+        if not qcolor.isValid():
+            return
+        name = qcolor.name()
+        if name == self._latex_color:
+            return
+        self._latex_color = name
+        self._apply_latex_style()
 
     @Property(QObject, constant=True)
     def calculator(self) -> CalculatorViewModel:

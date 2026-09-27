@@ -23,6 +23,11 @@ Item {
             page.rowCount = variablesFilter.rowCount()
             page.dataRevision++
         }
+
+        //: The filter owns the `LatexStyle` (ink, size, font), so a change to it
+        //: arrives as a signal: the panel's line is read through `latexFor`, and a
+        //: call in a binding creates no dependency of its own.
+        function onLatexStyleChanged() { page.dataRevision++ }
     }
 
     // The selection, not the current index: `currentIndex` is the view's to keep
@@ -51,6 +56,10 @@ Item {
     //: The details panel is a view toggle, closed by default; the toolbar button
     //: says which way it goes.
     property bool sidebarOpen: false
+    //: The details panel's width. A named number because 320 also appears on other
+    //: pages meaning something else entirely (History's prefetch margin, the
+    //: dialogs' width).
+    readonly property int panelWidth: 320
 
     //: Bumped on every model change. The panel's line is read through functions —
     //: `latexFor` and `cellAt` — and a call in a binding creates no dependency of
@@ -66,10 +75,7 @@ Item {
     //: panel's cue for the raw line below.
     readonly property var definition: {
         page.dataRevision
-        return variablesFilter.latexFor(page.selectedRow,
-                                        Theme.currentTheme.colors.textColor,
-                                        settingsVM.latexSize,
-                                        settingsVM.latexFontPath)
+        return variablesFilter.latexFor(page.selectedRow)
     }
 
     //: The fallback: the entry as it was typed. That is all there is to show when
@@ -190,7 +196,7 @@ Item {
         contentWidth: width
         // The content plus the page's bottom inset, so the last row can be scrolled
         // clear of the edge.
-        contentHeight: content.height + 24
+        contentHeight: content.height + frame.inset * 2
 
         //: RinUI's own bar, attached to this flickable — the bar the other pages
         //: attach, so a page carries one scroll bar and it sits at the window edge.
@@ -199,9 +205,9 @@ Item {
         Column {
             id: content
 
-            x: 12
-            y: 12
-            width: varsScroll.width - 24
+            x: frame.inset
+            y: frame.inset
+            width: varsScroll.width - frame.inset * 2
             spacing: 10
 
             //: The title, and the row the actions ride until the bar takes over.
@@ -469,7 +475,7 @@ Item {
         anchors.right: parent.right
         //: The width *is* the toggle, and `visible` follows it — a collapsed panel
         //: that stayed visible would still take its clicks.
-        width: page.sidebarOpen ? 320 : 0
+        width: page.sidebarOpen ? page.panelWidth : 0
         visible: width > 0
         color: Theme.currentTheme.colors.cardColor
 
@@ -689,7 +695,7 @@ Item {
         standardButtons: Dialog.Ok
         Text {
             Layout.fillWidth: true
-            width: 320
+            width: page.panelWidth
             wrapMode: Text.WordWrap
             typography: Typography.Body
             color: Theme.currentTheme.colors.textColor

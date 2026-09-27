@@ -112,7 +112,7 @@ Item {
         contentWidth: width
         // The same 24px inset again at the bottom, so the last card can be
         // scrolled clear of the edge.
-        contentHeight: settingsColumn.implicitHeight + 48
+        contentHeight: settingsColumn.implicitHeight + frame.inset * 2
 
         // RinUI's own bar, attached to this flickable — the same bar RinUI's
         // ListView attaches for the History page.
@@ -123,9 +123,9 @@ Item {
         ColumnLayout {
             id: settingsColumn
 
-            x: 24
-            width: scroll.width - 48
-            y: 24
+            x: frame.inset
+            width: scroll.width - frame.inset * 2
+            y: frame.inset
             spacing: 14
 
             // The title is content and scrolls away with the sections; the bar

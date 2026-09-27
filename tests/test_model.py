@@ -41,6 +41,7 @@ from python.model.calculator import (
     Success,
 )
 from python.model.variable import VariableManager, is_sympy_name, validate_name
+from python.latex_render import LatexStyle, render_data_url
 from python.settings import DEFAULTS, SettingsStore
 from python.viewmodel.history_viewmodel import HistoryModel
 from python.viewmodel.main_viewmodel import MainViewModel
@@ -926,6 +927,63 @@ def test_history_filter_fuzzy_covers_every_field():
     assert len(expressions(model)) == 3
     model.searchText = "x + 1"
     assert expressions(model) == ["x + 1"]
+
+
+def test_latex_style_renders_and_reports_empty():
+    """The contract every LaTeX surface leans on: no artwork means ('', 0, 0).
+
+    An empty URL is what makes a page fall back to plain text instead of showing
+    a blank image, so it has to be the answer for *every* shape ziamath cannot
+    typeset — and the style has to reach the artwork, or the theme's ink would
+    never show up.
+    """
+    url, width, height = render_data_url("x^2", LatexStyle())
+    assert url.startswith("data:image/svg+xml;charset=utf-8,")
+    assert width > 0 and height > 0
+
+    # Different knobs, different artwork: the style is not decoration.
+    assert render_data_url("x^2", LatexStyle(color="#ff0000"))[0] != url
+    assert render_data_url("x^2", LatexStyle(size=48))[1] > width
+
+    # Unparsable, malformed, and empty all come back as "nothing to draw".
+    for broken in ("", "x^", "\\frac{", "{"):
+        assert render_data_url(broken, LatexStyle()) == ("", 0, 0)
+
+
+def test_one_latex_style_reaches_every_surface():
+    """One style object, three caches, and every one of them re-renders.
+
+    The calculator holds a single result, the history renders each entry once,
+    the details panel renders one row — so the caches differ on purpose. What
+    must not differ is the style they render with, or the same formula would
+    come out in three inks.
+    """
+    vm = MainViewModel(SettingsStore.open(temp_dir(), {}, "linux"))
+    vm.variables.addVariable("alpha", "2*rho")
+    vm.calculator.calculate("x^2")
+    vm.calculator.calculate("y + 1")             # so the history has an entry
+
+    first_calc = vm.calculator.latexSvgUrl
+    assert first_calc.startswith("data:image/svg+xml")
+
+    vm.set_latex_color("#ff0000")
+    assert vm.calculator.latexSvgUrl != first_calc     # re-rendered in the new ink
+
+    row = vm.history.index(0, 0)
+    assert vm.history.data(row, HistoryModel.LatexUrlRole) == ""   # cache dropped
+    vm.history.requestLatex(0)
+    assert vm.history.data(row, HistoryModel.LatexUrlRole).startswith("data:image/svg+xml")
+
+    # The panel asks for a row and gets artwork; the filter announced the change
+    # rather than being handed three arguments per call.
+    seen = []
+    vm.variablesFilter.latexStyleChanged.connect(lambda: seen.append(1))
+    vm.set_latex_color("#00ff00")
+    assert len(seen) == 1
+    vm.set_latex_color("#00ff00")                      # unchanged: no second trip
+    assert len(seen) == 1
+    assert vm.variablesFilter.latexFor(0)["url"].startswith("data:image/svg+xml")
+    assert vm.variablesFilter.latexAt(0) == "\\alpha = 2 \\rho"
 
 
 def test_history_filter_sees_new_entries():

@@ -77,7 +77,7 @@ Item {
         contentWidth: width
         // The content plus the same 24px again at the bottom, so the newest line
         // can be scrolled clear of the edge.
-        contentHeight: content.height + 48
+        contentHeight: content.height + frame.inset * 2
 
         // RinUI's own bar, attached to this flickable — the same bar RinUI's
         // ListView attaches for the History page.
@@ -88,10 +88,10 @@ Item {
         Item {
             id: content
 
-            x: 24
-            y: 24
-            width: logScroll.width - 48
-            height: headerRow.height + 12 + logText.height
+            x: frame.inset
+            y: frame.inset
+            width: logScroll.width - frame.inset * 2
+            height: headerRow.height + logText.height
 
             PageHeaderRow {
                 id: headerRow
@@ -99,12 +99,14 @@ Item {
                 width: parent.width
                 reservedWidth: frame.actionsWidth
                 reservedHeight: frame.headerHeight
+                //: Air between the reserve and the log itself.
+                bottomGap: 12
                 }
 
             Text {
                 id: logText
 
-                y: headerRow.height + 12
+                y: headerRow.height
                 width: parent.width
                 // The markup is ours (python/viewmodel/log_viewmodel.py), and the
                 // message text inside it is escaped there — so the `<` and `&` of

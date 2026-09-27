@@ -27,6 +27,9 @@ Item {
     //: it is scrolled, one batch at a time.
     property int loaded: 12
     readonly property int batch: 12
+    //: How close to the bottom the reader gets before the next batch loads. Not
+    //: the panel width, which happens to be the same number on its own page.
+    readonly property int prefetchMargin: 320
 
     //: How far the cards sit from the page edge: the content is already inset
     //: 24px, and the cards add this much on each side, clear of the scroll bar.
@@ -45,7 +48,7 @@ Item {
     function maybeLoadMore() {
         if (loaded < cards.count
                 && historyScroll.contentY + historyScroll.height
-                   > historyScroll.contentHeight - 320) {
+                   > historyScroll.contentHeight - page.prefetchMargin) {
             loaded = Math.min(cards.count, loaded + batch)
             Qt.callLater(maybeLoadMore)
         }
@@ -83,7 +86,7 @@ Item {
         contentWidth: width
         // The content plus the page's bottom inset, so the last card can be
         // scrolled clear of the edge.
-        contentHeight: content.height + 48
+        contentHeight: content.height + frame.inset * 2
 
         //: One batch more as the reader nears the bottom of what is loaded.
         //: These two plus the page's completion cover every state where the
@@ -99,9 +102,9 @@ Item {
         Column {
             id: content
 
-            x: 24
-            y: 24
-            width: historyScroll.width - 48
+            x: frame.inset
+            y: frame.inset
+            width: historyScroll.width - frame.inset * 2
             spacing: 10
 
             //: The title, and the row the actions ride until the bar takes over.

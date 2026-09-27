@@ -7,12 +7,11 @@ The widgets app's eager plot-data computation (``create_plot_data`` /
 """
 
 from typing import Any, Optional
-from urllib.parse import quote
 
 from PySide6.QtCore import Property, QObject, Signal, Slot
 from PySide6.QtGui import QColor
 
-from ..latex_render import latex_to_svg, svg_size
+from ..latex_render import LatexStyle, render_data_url
 from ..model.calculator import Assignment, Calculator, ErrorKind, Failure, Result, Success
 from ..model.variable import VariableManager
 from .history_viewmodel import HistoryModel
@@ -75,10 +74,9 @@ class CalculatorViewModel(QObject):
         self._latex_svg_url = ""
         self._latex_width = 0
         self._latex_height = 0
-        self._latex_color = "#000000"
-        self._latex_size = 24
-        #: Path to the LaTeX font file; '' uses ziamath's bundled font.
-        self._latex_font = ""
+        #: Theme ink, font size and LaTeX font file, in one value; built by
+        #: `MainViewModel`, which owns the settings and sees the theme.
+        self._latex_style = LatexStyle()
         # A fresh page shows the placeholder, so the empty formula area says what
         # it is for from the first frame.
         self._refresh_strip()
@@ -150,18 +148,10 @@ class CalculatorViewModel(QObject):
         return self._latex_height
 
     def _build_latex_url(self, latex: str) -> str:
-        """Render LaTeX to an SVG data URL, storing its intrinsic size."""
-        svg = latex_to_svg(
-            latex,
-            size=self._latex_size,
-            color=self._latex_color,
-            font=self._latex_font,
+        """Render LaTeX for the formula area, storing its data URL and size."""
+        self._latex_svg_url, self._latex_width, self._latex_height = render_data_url(
+            latex, self._latex_style
         )
-        if not svg:
-            self._clear_latex()
-            return ""
-        self._latex_svg_url = "data:image/svg+xml;charset=utf-8," + quote(svg, safe="")
-        self._latex_width, self._latex_height = svg_size(svg)
         return self._latex_svg_url
 
     def _clear_latex(self) -> None:
@@ -187,48 +177,17 @@ class CalculatorViewModel(QObject):
         else:
             self._build_latex_url(self.PLACEHOLDER_LATEX)
 
-    @Slot(str)
-    def set_latex_color(self, color: str) -> None:
-        """Re-tint the rendered LaTeX (called when the RinUI theme changes).
+    def set_latex_style(self, style: LatexStyle) -> None:
+        """Re-render the current result in a new style.
 
-        Re-renders the current result with the new color; the Image element
-        refreshes automatically because the data URL changes.
+        One entry point for the three knobs: they all mean "draw it again", and
+        they now arrive together — the theme owns the ink, the settings store the
+        size and the font file, and `MainViewModel` assembles both into one
+        `LatexStyle`. The data URL changes, so the `Image` refreshes itself.
         """
-        qcolor = QColor(color)
-        if not qcolor.isValid():
+        if style == self._latex_style:
             return
-        normalized = qcolor.name()
-        if normalized == self._latex_color:
-            return
-        self._latex_color = normalized
-        self._refresh_strip()
-        self.resultChanged.emit()
-
-    @Slot(int)
-    def set_latex_size(self, size: int) -> None:
-        """Re-render the current result at a new font size (settings page).
-
-        Mirrors :meth:`set_latex_color`: the value comes from the settings store
-        and only the rendering changes, so the data URL is rebuilt in place.
-        """
-        size = int(size)
-        if size == self._latex_size:
-            return
-        self._latex_size = size
-        self._refresh_strip()
-        self.resultChanged.emit()
-
-    @Slot(str)
-    def set_latex_font(self, font: str) -> None:
-        """Re-render the current result with a different LaTeX font.
-
-        Mirrors :meth:`set_latex_size`; ``font`` is a font file path (or '' for
-        ziamath's bundled font), resolved by ``python/fonts.py``.
-        """
-        font = font or ""
-        if font == self._latex_font:
-            return
-        self._latex_font = font
+        self._latex_style = style
         self._refresh_strip()
         self.resultChanged.emit()
 
