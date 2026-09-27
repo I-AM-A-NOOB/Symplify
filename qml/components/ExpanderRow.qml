@@ -19,6 +19,15 @@ import RinUI
 SettingExpander {
     id: root
 
+    //: The body's own surface. RinUI's `SettingExpander` makes it transparent, which
+    //: works while a body holds `SettingItem`s — they paint themselves — and stops
+    //: working the moment it holds rows that do not: the radio rows are exactly that
+    //: case (they are one row of a list, so the list owns the surface), and they ended
+    //: up on the page tint with the card white all around them. This is the colour
+    //: RinUI's own `Expander` gives its content (`cardSecondaryColor`), restored on our
+    //: side so every expander on every page has the surface it was meant to have.
+    contentFrame.color: Theme.currentTheme.colors.cardSecondaryColor
+
     function keepCursorsVisible(blocker) {
         blocker.visible = Qt.binding(function () { return blocker.enabled })
     }

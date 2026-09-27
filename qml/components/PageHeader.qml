@@ -53,20 +53,6 @@ Item {
     //: What the backdrop is drawn at, which is the same thing.
     readonly property real innerHeight: containedHeight
 
-    //: Where the inline row's top sits in the *content*, before any scrolling.
-    //: `mapToItem` answers with the position as it is on screen — the flickable's
-    //: scroll included — and `inlineRowPageY` takes the scroll off again, so the
-    //: scroll has to come back off here first. Not `inlineRow.y` either: that is
-    //: inside the content, and the content is itself inset.
-    readonly property real inlineRowY: header.inlineRow && header.flickable
-        ? header.inlineRow.mapToItem(header.flickable, 0, 0).y + header.flickable.contentY
-        : header.y
-
-    //: Where the inline row's top is on the page right now. The bar does not follow
-    //: it — the row below is parked — but the backdrop still needs to know when the
-    //: content has reached the bar.
-    readonly property real inlineRowPageY: header.inlineRowY
-        - (header.flickable ? header.flickable.contentY : 0)
 
     //: The row's resting place, relative to this header — centred in the box. Any
     //: slack the actions leave (a page with none, or with short ones) is split above
@@ -74,17 +60,21 @@ Item {
     //: title at a different height.
     readonly property real restingY: header.pad
         + (header.innerHeight - barRow.implicitHeight) / 2
-    //: True once the inline row has scrolled up to the bar, which is when the
-    //: backdrop may appear: the reserve is exactly as tall as the bar, so the moment
-    //: its top passes the bar's top is the moment whatever follows it is already
-    //: behind the bar.
+    //: True once the content has scrolled under the bar, which is when the backdrop
+    //: may appear: the reserve is exactly as tall as the bar, and it starts `inset`
+    //: from the page's top, so the bar's own top edge is reached after
+    //: `inset - margin` of scrolling — past that, the first real row of content is
+    //: already behind the bar.
     //:
-    //: Not "once the row is gone from view": a page's `bottomGap` is air *below* the
-    //: reserve, and counting it would hold the backdrop back long after the content
-    //: had started sliding under the bar.
+    //: Measured from `contentY` on purpose. The obvious version asked where the
+    //: inline row *is* (`inlineRow.mapToItem(...)`), and `mapToItem` is a snapshot
+    //: taken when the binding runs: on the first pass the content had not been laid
+    //: out yet, so the row read as being at 0 and every page that starts at its top
+    //: opened with the capsule already drawn — until the first scroll re-evaluated
+    //: the binding and it went away. `contentY` notifies; a snapshot does not.
     readonly property bool barShown: header.flickable !== null
         && header.inlineRow !== null
-        && header.inlineRowPageY <= header.y
+        && header.flickable.contentY > header.inset - header.y
 
     x: header.margin
     y: header.margin

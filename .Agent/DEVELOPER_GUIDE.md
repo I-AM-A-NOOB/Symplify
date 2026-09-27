@@ -290,6 +290,15 @@ scratch/                        # Preserved experiments — NOT part of the app 
     `restoreMode: Binding.RestoreNone`), so an instance cannot re-open the item's left label column:
     with that column visible the content moves to the *right-hand* slot and the radio trails the text
     — the one thing this row exists to avoid.
+  * Its `background` is **null on purpose** ("it is one row of a list, and the list owns the surface"),
+    which means the *expander body* has to be that surface. RinUI's `SettingExpander` sets
+    `contentFrame.color: "transparent"` — fine while a body holds `SettingItem`s, which paint
+    themselves, and wrong the moment it holds radio rows: they ended up on the page tint with the card
+    white all around them. `qml/components/ExpanderRow.qml` restores the colour RinUI's own `Expander`
+    gives its content (`cardSecondaryColor`), so every expander on every page has the surface it was
+    meant to have. Measured: the body reads `#f8f8f8` against the cards' `#ffffff` — the secondary
+    surface Windows uses for an expanded card, not a seam. Wanting the body to match the cards exactly
+    is a one-word change (`cardColor`).
   * The content column carries `Layout.leftMargin: -24`. `SettingItem`'s row has `spacing: 16`, and
     with the label column collapsed RinUI's zero-width filler `Item` still counts as a neighbour
     beside our content, so the item's own inset (58) plus that spacing (16) lands the circle at 74 —
@@ -337,17 +346,23 @@ scratch/                        # Preserved experiments — NOT part of the app 
   object at all. The row takes `reservedWidth: frame.actionsWidth`, a *number*: the row lives inside
   the scrolling body and the actions outside it, so a reference is a loop across that boundary while
   a number keeps the dependency one-way.
-- **`mapToItem` in a binding is a snapshot of where things are *now*, scroll included.** `PageHeader`
-  finds its inline row with `inlineRow.mapToItem(flickable, 0, 0).y`, and `travellingY` then subtracts
-  the flickable's scroll — so the scroll has to come back off at the mapping. Otherwise it is counted
-  twice, the actions move at twice the scroll rate, and they end up tens of pixels below the row they
-  belong beside. Worse, the error **persists**: a `mapToItem` call creates no dependency on the
-  positions it reads, so the property keeps whatever it saw when the binding last ran and the actions
-  stay displaced after the gesture ends. Mapping into the flickable and adding `contentY` back gives
-  the row's position in *content* coordinates (what the rest of the maths assumes), and that is
-  stable, because scrolling does not change it. Clamping the scroll (`Math.max(0, contentY)`) hides
-  the symptom without fixing the frame of reference — it lived in this file for a round, and the
-  drift came straight back the moment it was removed.
+- **`mapToItem` in a binding is a snapshot of where things are *now*, and it creates no dependency.**
+  Two rounds were lost to this, in opposite directions:
+  * **First, as a moving value.** The bar's row used to ride the content, positioned from
+    `inlineRow.mapToItem(flickable, 0, 0).y`; that answers with the position *as it is on screen*,
+    scroll included, so the scroll had to come back off (`.y + contentY`) or it was counted twice and
+    the actions moved at twice the scroll rate. Clamping the scroll (`Math.max(0, contentY)`) hid the
+    symptom without fixing the frame of reference.
+  * **Then, as a stale one.** `barShown` — "has the content scrolled under the bar?" — asked where the
+    inline row was, which on the first pass is *before the content has been laid out*: it read `0`, so
+    every page that starts at its top opened with the backdrop already drawn, and the capsule only
+    went away after the first scroll re-evaluated the binding. The fix is to measure something that
+    *notifies*: `flickable.contentY > inset - margin`, which is the same question in stable
+    coordinates (the reserve starts `inset` from the page's top, and the bar's top edge is `margin`).
+
+  Generalise: if a binding must react to layout or scrolling, read properties that emit change signals
+  (`contentY`, `y`, `width`), or make the snapshot recompute. A snapshot in a binding silently freezes
+  the first frame it saw.
 - **Overscroll and its bounce are the native ones; nothing here needs to manage them.** An earlier
   round set `boundsBehavior: Flickable.StopAtBounds` on every page body (and clamped `contentY` in
   `PageHeader`) to stop a list being dragged past its end. All of it is gone. The stretched state
