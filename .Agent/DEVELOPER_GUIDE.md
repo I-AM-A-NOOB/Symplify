@@ -1283,6 +1283,16 @@ Data-file pitfalls for frozen builds (update this list when you add data-reading
   fonts) must be included via the `--include-*` flags in `scripts/build_windows.py`.
 - Packages whose data is loaded through `importlib.resources` by name
   (e.g. `ziamath.fonts`) need `--include-module=<subpackage>` — Nuitka can't follow string refs.
+- **Include the subpackage you import, not the whole distribution.** `fontTools` was included as a
+  package because `python/fonts.py` imports it lazily; that also compiled
+  `fontTools.pens.momentsPen`, whose generated C file runs to ~30k lines and made MSVC's second pass
+  die with `fatal error C1002: ran out of heap space` — the local build stopped there, while CI
+  (same options, more headroom) had built the same tree fine. `import fontTools.ttLib` is the whole of
+  our usage (`TTCollection`, `TTFont`) and it pulls in `fontTools.pens` — base, filter, point,
+  recording and transform pens, measured — and nothing else, so `--include-package=fontTools.ttLib`
+  is both correct and smaller. `--prefer-source-code` is *not* the lever here: it picks `.py` over
+  `.pyc` and changes nothing about how much C a module generates. If a needed module ever exhausts
+  the compiler again, `--low-memory` is the flag (fewer C compilations at once).
 - Debugging a GUI exe that exits early: rebuild with `--windows-console-mode=force` to see the traceback.
 
 ## Versioning

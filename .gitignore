@@ -8,6 +8,9 @@ __pycache__
 /main.build
 /main.dist
 /build
+# Nuitka's diagnostics, written next to the CWD when a build fails
+nuitka-crash-report.xml
+nuitka_output.txt
 # Portable-mode marker: its presence makes the app read/write data/config.yaml
 # instead of the system config directory (see python/settings.py)
 /data

@@ -48,8 +48,17 @@ CMD = [
     # latex2mathml ships a symbol table that ziamath reads at runtime
     "--include-package-data=latex2mathml",
     # fontTools reads installed fonts (python/fonts.py: which ones can typeset
-    # maths). Imported lazily inside functions, so make it explicit.
-    "--include-package=fontTools",
+    # maths). Imported lazily inside functions, so make it explicit — but only
+    # `ttLib`, which is the whole of our usage (`TTCollection`, `TTFont`).
+    # `--include-package=fontTools` asked for the *entire* package, and that
+    # brought in `fontTools.pens.momentsPen`: its generated C file runs to ~30k
+    # lines and MSVC's second pass dies on it ("fatal error C1002: ran out of
+    # heap space"), which is where the local build stopped. Nothing in our path
+    # imports it — `import fontTools.ttLib` loads `fontTools.pens` (base, filter,
+    # point, recording, transform pens) and stops there, measured.
+    # `--prefer-source-code` would not have helped: it chooses `.py` over `.pyc`
+    # and does not change how much C a module generates.
+    "--include-package=fontTools.ttLib",
     # our package data (keyboard_config.yaml lives next to the module)
     "--include-package-data=python",
     # QML views (loaded by path at runtime next to the exe)
