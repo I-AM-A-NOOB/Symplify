@@ -22,6 +22,15 @@ Two details the handlers have to get right:
 * **Repeats.** RinUI emits the same warning once per instantiation; left alone
   they bury everything else, so the viewmodel collapses consecutive identical
   entries into one line with a count.
+
+And one it has to survive: **shutdown**. Qt keeps printing while the interpreter
+tears its modules down — RinUI's native event filter is still running when
+`__moduleShutdown` reaches it — and by then the viewmodel behind the sink is
+gone, so a message handled at that point would raise out of `emit()` *inside*
+Qt's own event filter (which reports it as a wall of "Error calling Python
+override" frames, and prints every one of them). The handler therefore stops
+routing the moment the application says it is quitting, and drops anything that
+raises underneath it regardless.
 """
 
 import sys
@@ -38,6 +47,10 @@ if TYPE_CHECKING:                      # Qt is imported for typing only
 #: Guards the Qt handler against re-entering itself through a signal emission.
 _in_handler = False
 
+#: Set once the application is quitting. Qt prints during teardown, after the
+#: viewmodels the sink belongs to have been destroyed.
+_shutting_down = False
+
 
 def install(sink: LogViewModel) -> None:
     """Send Qt messages and uncaught exceptions to ``sink``, and mirror it out.
@@ -48,6 +61,37 @@ def install(sink: LogViewModel) -> None:
     sink.entryAdded.connect(_mirror_to_terminal)
     _install_message_handler(sink)
     _install_excepthook(sink)
+    _detach_at_quit()
+
+
+def _detach_at_quit() -> None:
+    """Stop routing once the application is quitting.
+
+    Qt's output and the interpreter's teardown overlap: RinUI's event filter keeps
+    running while modules are being destroyed, and the log viewmodel is one of
+    them. Anything it printed then would be routed into a deleted QObject and
+    raise inside Qt, which prints that as a nest of "Error calling Python
+    override" frames. Detaching first turns all of it back into a plain Qt
+    message on stderr.
+    """
+    def detach() -> None:
+        global _shutting_down
+        _shutting_down = True
+        try:
+            from PySide6.QtCore import qInstallMessageHandler
+
+            qInstallMessageHandler(None)
+        except Exception:              # Qt already gone: nothing left to restore
+            pass
+
+    try:
+        from PySide6.QtCore import QCoreApplication
+
+        app = QCoreApplication.instance()
+        if app is not None:
+            app.aboutToQuit.connect(detach)
+    except Exception:                  # no Qt (tests importing the model layer)
+        pass
 
 
 def _mirror_to_terminal(level: str, source: str, message: str) -> None:
@@ -76,7 +120,7 @@ def _install_message_handler(sink: LogViewModel) -> None:
         message: str,
     ) -> None:
         global _in_handler
-        if _in_handler:
+        if _in_handler or _shutting_down:
             return
         _in_handler = True
         try:
@@ -89,6 +133,10 @@ def _install_message_handler(sink: LogViewModel) -> None:
                 level=_level_for(msg_type),
                 source="Qt",
             )
+        except Exception:
+            # The sink is gone or Qt is mid-teardown: a message must never raise
+            # out of the handler, least of all into Qt's own printing.
+            pass
         finally:
             _in_handler = False
 
@@ -116,11 +164,16 @@ def _install_excepthook(sink: LogViewModel) -> None:
         exc_value: BaseException,
         exc_tb: Optional[TracebackType],
     ) -> None:
+        if _shutting_down:
+            return
         text = "".join(
             traceback.format_exception(exc_type, exc_value, exc_tb)
         ).rstrip()
         # No `previous(...)`: the entry itself is mirrored to stderr now, so
         # calling the default hook would print the same traceback twice.
-        sink.add_log(text, level=LogLevel.ERROR, source="Python")
+        try:
+            sink.add_log(text, level=LogLevel.ERROR, source="Python")
+        except Exception:              # as in the Qt handler: teardown is not ours
+            pass
 
     sys.excepthook = hook
