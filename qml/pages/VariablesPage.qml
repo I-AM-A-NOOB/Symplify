@@ -135,7 +135,12 @@ Item {
     function selectRow(row) {
         if (row < 0 || row >= variablesFilter.rowCount())
             return
-        varTable.selectionModel.select(
+        //: `setCurrentIndex`, not `select`: `select` moves the selection but leaves the
+        //: view's *current* index where it was, and RinUI's delegate paints `currentRow`
+        //: as selected too — so adding or duplicating a variable left the row the reader
+        //: had clicked highlighted beside the new one. Two selected rows, one of them
+        //: stale. Setting both keeps the delegate's two ideas of "selected" in step.
+        varTable.selectionModel.setCurrentIndex(
             variablesFilter.modelIndex(row, 0),
             ItemSelectionModel.ClearAndSelect | ItemSelectionModel.Current)
     }
@@ -272,17 +277,56 @@ Item {
                     }
                     rowHeightProvider: () => 40
 
+                    //: Both of the table's own bars are dropped, and they have to be
+                    //: *declared away*: assigning `policy` on the view does nothing, because
+                    //: the bar binds it itself — the same finding as the `verticalScrollBar`
+                    //: alias noted above. Neither is ever useful here. The columns are
+                    //: computed from this view's own width, so they always fit; the view is
+                    //: given every row's height, so the *page* is what scrolls. Qt drew both
+                    //: anyway, `size == 1.000` and visible: a full-width empty strip under
+                    //: the rows, which read as a scroll bar over content that all fits.
+                    ScrollBar.horizontal: null
+                    ScrollBar.vertical: null
+
                     // RinUI's delegate (Fluent visuals); a click selects the row.
                     delegate: TableViewDelegate {
                         id: cell
 
+                        //: What the inline editor holds right now, and whether the reader
+                        //: threw the edit away. Both live here, on the delegate, because
+                        //: the *editor* is destroyed as the session ends (the view tears
+                        //: it down before anything of ours can run from inside it) while
+                        //: the delegate — and its model context — survives the change.
+                        property string pendingText: ""
+
+                        //: The one write path, for every gesture: a click on another cell,
+                        //: `Return`/`Ctrl+Return` from the editor's `Shortcut`, or a plain
+                        //: `Return`, which the view handles itself in C++. Committing on
+                        //: the session ending rather than on the key is what makes those
+                        //: three behave the same.
+                        onEditingChanged: {
+                            if (editing) {
+                                pendingText = ""
+                                return
+                            }
+                            //: Empty means "nothing to write": that is how Escape
+                            //: abandons an edit, and it needs no separate flag — the
+                            //: order between the key and the session ending stops
+                            //: mattering when "rejected" is spelled as "no text".
+                            if (pendingText.length) {
+                                model.display = pendingText
+                                pendingText = ""
+                            }
+                        }
+
                         onClicked: {
-                            // Clicking a cell is "done here": commit whatever is being
-                            // edited before the selection moves. The editor lives inside
-                            // a delegate the click re-lays out, so it cannot be left open
-                            // across the change.
+                            // Clicking a cell is "done here": end whatever is being
+                            // edited before the selection moves — the delegate writes on
+                            // the session ending. The editor lives inside a delegate the
+                            // click re-lays out, so it cannot be left open across the
+                            // change.
                             if (page.activeEditor)
-                                page.activeEditor.commitVisible()
+                                page.activeEditor.close()
                             page.selectRow(row)
                         }
 
@@ -315,39 +359,78 @@ Item {
 
                             //: Commit whichever field this column is editing.
                             function commitVisible() {
-                                commitEdit(cell.column === 0 ? nameEditor.text : valueEditor.text)
+                                close()
                             }
 
-                            //: Write the edited text through the model and close the
-                            //: editor. The proxy forwards it to the source, which renames
-                            //: (column 0) or re-parses (column 1); warnings come back
-                            //: through the viewmodel as usual. Once only: an editor can be
-                            //: closed by the commit itself, which loses focus on the way
-                            //: out and would otherwise commit twice.
-                            property bool committed: false
-
-                            function commitEdit(text) {
-                                if (committed)
-                                    return
-                                committed = true
-                                model.display = text
+                            //: Close the session. The write belongs to the delegate (see
+                            //: its `onEditingChanged`): this only ends the edit, so every
+                            //: gesture — a click elsewhere, a `Shortcut`, Escape — reaches
+                            //: the model by the same road.
+                            function close() {
                                 cell.editing = false
                             }
 
-                            // A `TextArea` has no `editingFinished`, and the base delegate's
-                            // editor is a `TextField` — which has one — so the framework
-                            // used to end the session when focus left the editor. That
-                            // trigger is gone with the control, and clicking another cell
-                            // (or another control) has to commit rather than leave the
-                            // editor open on top of the table.
+                            //: The commit gesture, as a window `Shortcut` rather than a
+                            //: `Keys` handler on the editor. A `TextArea` is a text
+                            //: control: it consumes Return for itself before the
+                            //: attached `Keys` object ever sees the event (measured —
+                            //: the key reaches the editor, the handler never runs, and
+                            //: the session closes with nothing written). `Shortcut`s are
+                            //: dispatched by the window *ahead* of the key event, so
+                            //: this one always fires — and listing the Ctrl variants
+                            //: gives the editor the same confirm gesture the calculator
+                            //: uses, on both columns. `enabled` keeps it to the open
+                            //: editor: nothing else in the app wants Return.
+                            //: `Ctrl+Return` (to match the calculator) and plain Return,
+                            //: which the view would otherwise close without a write. A
+                            //: `Shortcut` is dispatched ahead of the key event, so it
+                            //: reaches us where a `Keys` handler on the editor does not —
+                            //: a text control eats Return for itself first.
+                            Shortcut {
+                                enabled: cell.editing
+                                sequences: ["Return", "Enter", "Ctrl+Return", "Ctrl+Enter"]
+                                context: Qt.WindowShortcut
+                                onActivated: cellEditor.close()
+                            }
+
+                            //: Escape too, and for the same reason: it has to clear what was
+                            //: typed *before* the session ends, or the delegate's write on
+                            //: the session ending saves the edit the reader just rejected.
+                            //: A `Shortcut` runs ahead of the key event, a `Keys` handler on
+                            //: the text control does not.
+                            Shortcut {
+                                enabled: cell.editing
+                                sequences: ["Escape"]
+                                context: Qt.WindowShortcut
+                                onActivated: {
+                                    cell.pendingText = ""
+                                    cellEditor.close()
+                                }
+                            }
+
+                            // Neither control raises `editingFinished` for us: a
+                            // `TextArea` never has one, and the base delegate's `TextField`
+                            // only did because the framework ended the session when focus
+                            // left it. So leaving the editor — for another cell, another
+                            // control, a click on the page — has to end the session
+                            // itself, and the delegate writes what was typed when it does.
                             property bool tookFocus: false
 
                             function watchFocus(item) {
+                                //: The delegate is captured now, by value: the callback can
+                                //: outlive the id lookup (it runs while the editor is being
+                                //: destroyed), and `cell` is then a `ReferenceError`.
+                                const owner = cell
+
                                 item.activeFocusChanged.connect(function () {
                                     if (item.activeFocus)
                                         cellEditor.tookFocus = true
-                                    else if (cellEditor.tookFocus)
-                                        cellEditor.commitEdit(item.text)
+                                    else if (cellEditor.tookFocus && owner.editing)
+                                        //: `owner.editing` first: losing focus is part of
+                                        //: the editor being destroyed, and calling into it
+                                        //: then throws. If the session is already over,
+                                        //: there is nothing to close.
+                                        cellEditor.close()
                                 })
                             }
 
@@ -371,6 +454,7 @@ Item {
                                 visible: cell.column === 0
                                 focus: visible
                                 placeholderText: qsTr("name")
+                                onTextChanged: cell.pendingText = text
                                 text: model.display !== undefined ? `${model.display}` : ""
                                 Component.onCompleted: {
                                     if (!visible)
@@ -378,7 +462,9 @@ Item {
                                     cellEditor.watchFocus(nameEditor)
                                     selectAll()
                                 }
-                                onAccepted: cellEditor.commitEdit(text)
+                                //: Return is the delegate's `Shortcut`; nothing to do here
+                                //: (the editor's `pendingText` is what gets written).
+                                readOnly: false
                             }
 
                             // Column 1 re-parses the expression, so it edits in the
@@ -398,21 +484,20 @@ Item {
                                 focus: visible
                                 wrapMode: TextEdit.NoWrap
                                 text: model.display !== undefined ? `${model.display}` : ""
+                                onTextChanged: cell.pendingText = text
                                 Component.onCompleted: {
                                     if (!visible)
                                         return
                                     cellEditor.watchFocus(valueEditor)
                                     selectAll()
                                 }
-                                // Enter commits and never inserts a newline, exactly as the
-                                // calculator's inputs do; Escape abandons the edit.
+                                //: Escape abandons the edit. Return is the delegate's
+                                //: `Shortcut` — a text control eats it here.
                                 Keys.onPressed: (event) => {
-                                    if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                                    if (event.key === Qt.Key_Escape) {
                                         event.accepted = true
-                                        cellEditor.commitEdit(valueEditor.text)
-                                    } else if (event.key === Qt.Key_Escape) {
-                                        event.accepted = true
-                                        cell.editing = false
+                                        cell.pendingText = ""
+                                        cellEditor.close()
                                     }
                                 }
                             }
@@ -484,6 +569,16 @@ Item {
             NumberAnimation {
                 duration: Utils.animationSpeed
                 easing.type: Easing.OutQuint
+
+                //: The table's columns are computed from its own width, and the
+                //: provider runs whenever that changes — which, during this animation,
+                //: is every frame. The frame that happens to run last is not
+                //: necessarily the one at the final width, so the columns could end up
+                //: sized for an intermediate one: `contentWidth` a hair over `width`,
+                //: and a horizontal scroll bar over content that all fits (measured
+                //: intermittently, same widths, open/close/open). One relayout when the
+                //: animation stops fixes it at the only moment that matters.
+                onRunningChanged: if (!running) varTable.forceLayout()
             }
         }
 
@@ -494,10 +589,16 @@ Item {
 
             Item { Layout.fillHeight: true }
 
-            LatexImage {
+            //: `MathStrip`, not a bare `LatexImage`: it is the one place a rendered
+            //: formula is laid out (padding, the room the overlay bar needs, the
+            //: image at its natural size), and a long definition can be scrolled
+            //: sideways in the panel instead of being clipped by it. Hand-rolling the
+            //: image here is how the panel's artwork drifted in size from every other
+            //: surface — same LaTeX, different frame.
+            MathStrip {
                 id: definitionImage
 
-                Layout.alignment: Qt.AlignHCenter
+                Layout.fillWidth: true
                 visible: page.selectedRow >= 0 && page.definition.url !== ""
                 source: page.definition.url
                 naturalWidth: page.definition.width
@@ -522,13 +623,18 @@ Item {
                 placeholderText: qsTr("name")
                 onAccepted: page.applyDetails()
             }
+            //: Shaped exactly like the Calculator's Assign value box — the shared
+            //: `CodeArea`, wrapping, its own height — rather than a forced 40px: a
+            //: fixed height fights the content as soon as the expression wraps, and the
+            //: panel is narrower than any calculator row.
             CodeArea {
                 id: valueField
 
                 Layout.fillWidth: true
-                Layout.preferredHeight: 40
+                Layout.minimumWidth: 80
+                Layout.alignment: Qt.AlignVCenter
                 enabled: page.selectedRow >= 0
-                wrapMode: TextEdit.NoWrap
+                wrapMode: TextEdit.Wrap
                 placeholderText: qsTr("expression")
                 // Enter applies and never inserts a newline, as everywhere else.
                 Keys.onPressed: (event) => {
@@ -539,45 +645,30 @@ Item {
                 }
             }
 
-            RowLayout {
+            //: The panel's whole vocabulary, as two plain buttons with their words on
+            //: them: the sidebar is narrow, there are only two, and a row of icons made
+            //: them read as a toolbar of unrelated actions. Delete is destructive and
+            //: says so in its label as well as its icon.
+            ColumnLayout {
                 Layout.fillWidth: true
-                spacing: 8
+                spacing: 6
 
-                ToolButton {
-                    icon.name: "ic_fluent_copy_20_regular"
-                    icon.color: enabled
-                        ? Theme.currentTheme.colors.textColor
-                        : Theme.currentTheme.colors.textDisabledColor
+                Button {
+                    Layout.fillWidth: true
                     flat: true
+                    text: qsTr("Duplicate")
+                    icon.name: "ic_fluent_copy_20_regular"
                     enabled: page.selectedRow >= 0
-                    ToolTip {
-                        delay: 500
-                        visible: parent.hovered
-                        text: qsTr("Duplicate variable")
-                    }
                     onClicked: page.duplicateVariable()
                 }
-                Rectangle {
-                    Layout.preferredWidth: 1
-                    Layout.preferredHeight: 18
-                    color: Theme.currentTheme.colors.cardBorderColor
-                }
-                ToolButton {
-                    icon.name: "ic_fluent_delete_20_regular"
-                    //: Destructive, and it says so.
-                    icon.color: enabled
-                        ? Theme.currentTheme.colors.systemCriticalColor
-                        : Theme.currentTheme.colors.textDisabledColor
+                Button {
+                    Layout.fillWidth: true
                     flat: true
+                    text: qsTr("Delete")
+                    icon.name: "ic_fluent_delete_20_regular"
                     enabled: page.selectedRow >= 0
-                    ToolTip {
-                        delay: 500
-                        visible: parent.hovered
-                        text: qsTr("Delete variable")
-                    }
                     onClicked: page.deleteVariable()
                 }
-                Item { Layout.fillWidth: true }
             }
 
             Item { Layout.fillHeight: true }

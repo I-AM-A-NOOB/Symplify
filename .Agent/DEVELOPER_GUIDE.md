@@ -191,14 +191,26 @@ scratch/                        # Preserved experiments — NOT part of the app 
     reads *and writes* the cell (through the search proxy, so the page's proxy-index rule still
     applies), and `row`/`column`/`cell.editing` are in reach. Branching between two editors on
     `column` with `visible`/`focus: visible` is enough — no `Loader` needed.
-  * **`editing = false` is what closes the session**, and a `TextArea` never raises it: the base
-    delegate's `TextField` has `editingFinished` (fired on Return *and* on focus loss) and the
-    framework used to end the edit with it, but `TextArea` has no such signal. Both editors
-    therefore commit themselves — Return (via `Keys.onPressed`, the same way the calculator's inputs
-    keep Enter from inserting a newline), Escape abandons, and a focus watch commits when the editor
-    is left. The commit is **once-only** (a flag), because closing the editor takes focus away and
-    would otherwise commit twice — visible when the model's re-parse is not idempotent in its
-    warnings.
+  * **The commit rides the session ending, not a key — the view owns Return.** `editing = false`
+    closes the session, and a `TextArea` never raises it (the base delegate's `TextField` had
+    `editingFinished`; the framework used to end the edit with it). The tempting fix — handle Return
+    in the editor, the way the calculator's inputs do — **does not work**, and it fails silently:
+    pressing plain Return reaches the editor (an event filter sees the key arrive) but a `Keys`
+    handler on it never runs, `onAccepted` never fires, and the session is closed *in C++* by the
+    view (a JS stack from `onEditingChanged` has no QML frame). `Ctrl+Return` is not a gesture the
+    view knows, so *that* one is reachable — which is exactly what made the bug look random.
+    Worse, the editor is **destroyed** as the session ends, so anything written from inside it at
+    that moment — a `Connections` on the delegate, `Component.onDestruction`, a commit called by the
+    click that closed it — never runs, and the typed text is simply lost.
+    The write therefore lives on the **delegate**, which survives the change and still has its model
+    context: the editors feed `cell.pendingText` on `onTextChanged`, and `onEditingChanged` writes it
+    when the session ends. Empty means "nothing to write", which is how Escape abandons an edit —
+    spelled that way, the order between the key and the session ending stops mattering. `Shortcut`s
+    inside the editor (`Return`/`Enter`/`Ctrl+Return`/`Ctrl+Enter` and `Escape`, `enabled: cell.editing`,
+    `context: Qt.WindowShortcut`) give it the calculator's confirm gesture and are dispatched ahead
+    of the key event, so they reach us where a `Keys` handler does not. The focus watch has to
+    capture the delegate **by value**: its callback can outlive the id lookup and `cell` is then a
+    `ReferenceError`.
   * Both fields are the shared components (`CodeField`, `CodeArea`), which is also where the
     highlighter comes from: one per edit session, on the editor's own document. (The page-level
     `vm.attachCodeHighlighting` for the Assign value is gone with it — two highlighters on one
@@ -382,7 +394,12 @@ scratch/                        # Preserved experiments — NOT part of the app 
   `verticalScrollBar` alias removes an attached bar**: the assignment raises no warning and does
   nothing, because the bar binds `policy` itself — only declaring `ScrollBar.vertical: null` on the
   view drops it. The pages therefore keep what the view already had: `Rin.ListView` attaches RinUI's
-  bar itself, and the `Flickable` pages add `Rin.ScrollBar.vertical: Rin.ScrollBar {}`. One bar, at
+  bar itself, and the `Flickable` pages add `Rin.ScrollBar.vertical: Rin.ScrollBar {}`. The same rule
+  decides the Variables table's *own* pair: the columns are computed from that view's width (they
+  always fit) and it is given every row's height (the *page* scrolls), so both bars are inert — yet
+  Qt drew both, `size == 1.000` and visible, as a full-width empty strip under the rows. Setting
+  `policy` on the view did nothing; `ScrollBar.horizontal: null` / `ScrollBar.vertical: null` on the
+  view is what removed them. One bar, at
   the right edge of the view that scrolls — which is why the History list is deliberately
   **full-bleed**: that puts its bar on the window edge, where the Microsoft Store keeps it, and the
   *cards* carry the inset instead: the content sits at the usual 24px and the cards add
@@ -536,6 +553,13 @@ scratch/                        # Preserved experiments — NOT part of the app 
   two-scroll-bars bullet above). Attaching RinUI's bar is what the pages do now; it also means the
   bar is not part of `PageScaffold`, which draws only what must not scroll.
 
+- **RinUI's `Button` ignores `textColor` and `icon.color`.** The property exists
+  (`components/BasicInput/Button.qml:11`) and is *never read*: its `contentItem` paints the label and
+  the icon straight from the theme, at four places. So a `Button` cannot be tinted, and colouring one
+  at all means replacing its `contentItem` — the details panel's Delete was written that way for a
+  round (red label and icon, icon/gap/label centred by equal fillers) and then dropped: two ordinary
+  buttons say what they do, and the destructive one is the second in a pair rather than the red one.
+  `ToolButton` is the control that honours `icon.color`.
 - **RinUI's `ToolButton` is not flat, and a flat button does not dim when disabled.** `flat: true`
   is *commented out* in `components/BasicInput/ToolButton.qml`, so the control keeps `Button`'s
   raised chrome; every toolbar button therefore says `flat: true` itself. And the icon colour
@@ -1379,10 +1403,19 @@ already anchored to `details.left`.
 **Two traps that only show up with the panel open.** The column widths come from the view's own width
 (`QQuickTableView.columnWidthProvider`), and the view does *not* re-ask when that width changes — the
 panel narrows the table and the columns stayed as wide as before, which is a horizontal scroll bar over
-content that all fits. `onWidthChanged: varTable.forceLayout()` is what re-runs the provider.
+content that all fits. `onWidthChanged: varTable.forceLayout()` is what re-runs the provider — but
+the panel *animates* its width, so that fires on every frame and the frame that runs last is not
+necessarily the one at the final width: the columns could end up sized for an intermediate one and
+the bar came back (measured intermittently — same widths, open/close/open). The animation therefore
+relayouts once more when it stops (`onRunningChanged: if (!running) varTable.forceLayout()`), which is
+the only moment that decides it.
 And `page.selectedRow` reads the *selection* first, falling back to the view's `currentIndex.row`: a
 click sets the selection, but the arrow keys move only the current row, which RinUI's delegate paints as
-selected too, so without the fallback the panel ignored the keyboard.
+selected too, so without the fallback the panel ignored the keyboard. The same pair of ideas bites when
+the selection is *written*: `selectionModel.select(...)` moves the selected row and leaves the current
+index where it was, so adding or duplicating a variable highlighted the new row *beside* the one the
+reader had clicked — two selected rows, one of them stale. `selectRow` uses
+`setCurrentIndex(index, ClearAndSelect | Current)` for that reason.
 
 **The details panel** (a toolbar toggle, closed by default) shows the selected variable and its two
 fields, and duplicates or deletes the row. Three things about it are worth keeping:
