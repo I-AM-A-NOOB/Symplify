@@ -42,6 +42,12 @@ CMD = [
     # the same files compiled here, where cl had more room. This is the flag
     # Nuitka documents for exactly that; it costs build time, not correctness.
     "--low-memory",
+    # And one C compilation at a time. `--low-memory` already took the failures
+    # from five to one on the CI runner (`sympy.polys.polyquinticconst`, a 26k-line
+    # C file) — it reduces how many compilations run at once, so going all the way
+    # to one is the same lever, pulled harder. Costs build time; this machine has
+    # the clcache to make that cheap, and the runner is free but slow.
+    "--jobs=1",
     "--windows-console-mode=disable",
     # RinUI (python package + its QML module tree)
     "--include-package=RinUI",
