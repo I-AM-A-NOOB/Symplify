@@ -303,21 +303,21 @@ scratch/                        # Preserved experiments — NOT part of the app 
     with that column visible the content moves to the *right-hand* slot and the radio trails the text
     — the one thing this row exists to avoid.
   * Its `background` is **null on purpose** ("it is one row of a list, and the list owns the surface"),
-    which means the *expander body* has to be that surface — and that **exactly one layer may paint
-    it**. RinUI sets `SettingExpander`'s `contentFrame.color: "transparent"` while every `SettingItem`
-    paints its own translucent `cardColor`, so a body with any row in it other than a `SettingItem`
-    falls back to the page tint, and a body with `SettingItem`s paints the card colour **on top of**
-    whatever the body says. Two layers of the same tint composite to twice as much, and a different
-    tint reads as a different surface. Measured, light and dark:
-    `cardColor` = `#b3ffffff` / `#0dffffff` (α 0.70 / 0.051 of white, what the header and the
-    `SettingItem`s paint), `cardSecondaryColor` = `#80f6f6f6` / `#08ffffff`.
-
-    `qml/components/ExpanderRow.qml` settles it: the body paints `cardColor` (the header's own
-    colour), and the walk in `Component.onCompleted`/`onExpandedChanged` sets every `SettingItem`'s
-    `background` to null, so the rows stop adding a second layer. Symptom before: the radio rows sat
-    on `cardSecondaryColor` and came out *darker* than the header in light mode, while the
-    `SettingItem`s' `cardColor` composited over it to come out *brighter* in dark mode — one cause,
-    two faces. A row is a row of one list; the list owns the surface.
+    so a body of radio rows needs a surface — and it gets one of its own:
+    `qml/components/RadioSettingGroup.qml`, a card in `cardColor` (the colour the header and every
+    `SettingItem` paint), declared once per group. RinUI's `SettingExpander` leaves the body
+    *transparent* because every `SettingItem` in it paints itself; put radio rows straight in and
+    there is no surface at all, and putting a *different* one there (RinUI's `Expander` default,
+    `cardSecondaryColor`) reads as a different card. Measured, per theme: `cardColor` = `#b3ffffff`
+    (α 0.70 of white) / `#0dffffff` (α 0.051), `cardSecondaryColor` = `#80f6f6f6` / `#08ffffff` — so
+    with the wrong one the radio rows came out *darker* than the header in light mode, while the
+    `SettingItem`s' own translucent `cardColor` composited on top of it and came out *brighter* in
+    dark mode. One cause, two faces.
+    Painting the body `cardColor` and flattening every `SettingItem`'s background also fixes both, and
+    was tried and measured (23/23 rows flattened, both themes correct). It was dropped anyway: it
+    mutates a third party's internals, twice over (on completion and on expand, to catch lazily built
+    content), to say what a group card says declaratively. A row is a row of one list; the list owns
+    the surface.
   * The content column carries `Layout.leftMargin: -24`. `SettingItem`'s row has `spacing: 16`, and
     with the label column collapsed RinUI's zero-width filler `Item` still counts as a neighbour
     beside our content, so the item's own inset (58) plus that spacing (16) lands the circle at 74 —

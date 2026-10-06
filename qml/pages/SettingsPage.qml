@@ -182,46 +182,45 @@ Item {
                         color: Theme.currentTheme.colors.textSecondaryColor
                     }
 
-                    // One `SettingItem` per family, dropped straight into the
-                    // expander's body as the gallery does — RinUI's corner and
-                    // divider bookkeeping counts them through their *parent*, so
-                    // they must not sit behind an extra layout. The radio leads
-                    // each row's own content and there are no dividers.
-                    Repeater {
-                        objectName: "codeThemeRows"
+                    // One `RadioSettingRow` per family. They carry no background of
+                    // their own, so the group card is what they sit on — see
+                    // `RadioSettingGroup`. (A `SettingItem` that *did* paint would have
+                    // to sit directly in the body: RinUI's corner and divider
+                    // bookkeeping reads the parent. These rows round nothing and
+                    // divide nothing, so a group of their own is free.)
+                    RadioSettingGroup {
+                        Repeater {
+                            objectName: "codeThemeRows"
 
-                        // Ids and blurbs only: the display names come from
-                        // `code_themes.FAMILIES` through the viewmodel, so the
-                        // palette table stays their one home. `visible: false` so
-                        // the layout does not spend spacing on the repeater
-                        // itself before the first item.
-                        visible: false
+                            // Ids and blurbs only: the display names come from
+                            // `code_themes.FAMILIES` through the viewmodel, so the
+                            // palette table stays their one home. `visible: false` so
+                            // the layout does not spend spacing on the repeater
+                            // itself before the first item.
+                            visible: false
 
-                        model: [
-                            { key: "one", blurb: qsTr("The one everyone copies. Warm greys, honest colours.") },
-                            { key: "default", blurb: qsTr("The classics — what your muscle memory already sees.") },
-                            { key: "modern", blurb: qsTr("The same taste as Dark+, on a quieter background.") },
-                            { key: "2026", blurb: qsTr("The new kid: more contrast, more glow.") },
-                            { key: "solarized", blurb: qsTr("Low contrast on purpose, and its own bracket colours.") },
-                            { key: "highcontrast", blurb: qsTr("For when you would rather the code just shout.") },
-                            { key: "github", blurb: qsTr("The classic GitHub pair, from the Primer theme.") },
-                            { key: "githubdefault", blurb: qsTr("GitHub's current default — what the site and the editor ship today.") },
-                            { key: "githubcolorblind", blurb: qsTr("GitHub's default pair, retuned for colour blindness.") },
-                            { key: "githubhighcontrast", blurb: qsTr("GitHub's high-contrast pair, for the most separation.") },
-                            { key: "catppuccin", blurb: qsTr("Soothing pastels: Mocha on a dark UI, Latte on a light one.") }
-                        ]
+                            model: [
+                                { key: "one", blurb: qsTr("The one everyone copies. Warm greys, honest colours.") },
+                                { key: "default", blurb: qsTr("The classics — what your muscle memory already sees.") },
+                                { key: "modern", blurb: qsTr("The same taste as Dark+, on a quieter background.") },
+                                { key: "2026", blurb: qsTr("The new kid: more contrast, more glow.") },
+                                { key: "solarized", blurb: qsTr("Low contrast on purpose, and its own bracket colours.") },
+                                { key: "highcontrast", blurb: qsTr("For when you would rather the code just shout.") },
+                                { key: "github", blurb: qsTr("The classic GitHub pair, from the Primer theme.") },
+                                { key: "githubdefault", blurb: qsTr("GitHub's current default — what the site and the editor ship today.") },
+                                { key: "githubcolorblind", blurb: qsTr("GitHub's default pair, retuned for colour blindness.") },
+                                { key: "githubhighcontrast", blurb: qsTr("GitHub's high-contrast pair, for the most separation.") },
+                                { key: "catppuccin", blurb: qsTr("Soothing pastels: Mocha on a dark UI, Latte on a light one.") }
+                            ]
 
-                        //: One `RadioSettingRow` per family, dropped straight into
-                        //: the expander's body (RinUI's corner and divider
-                        //: bookkeeping reads the *parent*, so they must not sit
-                        //: behind an extra layout).
-                        delegate: RadioSettingRow {
-                            required property var modelData
+                            delegate: RadioSettingRow {
+                                required property var modelData
 
-                            label: settingsVM.codeThemeLabel(modelData.key)
-                            hint: modelData.blurb
-                            checked: settingsVM.codeTheme === modelData.key
-                            onSelected: settingsVM.codeTheme = modelData.key
+                                label: settingsVM.codeThemeLabel(modelData.key)
+                                hint: modelData.blurb
+                                checked: settingsVM.codeTheme === modelData.key
+                                onSelected: settingsVM.codeTheme = modelData.key
+                            }
                         }
                     }
                 }
@@ -245,48 +244,50 @@ Item {
                         color: Theme.currentTheme.colors.textSecondaryColor
                     }
 
-                    RadioSettingRow {
-                        label: page.bracketThemeLabel
-                        hint: qsTr("The code theme's own bracket colours — VS Code's defaults when the family names none.")
-                        checked: settingsVM.bracketMode === "theme"
-                        onSelected: settingsVM.bracketMode = "theme"
-                    }
+                    RadioSettingGroup {
+                        RadioSettingRow {
+                            label: page.bracketThemeLabel
+                            hint: qsTr("The code theme's own bracket colours — VS Code's defaults when the family names none.")
+                            checked: settingsVM.bracketMode === "theme"
+                            onSelected: settingsVM.bracketMode = "theme"
+                        }
 
-                    RadioSettingRow {
-                        id: bracketCustomRow
+                        RadioSettingRow {
+                            id: bracketCustomRow
 
-                        label: page.bracketCustomLabel
-                        hint: qsTr("Your own colours, one per nesting level and cycled, as comma-separated #rrggbb.")
-                        checked: settingsVM.bracketMode === "custom"
-                        onSelected: settingsVM.bracketMode = "custom"
+                            label: page.bracketCustomLabel
+                            hint: qsTr("Your own colours, one per nesting level and cycled, as comma-separated #rrggbb.")
+                            checked: settingsVM.bracketMode === "custom"
+                            onSelected: settingsVM.bracketMode = "custom"
 
-                        TextField {
-                            id: bracketColorsField
+                            TextField {
+                                id: bracketColorsField
 
-                            // The field sits in the row's action slot, the way
-                            // the font rows' fields do, and takes about two
-                            // thirds of it — the label column keeps the rest,
-                            // which is what the wrapped hint needs. Live only
-                            // while this option is the one in use.
-                            Layout.preferredWidth: bracketCustomRow.width * 2 / 3
-                            Layout.minimumWidth: bracketCustomRow.width * 2 / 3
-                            enabled: settingsVM.bracketMode === "custom"
-                            placeholderText: qsTr("e.g. #ff6b6b, #ff9f43, #ffd93d")
-                            text: settingsVM.bracketColors
-                            Component.onCompleted: cursorPosition = 0
-                            onEditingFinished: {
-                                settingsVM.bracketColors = text
-                                // The store normalises what it keeps (invalid
-                                // entries are dropped), so show that back.
-                                text = Qt.binding(() => settingsVM.bracketColors)
-                                cursorPosition = 0
-                            }
-                            ToolTip {
-                                delay: 500
-                                visible: bracketColorsField.hovered
-                                text: settingsVM.bracketColors.length > 0
-                                    ? settingsVM.bracketColors
-                                    : qsTr("One colour per nesting level, cycled")
+                                // The field sits in the row's action slot, the way
+                                // the font rows' fields do, and takes about two
+                                // thirds of it — the label column keeps the rest,
+                                // which is what the wrapped hint needs. Live only
+                                // while this option is the one in use.
+                                Layout.preferredWidth: bracketCustomRow.width * 2 / 3
+                                Layout.minimumWidth: bracketCustomRow.width * 2 / 3
+                                enabled: settingsVM.bracketMode === "custom"
+                                placeholderText: qsTr("e.g. #ff6b6b, #ff9f43, #ffd93d")
+                                text: settingsVM.bracketColors
+                                Component.onCompleted: cursorPosition = 0
+                                onEditingFinished: {
+                                    settingsVM.bracketColors = text
+                                    // The store normalises what it keeps (invalid
+                                    // entries are dropped), so show that back.
+                                    text = Qt.binding(() => settingsVM.bracketColors)
+                                    cursorPosition = 0
+                                }
+                                ToolTip {
+                                    delay: 500
+                                    visible: bracketColorsField.hovered
+                                    text: settingsVM.bracketColors.length > 0
+                                        ? settingsVM.bracketColors
+                                        : qsTr("One colour per nesting level, cycled")
+                                }
                             }
                         }
                     }
