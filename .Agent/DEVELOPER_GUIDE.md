@@ -1310,7 +1310,13 @@ Data-file pitfalls for frozen builds (update this list when you add data-reading
   exist under PySide6, so a `typeof` guard around it silently drops the Qt version forever.
 - Change it with `scripts/release.py` (patch|minor|major|explicit [+ `--tag`]) — it syncs both files
   and, with `--tag`, commits and tags `vX.Y.Z`.
-- Pushing a `vX.Y.Z` tag runs the Windows packaging workflow and uploads the `.dist` artifact.
+- Pushing a `vX.Y.Z` tag **does not** run the packaging workflow any more: it is a
+  `workflow_dispatch` build, because the GitHub runner cannot finish this build. MSVC fails there
+  with `fatal error C1002` (out of heap) on sympy's own generated C —
+  `polys.polyquinticconst`, 26k lines — while the same commit builds locally in ~4 minutes.
+  `--low-memory` and `--jobs=1` took the failures from five files to one and still not through: it
+  is the runner's memory, not the options. Releases are built locally
+  (`scripts/build_windows.py` → `Compress-Archive` → `gh release create`); 0.5.0 was made that way.
 
 ## History of routes (read-only branches)
 

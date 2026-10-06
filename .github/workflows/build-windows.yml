@@ -1,12 +1,17 @@
 name: Windows build (Nuitka)
 
+# Manual only. The GitHub runner cannot finish this build: v0.5.0's tag run — and
+# two attempts after it, with `--low-memory` and then `--jobs=1` — all died in the
+# C backend with MSVC's `fatal error C1002` (out of heap), while the same commit
+# builds on a dev machine in about four minutes. Those flags took the failures from
+# five files to one (`sympy.polys.polyquinticconst`, a 26k-line generated C file)
+# and still not through: the runner has less memory, and no Nuitka flag changes
+# that. Releases are built locally now (`scripts/build_windows.py` → `Compress-Archive`
+# → `gh release create`; 0.5.0 was made that way), so the tag trigger and the
+# release steps are gone — with them the `contents: write` permission, which only
+# ever existed to publish. Re-add both if the runner ever gets the memory.
 on:
   workflow_dispatch:
-  push:
-    tags: ["v*"]
-
-permissions:
-  contents: write
 
 jobs:
   build-windows:
@@ -35,14 +40,3 @@ jobs:
           path: build/main.dist
           if-no-files-found: error
 
-      # Tagged runs (vX.Y.Z) additionally publish a GitHub Release.
-      - name: Package zip
-        if: startsWith(github.ref, 'refs/tags/')
-        run: powershell Compress-Archive -Path build/main.dist -DestinationPath symplify-${{ github.ref_name }}.zip
-
-      - name: Publish release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: symplify-${{ github.ref_name }}.zip
-          generate_release_notes: true
