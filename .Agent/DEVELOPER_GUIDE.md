@@ -1317,6 +1317,10 @@ Data-file pitfalls for frozen builds (update this list when you add data-reading
   `--low-memory` and `--jobs=1` took the failures from five files to one and still not through: it
   is the runner's memory, not the options. Releases are built locally
   (`scripts/build_windows.py` → `Compress-Archive` → `gh release create`); 0.5.0 was made that way.
+  `scripts/release.py … --publish` chains the whole thing — bump, commit, tag, build, package, push,
+  `gh release create` — with two gates: the tree must be clean (checked before anything is written)
+  and the build must produce the exe. It builds *before* it pushes, so a failed build leaves nothing
+  remote to clean up.
 
 ## History of routes (read-only branches)
 

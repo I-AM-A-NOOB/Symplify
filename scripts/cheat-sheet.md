@@ -43,14 +43,24 @@ uv run python scripts/release.py minor --tag    # 升版 + 自动 commit + tag v
 
 ## CI / Release
 
-**发布走本地构建**——云端 runner 装不下这个构建：
+**发布一条命令**——云端 runner 装不下这个构建：
+
+```bash
+uv run python scripts/release.py minor --publish
+```
+
+它按顺序做：升版（同步 `pyproject.toml` / `python/version.py` / `uv.lock`）→ 提交并打标签 `vX.Y.Z`（本地）→ 本地构建 → 打成 `symplify-vX.Y.Z.zip`（内含 `main.dist/…`，与 CI 当年同形）→ 推送 main 与标签 → `gh release create`（`--generate-notes`）。
+
+两道闸：**工作区必须干净**（否则在任何写入前退出）、**构建产物必须存在**。构建排在推送之前，所以构建失败时远端没有任何需要清理的东西。
+
+要手工分步，等价于：
 
 ```bash
 uv run python scripts/release.py patch --tag   # 升版 + commit + tag vX.Y.Z
-git push origin main --tags                    # 推版本与标签
 uv run python scripts/build_windows.py         # 本地出包（约 4 分钟，clcache 命中率高）
 powershell -NoProfile -Command "Compress-Archive -Path 'build\main.dist' -DestinationPath 'symplify-vX.Y.Z.zip' -Force"
-gh release create vX.Y.Z symplify-vX.Y.Z.zip --title "Symplify X.Y.Z" --notes "…"
+git push origin main; git push origin vX.Y.Z
+gh release create vX.Y.Z symplify-vX.Y.Z.zip --title "Symplify X.Y.Z" --generate-notes
 ```
 
 - **为什么不在云端出包**：修掉 `fontTools.pens.momentsPen` 之后仍失败三次——`sympy.polys.polyquinticconst` 生成的 C 有 26k 行，MSVC 第二遍报 `fatal error C1002`（堆空间不足）。`--low-memory` 把失败面从 5 处收到 1 处，再加 `--jobs=1` 仍未通过；同一提交本机约 4 分钟编过。这是 runner 内存的硬墙，不是配置问题
