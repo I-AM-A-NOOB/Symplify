@@ -213,6 +213,16 @@ scratch/                        # Preserved experiments — NOT part of the app 
 
 ## Known RinUI / Qt traps (learned the hard way)
 
+- **Equal-sized cells in a `GridLayout` need the documented mechanism, not arithmetic.** Every key of
+  a keyboard tab is the same size: it sets `Layout.preferredWidth/Height: 1` and the same
+  `horizontal/verticalStretchFactor`. Two traps on the way there. A preferred (or minimum) size of
+  **0 is not a size** — the item's implicit size is used instead, which is what its label makes it, so
+  the columns come out as uneven as before. And computing the cell from the layout's own size
+  (`parent.width / columns`) is the **cyclic dependency Qt's layouts overview warns about**: it
+  showed, with the grid growing past the panel and the last column drawing outside the card. Extra
+  space in a layout is shared by the *ratio* of the items' preferred sizes, so equal preferred sizes
+  plus equal stretch factors are all it takes.
+
 - Import **unversioned** `QtQuick` (`import QtQuick`) where you need current API — `import QtQuick 2.15`
   version-gates newer members (e.g. `currentRow`, `itemAtCell` revisions).
 - RinUI's `TableView` sets `acceptedButtons: Qt.NoButton`, which kills its built-in

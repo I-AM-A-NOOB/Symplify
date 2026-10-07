@@ -78,8 +78,33 @@ Rectangle {
 
                             Layout.row: modelData.row
                             Layout.column: modelData.col
+                            // Every key in a tab is the same size, so the grid
+                            // divides the tab evenly. The preferred and minimum
+                            // sizes are 0 on purpose: a `GridLayout` sizes a
+                            // column from the implicit widths of the items in it,
+                            // so a wide label ("integrate") used to take a wider
+                            // column — `fillWidth` only shares out what is *left*.
+                            // With nothing preferred, all of the space is left,
+                            // and it is split equally between the columns (rows
+                            // likewise). A label that no longer fits elides; see
+                            // the contentItem below.
+                            // Equal cells, by the mechanism Qt documents: the extra
+                            // space in a layout is shared out by the *ratio* of the
+                            // items' preferred sizes, and the preferred sizes act as
+                            // weights when everything fills. A preferred size of 0 is
+                            // not a size (the item's implicit width is used instead,
+                            // which is what the label makes it), so every key prefers
+                            // 1 and states the same stretch factor: the ratio is 1:1
+                            // and the columns come out equal. A label that no longer
+                            // fits elides; see the contentItem below.
                             Layout.fillWidth: true
                             Layout.fillHeight: true
+                            Layout.preferredWidth: 1
+                            Layout.preferredHeight: 1
+                            Layout.minimumWidth: 1
+                            Layout.minimumHeight: 1
+                            Layout.horizontalStretchFactor: 1
+                            Layout.verticalStretchFactor: 1
                             // The key shows `label` and types `insert`; they are
                             // the same string unless the glyph differs from the
                             // name it inserts (√ shows, sqrt types).

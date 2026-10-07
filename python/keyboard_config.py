@@ -5,7 +5,7 @@ Loads the keyboard config YAML and flattens each tab's grid into the keys QML
 places with GridLayout attached properties. A key carries two strings: the
 ``label`` it shows and the ``insert`` text it types — the same string for most
 keys, but not for the ones whose glyph differs from the function they insert
-(``√`` shows, ``sqrt(`` types).
+(``√`` shows, ``sqrt`` types).
 """
 
 from pathlib import Path
