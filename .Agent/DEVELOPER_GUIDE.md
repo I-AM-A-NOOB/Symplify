@@ -138,6 +138,35 @@ scratch/                        # Preserved experiments — NOT part of the app 
    user's own typing, but it is the reason this must never become a way to run *pasted* expressions
    — that change needs an AST attribute allow-list first, which is why the lexical layer here is a
    tokenizer and pointedly **not** a parser.
+   **No ground-type accelerator is shipped, and this is the measurement that decided it.** sympy
+   picks its arithmetic backend at import from what is installed (`SYMPY_GROUND_TYPES=python|gmpy|
+   flint`; `auto` prefers flint, then gmpy2, then Python's own types), and that choice decides where
+   the integers live: `Integer`/`Rational` stay on **Python's own ints** whatever is installed
+   (`Integer(5).p` is an `int`, measured), `MPZ`/`MPQ` appear in `sympy/polys/domains/*` and a few
+   `evalf` conversions, and the number-theory primitives bind straight to gmpy when it is there
+   (`factorial = gmpy.fac`, `isqrt`, `gcd`, `is_square`; `primetest.py` has its own
+   `if _gmpy is not None:` branch). Measured with gmpy2 installed against not (best of 3, ms;
+   python → gmpy → flint), every case verified by its own output:
+   * the `Poly` multiply/mod loop: 407 → 125 (3.2×) → 13.8 (29.5×) — the domain layer is where the
+     ground types act. (An earlier version of this note called it 6.84 → 5.39: that loop reduced
+     modulo the operand itself, collapsed to zero after one iteration and measured nothing.)
+   * `isprime(2**1279-1)`: 4.34 → 0.98 (4.4×) → 4.28 — the one user-reachable win gmpy2 had.
+   * **`factor` is where gmpy2 lost**: `factor(x**1000-1)` 107.5 → 319.2 → 69.2 and
+     `factor(x**200-1)` 6.3 → 12.6 → 4.5 — the same output in all three, so pure overhead: the
+     domain switches to `mpz`/`mpq` wrappers, which cost more than Python ints at the coefficient
+     sizes a calculator produces (the same reason `Integer` avoids them).
+   * everything else flat: `solve` 2.04 → 2.06, `integrate(sin**4)` 1.08 → 0.99, `apart` 2.9 → 3.2,
+     `expand((x+1)**150)` 0.01, `evalf(sqrt(2), 20000)` 0.10 → 0.11, `factorint` of a ~10^14
+     semiprime 6.6 → 6.9, ziamath's render 4.28 → 4.59, a 500-bit `Integer` multiply loop 11.2 →
+     11.6, a 300-bit `Rational` add loop 12.0 → 12.1.
+   So gmpy2 was 4.4× on `isprime` and 3.2× on domain arithmetic against a **2-3× regression on
+   `factor`** — the operation a symbolic calculator's user reaches for more often — and it was
+   removed for that. `python-flint` is the accelerator that wins *every* case above (`auto` prefers
+   it over gmpy2), but its wins are milliseconds (107 → 69ms on a degree-1000 factor) and it is a
+   second CAS (~24 MB, shipping its own copy of GMP/MPFR) with newer, less-tested ground types, so
+   it is not shipped either: adopt it the day the app does real polynomial work (degree ≫ 10³,
+   resultants, Gröbner). `SYMPY_GROUND_TYPES` still pins the choice for a measurement, and the whole
+   suite passes under all three.
 2. **RinUI's NavigationView destroys & recreates pages on every navigation.**
    Anything that must survive switching pages lives in a ViewModel, not QML page state.
    The Calculator page pattern: VM is the single source of truth; the Segmented control
@@ -1342,6 +1371,15 @@ Data-file pitfalls for frozen builds (update this list when you add data-reading
   reason: sympy's `polys.rootisolation` and `polys.polyquinticconst` generate C big enough to exhaust
   MSVC's second pass *on the CI runner* while compiling fine locally (measured: same commit, CI
   `C1002`, local build clean), so the flag trades build time for a compiler that has the memory.
+- **A dependency sympy reaches for by name has to be included explicitly, or the frozen app
+  silently loses it.** `gmpy2` was one until it was removed (invariant 1 has the measurement that
+  decided that): `sympy/external/gmpy.py` imports it inside a `try:` at module scope, and dropping it
+  costs no error, only speed, so a build that misses it looks perfectly fine. If such a dependency is
+  added again, `--include-package=<name>` it and verify it in a build the way the Qt lists are
+  verified: start the exe and look for the module among its loaded ones
+  (`(Get-Process symplify).Modules`). A wheel like that keeps its DLLs in a sibling `<pkg>.libs/`
+  directory at the site-packages root (`gmpy2.libs/libgmp-10.dll`, `libmpfr-6.dll`, `libmpc-3.dll`),
+  not beside the extension.
 - Debugging a GUI exe that exits early: rebuild with `--windows-console-mode=force` to see the traceback.
 
 ## Versioning
