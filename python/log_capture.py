@@ -36,6 +36,7 @@ raises underneath it regardless.
 import sys
 import traceback
 from pathlib import Path
+import warnings
 from types import TracebackType
 from typing import TYPE_CHECKING, Optional, Type
 
@@ -46,6 +47,9 @@ if TYPE_CHECKING:                      # Qt is imported for typing only
 
 #: Guards the Qt handler against re-entering itself through a signal emission.
 _in_handler = False
+
+#: The hook this module replaced, restored on quit.
+_original_showwarning = None
 
 #: Set once the application is quitting. Qt prints during teardown, after the
 #: viewmodels the sink belongs to have been destroyed.
@@ -61,7 +65,25 @@ def install(sink: LogViewModel) -> None:
     sink.entryAdded.connect(_mirror_to_terminal)
     _install_message_handler(sink)
     _install_excepthook(sink)
+    _install_warning_hook(sink)
     _detach_at_quit()
+
+
+def _install_warning_hook(sink: LogViewModel) -> None:
+    """Route Python warnings into ``sink`` too.
+
+    ``warnings.warn`` writes to ``sys.stderr``, which a windowed build has none
+    of, so a warning raised deep inside a library was invisible in exactly the
+    builds that needed it. The LaTeX renderer warns when it cannot typeset
+    something (it catches its own exception, so the excepthook never sees it).
+    """
+    global _original_showwarning
+    _original_showwarning = warnings.showwarning
+
+    def showwarning(message, category, filename, lineno, file=None, line=None):
+        sink.add_warning(f"{category.__name__}: {message} ({filename}:{lineno})")
+
+    warnings.showwarning = showwarning
 
 
 def _detach_at_quit() -> None:

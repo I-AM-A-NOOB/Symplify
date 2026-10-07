@@ -27,6 +27,8 @@ from sympy import Integer, Matrix, Rational, Symbol
 from PySide6.QtCore import QObject
 from PySide6.QtGui import QTextDocument
 
+import warnings
+
 from python.brackets import DEFAULT_COLORS, parse_colors, spans
 from python.code_style import DEFAULT_STYLES, CodeSpan, Style, color_for, surface, theme
 from python.code_style import spans as code_spans
@@ -940,6 +942,23 @@ def test_history_filter_fuzzy_covers_every_field():
     assert len(expressions(model)) == 3
     model.searchText = "x + 1"
     assert expressions(model) == ["x + 1"]
+
+
+def test_an_unusable_configured_font_falls_back_to_the_bundled_one():
+    """`python/fonts.py` keeps a font when a MATH table is merely *present*, so a
+    font whose MATH subtable cannot be parsed still reaches the dropdown and the
+    config — a `latex_font` of UnifontExMono fails with `ValueError: Bad coverage
+    table format 20`. ziamath refuses to substitute a font, so one bad file would
+    blank every LaTeX surface in the app; the renderer falls back to its bundled
+    STIX Two Math instead, and warns, so the reason is visible in the Log."""
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        url, width, height = render_data_url(
+            "x^2", LatexStyle(font="/nonexistent/not-a-font.ttf")
+        )
+    assert url.startswith("data:image/svg+xml")      # the fallback rendered it
+    assert width > 0 and height > 0
+    assert any("falling back" in str(w.message) for w in caught)
 
 
 def test_a_result_too_long_to_typeset_reports_no_artwork():

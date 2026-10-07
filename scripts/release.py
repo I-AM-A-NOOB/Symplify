@@ -119,7 +119,11 @@ def make_zip(version: str, dist_dir: Path = BUILD_DIST) -> Path:
 
     ``dist_dir`` is a parameter so this can be exercised without a real build.
     """
-    archive = shutil.make_archive(str(ROOT / f"symplify-v{version}"), "zip",
+    # Under build/, next to the tree it packages: the repository root is not a
+    # place for a 100 MB artifact, and build/ is already ignored by git.
+    out_dir = ROOT / "build"
+    out_dir.mkdir(exist_ok=True)
+    archive = shutil.make_archive(str(out_dir / f"symplify-v{version}"), "zip",
                                   root_dir=dist_dir.parent, base_dir=dist_dir.name)
     print(f"Packaged {archive} ({Path(archive).stat().st_size / 1e6:.0f} MB)")
     return Path(archive)

@@ -982,8 +982,11 @@ One lexer, one span list, two renderers. Anything that colours code contributes 
 The Log page shows one stream, arriving from two directions, and it is the app's only window into
 its own health.
 
-**Into the page.** `python/log_capture.py` takes over `qInstallMessageHandler` and `sys.excepthook`
-and hands both to `LogViewModel`. Before it, Qt's warnings went to a console a packaged build does
+**Into the page.** `python/log_capture.py` takes over `qInstallMessageHandler`, `sys.excepthook` and
+`warnings.showwarning`, and hands all three to `LogViewModel`. The warning hook earns its place the
+hard way: a library that catches its own exception and warns — `latex_to_svg` does exactly that when
+ziamath cannot typeset a source — is otherwise invisible in a frozen build, which is how a broken
+LaTeX renderer shipped in 0.5.1 looking like a blank result pane and nothing else. Before it, Qt's warnings went to a console a packaged build does
 not have (`--windows-console-mode=disable` leaves `sys.stdout` as `None`), and an uncaught exception
 went nowhere the user could look. What that stream carries is not academic: RinUI emits
 `ScrollableTextArea.qml:20 … ReferenceError: defaultHeight is not defined` on every instantiation,
@@ -1237,6 +1240,15 @@ backdrop floats up from 10px below while fading in, and carries the page's own t
     list showing only its tail. The body's `SettingItem` description also reports what the chain
     resolves to ("Starts with X, then N fallback(s)") and any glyph no family in it can draw, neither
     of which is visible from the candidate list.
+- **A configured LaTeX font that cannot be parsed falls back to the bundled one.** `python/fonts.py`
+  keeps a font when a `MATH` table is *present* (`_math_families`), which is a cheaper check than
+  parsing it — so a font whose MATH subtable fontTools cannot read still reaches the dropdown and the
+  config, and ziamath **fails outright rather than substituting** a font. A `latex_font` of
+  `UnifontExMono` does exactly that (`ValueError: Bad coverage table format 20` from
+  `UnifontEX-Regular·latin.ttf`), and because every LaTeX surface catches its own failure, it looked
+  like "LaTeX is broken" with an empty Log. `latex_to_svg` now retries without the font and warns
+  with the file and the reason, so the feature survives a bad file and the user is told which one it
+  was.
 - **Font fallback is a real Qt feature, and the app uses it — but not through QML's `font` group.**
   Qt resolves each character against an ordered family list (`QFont.setFamilies`), so a glyph the
   first face lacks is drawn from the next one that has it. Two consequences shape the code:
@@ -1431,7 +1443,8 @@ Data-file pitfalls for frozen builds (update this list when you add data-reading
   `scripts/release.py … --publish` chains the whole thing — bump, commit, tag, build, package, push,
   `gh release create` — with two gates: the tree must be clean (checked before anything is written)
   and the build must produce the exe. It builds *before* it pushes, so a failed build leaves nothing
-  remote to clean up.
+  remote to clean up. The archive is written **under `build/`** (`make_zip`), next to the tree it
+  packages: the repository root is no place for a 100 MB artifact, and `build/` is already ignored.
 
 ## History of routes (read-only branches)
 

@@ -7,6 +7,7 @@ embeds the glyph paths directly, which Qt renders correctly.
 """
 
 import re
+import warnings
 from dataclasses import dataclass
 from typing import Optional, Tuple
 from urllib.parse import quote
@@ -60,8 +61,40 @@ def latex_to_svg(
             kwargs["color"] = color
         if font:
             kwargs["font"] = font
-        return Latex(latex, **kwargs).svg()
-    except Exception:
+        try:
+            return Latex(latex, **kwargs).svg()
+        except Exception as exc:
+            # A configured font can be unusable — a broken MATH subtable, a font
+            # update, a truncated collection in `python/fonts.py`'s cache — and
+            # ziamath fails outright rather than substituting one. One bad file
+            # must not disable every LaTeX surface in the app, so fall back to the
+            # bundled STIX Two Math and say so. (`fonts.py` only checks that a
+            # MATH table is *present*, so such a font reaches the dropdown and the
+            # config; a `latex_font` of UnifontExMono fails with
+            # `ValueError: Bad coverage table format 20` and used to look exactly
+            # like "LaTeX is broken", with nothing in the Log.)
+            if "font" not in kwargs:
+                raise
+            warnings.warn(
+                f"{kwargs['font']!r} could not typeset {latex[:40]!r} ({exc!r}); "
+                "falling back to ziamath's bundled STIX Two Math",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            del kwargs["font"]
+            return Latex(latex, **kwargs).svg()
+    except Exception as exc:
+        # A failed render is silent by nature — no artwork means the surface falls
+        # back to its text line — and in a windowed build a warning is the only
+        # trace anyone would ever see of it. python/log_capture.py routes warnings
+        # to the Log page; without that, a broken renderer looks like a blank
+        # result pane and nothing else (which is how the frozen build's LaTeX
+        # failure stayed invisible).
+        warnings.warn(
+            f"ziamath could not typeset {latex[:60]!r}: {exc!r}",
+            RuntimeWarning,
+            stacklevel=2,
+        )
         return ""
 
 
