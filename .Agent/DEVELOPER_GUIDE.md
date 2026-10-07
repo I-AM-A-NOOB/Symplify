@@ -66,7 +66,7 @@ python/
     history_viewmodel.py        #   HistoryModel (QAbstractListModel, newest first, lazy LaTeX)
     search.py                   #   SearchFilterModel + Variables/HistoryFilterModel: the pages'
                                 #   search boxes (proxy over the models above)
-    settings_viewmodel.py       #   Settings: appearance/typography/window, config path, the only writer
+    settings_viewmodel.py       #   Settings: appearance/workspace/window, config path, the only writer
     log_viewmodel.py            #   LogViewModel (formattedLogs)
     highlighter.py              #   CodeHighlighter (QSyntaxHighlighter) for TextArea.textDocument;
                                 #   paints code_style spans, knows nothing about the rules
@@ -456,7 +456,7 @@ scratch/                        # Preserved experiments — NOT part of the app 
   config.** `SettingsStore` is portable only when **`<root>/data` exists**, so `prepare(tmp)` with
   `tmp` being a bare temp dir falls back to the OS config directory and the run reads *and writes*
   the real `%APPDATA%/Symplify/config.yaml` — a probe that clicks a radio silently changed
-  `appearance.code_theme` once. Pass a temp directory that *contains* `data/`
+  `workspace.code_theme` once. Pass a temp directory that *contains* `data/`
   (`root = mkdtemp(); (root / "data").mkdir()`), and print `runtime.settings.path` at the start of
   the run so the isolation is visible rather than assumed.
 - **`findChildren` from Python does not see `Repeater`-created delegates.** Measured on the History
@@ -795,7 +795,7 @@ One lexer, one span list, two renderers. Anything that colours code contributes 
   Contrast variants, and Catppuccin (Mocha on a dark UI, Latte on a light one) — and **every
   family listed in `FAMILIES` has a dark and a light member**, so
   `code_style.theme(family, dark)` always answers: it returns `(styles, bracket_colors)` for the
-  half that matches the UI. `appearance.code_theme` names the family and the *page* passes
+  half that matches the UI. `workspace.code_theme` names the family and the *page* passes
   `Theme.isDark()`, so the two compose — the family says which colours, the UI theme says which half
   of it. A family that could answer for only one side would leave the code bare the moment the UI
   flipped, which is the point of pairing them.
@@ -846,12 +846,12 @@ One lexer, one span list, two renderers. Anything that colours code contributes 
   UI is switched to Light, and `#d33682` under Solarized.
 - **`MainViewModel._settings` is the settings *viewmodel*, not the store.** Read settings through its
   properties (`self._settings.codeTheme`, like `latexSize` beside it). A store call on it
-  (`self._settings.get("appearance.code_theme")`) raises *inside the QML slot*, where it is a line in
+  (`self._settings.get("workspace.code_theme")`) raises *inside the QML slot*, where it is a line in
   the log and the feature quietly does nothing — which is how the code colouring once broke with
   every palette test still green. `test_attaching_the_colouring_paints_the_named_family` covers that
   seam: it fails with the store call and passes with the property.
 - **Bracket colours have two modes, and both follow VS Code's rule rather than one of ours.**
-  `appearance.bracket_mode` is `theme` (the default) or `custom`; `appearance.bracket_colors` is the
+  `workspace.bracket_mode` is `theme` (the default) or `custom`; `workspace.bracket_colors` is the
   custom list, comma-separated `#rrggbb`, one per nesting level and cycled. `MainViewModel._palette`
   is the only place the choice is made, and all three renderers (the highlighter, `highlighted`,
   `highlightedElided`) go through it. The precedence is: a *usable* custom list when the mode asks
@@ -993,20 +993,24 @@ backdrop floats up from 10px below while fading in, and carries the page's own t
   validation live in `python/settings.py` (`DEFAULTS`): unknown keys survive a rewrite, invalid
   values fall back or clamp, writes are atomic (temp file + `os.replace`), and a read-only location
   degrades to in-memory values with a warning the page displays. Keys:
-  `appearance.theme|backdrop|code_theme|bracket_mode|bracket_colors|accent|accent_mode|accent_shading|accent_os_shading`,
-  `fonts.code_family|code_size|keyboard_family|keyboard_size|latex_font|latex_size`,
+  `appearance.theme|backdrop|accent|accent_mode|accent_shading|accent_os_shading`,
+  `workspace.code_theme|bracket_mode|bracket_colors|code_family|code_size|keyboard_family|keyboard_size|latex_font|latex_size`,
   `window.remember|width|height|x|y|maximized`. The page groups them under the subtitles
-  **Interface / Typography / Language / Settings file / About**. Layout follows RinUI's own gallery
+  **Interface / Workspace / Language / Settings file / About**, and a group is its section's: the
+  code theme and the bracket colours moved into `workspace` when their rows moved out of Interface
+  (they had lived in `appearance`). Layout follows RinUI's own gallery
   (`examples/pages/Settings.qml`): a section is a `ColumnLayout { spacing: 3 }` holding a
   **`Typography.BodyStrong`** subtitle and then one card per row, and the sections are separated by
   the outer column's spacing. Subtitle size is the gallery's, not a guess — `BodyStrong` renders at
   the theme's `bodyStrongSize` (14 pt, weight 600), i.e. *the same size as a card title but bolder*;
   `Typography.Subtitle` (20 pt) is one size too large and reads as a second page heading. Most rows
   are `SettingCard`s; a `SettingExpander` is used only where a row carries a second row of its own
-    (the code theme, accent and About groups). The code theme's holds one cell per family — a `Flow`
-  of fixed-width columns, each a `RadioButton` over a wrapped line of description — so the choices
-  read as one row and wrap only when the window is narrow. `fonts.latex_size` used to be `rendering.latex_size`: `load()`
-  migrates it, and a file that has both keeps the new key.
+    (the code theme, accent and About groups). The code theme's body is a `RadioSettingGroup` of
+  `RadioSettingRow`s, one per family. `load()` migrates both older shapes of the keys the Workspace
+  group owns: `workspace.*` was `fonts.*` (and `latex_size` before that `rendering.latex_size`), and
+  the code theme and the bracket colours were `appearance.*`. A key the new group already has wins,
+  and the nearer of the two old homes wins when a file has both — `SettingsStore._migrate_workspace`.
+  `version` (2 now) is a marker the store writes and never reads.
 - **Location**: `<root>/data/config.yaml` when a `data` folder sits next to the app (portable mode;
   `root` is the exe directory when frozen and the repository root in dev), otherwise the OS
   convention — `%APPDATA%\Symplify\` (Windows, falls back to `%LOCALAPPDATA%`),
@@ -1162,7 +1166,8 @@ backdrop floats up from 10px below while fading in, and carries the page's own t
   meant finding four or five literals — and Variables, whose inset is 12, had its own set. The body
   now binds `frame.inset`, which is the same one-way hand-off as `actionsWidth`/`headerHeight` and
   cannot drift from it.
-- **Typography** (`fonts.*`) is three faces, all applied live:
+- **The Workspace group** (`workspace.*`) is what the section of the same name owns — how code is
+  coloured, how brackets are coloured, and the three faces. The faces, all applied live:
   - **Code** (`code_family`/`code_size`): the expression surfaces — the calculator's two inputs
     and its outcome line, the Variables table cells, the History card lines
     and the Log pane. Size defaults to 14.
@@ -1187,8 +1192,8 @@ backdrop floats up from 10px below while fading in, and carries the page's own t
     `settingsVM.keyboardFont` and get real per-character fallback. Verified by rasterising the same
     glyph two ways: `∛` under `["Consolas","Cambria"]` is pixel-identical to `["Cambria"]`, while
     `∞` (which Consolas has) stays Consolas.
-  - **The row stores a preference list, and it is passed through in full.** `fonts.code_family` /
-    `fonts.keyboard_family` are comma-separated; generic keywords (`serif`, `monospace`,
+  - **The row stores a preference list, and it is passed through in full.** `workspace.code_family` /
+    `workspace.keyboard_family` are comma-separated; generic keywords (`serif`, `monospace`,
     `sans-serif`) are first expanded into real family names, because `"monospace"` is not something
     Qt can look up. Names are de-duplicated but never reordered or dropped: an uninstalled name is
     simply skipped during lookup, and an earlier face is *not* replaced by a later one that draws

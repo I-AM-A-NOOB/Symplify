@@ -55,7 +55,7 @@ APP_DIRNAME = "Symplify"
 
 #: Every setting the app understands, with its default.
 DEFAULTS: Dict[str, Any] = {
-    "version": 1,
+    "version": 2,
     "appearance": {
         "theme": "Auto",          # Auto | Light | Dark
         "backdrop": "mica",       # mica | acrylic | tabbed | none (Windows only)
@@ -68,6 +68,13 @@ DEFAULTS: Dict[str, Any] = {
         # instead of deriving it. Only meaningful with the system accent
         # and shading on; see SettingsViewModel.accentOsShadingAvailable.
         "accent_os_shading": True,
+    },
+    # What the Workspace section of the settings page owns: how code is
+    # coloured, how brackets are coloured, and the three faces. The group and
+    # the section are the same thing — it was called `fonts` until the section
+    # was renamed, and the code theme and the brackets used to live under
+    # `appearance`; `load()` migrates both shapes.
+    "workspace": {
         # Which family the code colouring uses. Every family has a dark and a
         # light member and follows the UI theme, so this names a STYLE rather
         # than a colour scheme (see python/code_themes.py).
@@ -83,8 +90,6 @@ DEFAULTS: Dict[str, Any] = {
         # (`brackets.DEFAULT_COLORS`), so clearing the field returns to it rather
         # than silently leaving the mode with nothing to paint.
         "bracket_colors": ",".join(DEFAULT_BRACKET_COLORS),
-    },
-    "fonts": {
         # A comma-separated PREFERENCE list, resolved to the first family the
         # system has (QML cannot express a fallback list — see python/fonts.py).
         "code_family": DEFAULT_CODE_FAMILY,
@@ -109,15 +114,15 @@ _CHOICES = {
     "appearance.theme": ("Auto", "Light", "Dark"),
     "appearance.backdrop": ("mica", "acrylic", "tabbed", "none"),
     "appearance.accent_mode": ("default", "system", "custom"),
-    "appearance.code_theme": tuple(family_ids()),
-    "appearance.bracket_mode": ("theme", "custom"),
+    "workspace.code_theme": tuple(family_ids()),
+    "workspace.bracket_mode": ("theme", "custom"),
 }
 
 #: Keys clamped into a numeric range.
 _CLAMPS = {
-    "fonts.code_size": (6, 72),
-    "fonts.keyboard_size": (6, 72),
-    "fonts.latex_size": (8, 96),
+    "workspace.code_size": (6, 72),
+    "workspace.keyboard_size": (6, 72),
+    "workspace.latex_size": (8, 96),
     "window.width": (860, 20000),
     "window.height": (560, 20000),
 }
@@ -132,15 +137,15 @@ _KNOWN_KEYS = (
     "appearance.accent_mode",
     "appearance.accent_shading",
     "appearance.accent_os_shading",
-    "appearance.code_theme",
-    "appearance.bracket_mode",
-    "appearance.bracket_colors",
-    "fonts.code_family",
-    "fonts.code_size",
-    "fonts.keyboard_family",
-    "fonts.keyboard_size",
-    "fonts.latex_font",
-    "fonts.latex_size",
+    "workspace.code_theme",
+    "workspace.bracket_mode",
+    "workspace.bracket_colors",
+    "workspace.code_family",
+    "workspace.code_size",
+    "workspace.keyboard_family",
+    "workspace.keyboard_size",
+    "workspace.latex_font",
+    "workspace.latex_size",
     "window.remember",
     "window.width",
     "window.height",
@@ -148,6 +153,11 @@ _KNOWN_KEYS = (
     "window.y",
     "window.maximized",
 )
+
+#: The keys the ``workspace`` group owns — read off ``_KNOWN_KEYS`` so a key
+#: added to the group is migrated too. See :meth:`SettingsStore._migrate_workspace`.
+_WORKSPACE_KEYS = tuple(key.split(".", 1)[1] for key in _KNOWN_KEYS
+                        if key.startswith("workspace."))
 
 
 def _platform(system: Optional[str] = None) -> str:
@@ -207,7 +217,7 @@ def _merge_defaults(loaded: Any) -> Dict[str, Any]:
             values[key] = value
         # A scalar loaded where the default is a section is deliberately
         # ignored: it cannot be merged, and storing it would replace the whole
-        # section and break downstream writes and the latex-size migration.
+        # section and break downstream writes and the section migrations.
     return values
 
 
@@ -245,7 +255,7 @@ class SettingsStore:
             self.warning = f"config unreadable, using defaults: {exc}"
         self.values = _merge_defaults(loaded)
         self._infer_accent_mode(loaded)
-        self._migrate_latex_size(loaded)
+        self._migrate_workspace(loaded)
         for key in _KNOWN_KEYS:
             self._write_key(key, self._validate_known(key, self.get(key)))
 
@@ -306,23 +316,36 @@ class SettingsStore:
                 and "accent_mode" not in appearance):
             self.values["appearance"]["accent_mode"] = "custom"
 
-    def _migrate_latex_size(self, loaded: Any) -> None:
-        """Move a pre-``fonts`` ``rendering.latex_size`` into the fonts section.
+    def _migrate_workspace(self, loaded: Any) -> None:
+        """Move every key the ``workspace`` group owns into it, from where it was.
 
-        The key only moved; the value is still the result font size, so a file
-        written before the Typography section existed keeps its setting. An
-        already-present ``fonts.latex_size`` wins (the user has been through the
-        new page and the old key is stale).
+        Two older shapes are still in the wild, and both keep their settings.
+        A file written before the section was renamed holds its faces under
+        ``fonts`` — and before *that* the result font size sat under
+        ``rendering``, where the first migration left it. A file written while
+        the code theme and the brackets were rows of the Interface section holds
+        those three under ``appearance``. The keys only moved, and each still
+        means what it meant, so a file that has one keeps it.
+
+        A key the new group already has wins: the user has been through the new
+        page and the old one is stale. ``fonts`` is read before ``rendering``, so
+        the nearer of the two old homes wins — the rule the two migrations had
+        when they ran one after the other.
         """
         if not isinstance(loaded, dict):
             return
-        rendering = loaded.get("rendering")
-        fonts = loaded.get("fonts")
-        if not isinstance(rendering, dict) or "latex_size" not in rendering:
-            return
-        if isinstance(fonts, dict) and "latex_size" in fonts:
-            return
-        self.values["fonts"]["latex_size"] = rendering["latex_size"]
+        present = loaded.get("workspace")
+        present = present if isinstance(present, dict) else {}
+        target = self.values["workspace"]
+        moved: set = set()
+        for section in ("fonts", "rendering", "appearance"):
+            source = loaded.get(section)
+            if not isinstance(source, dict):
+                continue
+            for key in _WORKSPACE_KEYS:
+                if key in source and key not in present and key not in moved:
+                    target[key] = source[key]
+                    moved.add(key)
 
     def _default_for(self, key: str) -> Any:
         node: Any = DEFAULTS
@@ -355,15 +378,15 @@ class SettingsStore:
             return max(low, min(high, number))
         if key == "appearance.accent":
             return value if isinstance(value, str) and _HEX_COLOR.match(value) else default
-        if key in ("fonts.code_family", "fonts.keyboard_family"):
+        if key in ("workspace.code_family", "workspace.keyboard_family"):
             # A preference LIST: keep it verbatim so nothing the user typed is
             # silently dropped; only a non-string or an empty list falls back.
             text = value.strip() if isinstance(value, str) else ""
             return text if text else default
-        if key == "fonts.latex_font":
+        if key == "workspace.latex_font":
             # A family name from the dropdown, or "" for ziamath's own font.
             return value.strip() if isinstance(value, str) else default
-        if key == "appearance.bracket_colors":
+        if key == "workspace.bracket_colors":
             # A list of colours, one per nesting level. Entries that are not
             # `#rrggbb` are dropped rather than rejecting the line, and what is
             # stored is the normalised list — so the field shows what will be

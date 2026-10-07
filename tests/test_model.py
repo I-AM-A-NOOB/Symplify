@@ -701,7 +701,7 @@ def test_attaching_the_colouring_paints_the_named_family():
     """
     store = SettingsStore(temp_dir() / "config.yaml")
     store.load()
-    store.set("appearance.code_theme", "solarized")
+    store.set("workspace.code_theme", "solarized")
     vm = MainViewModel(store)
 
     target = StubTextDocument("(1)")
@@ -728,8 +728,8 @@ def test_a_family_with_no_bracket_colours_follows_vscode():
     """
     store = SettingsStore(temp_dir() / "config.yaml")
     store.load()
-    assert store.get("appearance.code_theme") == "one"      # the default family
-    assert store.get("appearance.bracket_mode") == "theme"
+    assert store.get("workspace.code_theme") == "one"      # the default family
+    assert store.get("workspace.bracket_mode") == "theme"
     vm = MainViewModel(store)
 
     target = StubTextDocument("((1))")
@@ -790,10 +790,10 @@ def test_the_code_theme_setting_is_written_and_remembered():
     store.load()
     vm = MainViewModel(store)
     settings = vm.settings
-    assert settings.codeTheme == DEFAULTS["appearance"]["code_theme"]
+    assert settings.codeTheme == DEFAULTS["workspace"]["code_theme"]
     settings.codeTheme = "solarized"
     assert settings.codeTheme == "solarized"
-    assert store.get("appearance.code_theme") == "solarized"
+    assert store.get("workspace.code_theme") == "solarized"
 
 
 def test_every_family_carries_a_surface_for_both_sides():

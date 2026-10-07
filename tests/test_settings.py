@@ -110,26 +110,26 @@ def test_set_persists_and_round_trips():
 def test_bracket_settings_round_trip_and_repair_what_cannot_be_painted():
     path = temp_dir() / CONFIG_FILENAME
     store = store_at(path)
-    assert store.get("appearance.bracket_mode") == "theme"
+    assert store.get("workspace.bracket_mode") == "theme"
     # The custom list starts as the rainbow the app has always used, so the mode
     # is usable the moment it is picked.
-    assert store.get("appearance.bracket_colors") == ",".join(DEFAULT_COLORS)
+    assert store.get("workspace.bracket_colors") == ",".join(DEFAULT_COLORS)
 
     # A mode that is not one of the two choices falls back instead of sticking.
-    assert store.set("appearance.bracket_mode", "rainbow") == "theme"
-    assert store.set("appearance.bracket_mode", "custom") == "custom"
+    assert store.set("workspace.bracket_mode", "rainbow") == "theme"
+    assert store.set("workspace.bracket_mode", "custom") == "custom"
 
     # The list keeps only what can be painted, normalised — so the field shows
     # back exactly what the renderer will use.
-    assert store.set("appearance.bracket_colors", " #FF0000 , nope, #00ff00 ") == \
+    assert store.set("workspace.bracket_colors", " #FF0000 , nope, #00ff00 ") == \
         "#ff0000,#00ff00"
-    assert store_at(path).get("appearance.bracket_colors") == "#ff0000,#00ff00"
+    assert store_at(path).get("workspace.bracket_colors") == "#ff0000,#00ff00"
 
     # A list that keeps nothing is repaired to the default rather than to "",
     # because an empty custom palette has no meaning.
-    assert store.set("appearance.bracket_colors", "nope, also nope") == \
+    assert store.set("workspace.bracket_colors", "nope, also nope") == \
         ",".join(DEFAULT_COLORS)
-    assert store.set("appearance.bracket_colors", "") == ",".join(DEFAULT_COLORS)
+    assert store.set("workspace.bracket_colors", "") == ",".join(DEFAULT_COLORS)
 
 
 def test_the_settings_page_offers_exactly_the_families_the_data_has():
@@ -158,11 +158,11 @@ def test_unknown_keys_survive_a_write():
     )
     store = store_at(path)
     assert store.get("appearance.theme") == "Light"
-    store.set("fonts.latex_size", 20)
+    store.set("workspace.latex_size", 20)
     reloaded = store_at(path)
     assert reloaded.values["my_own_key"] == {"keep": 7}
     assert reloaded.get("appearance.theme") == "Light"
-    assert reloaded.get("fonts.latex_size") == 20
+    assert reloaded.get("workspace.latex_size") == 20
 
 
 def test_invalid_values_fall_back_to_defaults():
@@ -176,7 +176,7 @@ def test_invalid_values_fall_back_to_defaults():
     assert store.get("appearance.theme") == "Auto"
     assert store.get("appearance.backdrop") == "mica"
     assert store.get("appearance.accent") == DEFAULTS["appearance"]["accent"]
-    assert store.get("fonts.latex_size") == 24
+    assert store.get("workspace.latex_size") == 24
     assert store.get("window.x") is None
 
 
@@ -203,22 +203,22 @@ def test_a_config_from_before_accent_modes_keeps_its_colour():
 def test_numeric_values_are_clamped():
     path = temp_dir() / CONFIG_FILENAME
     store = store_at(path)
-    assert store.set("fonts.latex_size", 999) == 96
-    assert store.set("fonts.latex_size", 3) == 8
-    assert store.set("fonts.code_size", 999) == 72
-    assert store.set("fonts.code_size", 1) == 6
-    assert store.set("fonts.keyboard_size", 0) == 6
+    assert store.set("workspace.latex_size", 999) == 96
+    assert store.set("workspace.latex_size", 3) == 8
+    assert store.set("workspace.code_size", 999) == 72
+    assert store.set("workspace.code_size", 1) == 6
+    assert store.set("workspace.keyboard_size", 0) == 6
     assert store.set("window.width", 10) == 860
     assert store.set("window.height", 999999) == 20000
 
 
-def test_typography_defaults_are_cross_platform_preference_lists():
+def test_workspace_defaults_are_cross_platform_preference_lists():
     """The defaults must name Windows, macOS and Linux faces and be lists."""
     from python.fonts import split_families
 
-    fonts = DEFAULTS["fonts"]
-    code = split_families(fonts["code_family"])
-    keyboard = split_families(fonts["keyboard_family"])
+    workspace = DEFAULTS["workspace"]
+    code = split_families(workspace["code_family"])
+    keyboard = split_families(workspace["keyboard_family"])
     # A list, not one name: the list is what Qt resolves each character against,
     # and QML cannot express it (its `font` type has no `families`).
     assert len(code) > 3 and len(keyboard) > 3
@@ -226,45 +226,88 @@ def test_typography_defaults_are_cross_platform_preference_lists():
     assert any("Consolas" in n or "Cascadia" in n for n in code)              # Windows
     assert any("Menlo" in n or "Monaco" in n or "SF Mono" in n for n in code)  # macOS
     assert any(n.startswith("DejaVu") for n in code)                          # Linux
-    assert fonts["latex_font"] == ""      # "" = ziamath's bundled STIX Two Math
-    assert (fonts["code_size"], fonts["keyboard_size"], fonts["latex_size"]) == (14, 16, 24)
+    assert workspace["latex_font"] == ""      # "" = ziamath's bundled STIX Two Math
+    assert (workspace["code_size"], workspace["keyboard_size"],
+            workspace["latex_size"]) == (14, 16, 24)
 
 
 def test_font_family_keys_keep_the_preference_list_verbatim():
     path = temp_dir() / CONFIG_FILENAME
     store = store_at(path)
     typed = "NoSuchFont, Consolas, monospace"
-    assert store.set("fonts.code_family", typed) == typed
-    assert store_at(path).get("fonts.code_family") == typed
+    assert store.set("workspace.code_family", typed) == typed
+    assert store_at(path).get("workspace.code_family") == typed
     # An empty list is not a choice, so it falls back rather than sticking.
-    assert store.set("fonts.code_family", "   ") == DEFAULTS["fonts"]["code_family"]
-    assert store.set("fonts.latex_font", "Cambria Math") == "Cambria Math"
+    assert store.set("workspace.code_family", "   ") == DEFAULTS["workspace"]["code_family"]
+    assert store.set("workspace.latex_font", "Cambria Math") == "Cambria Math"
 
 
-def test_a_pre_fonts_config_keeps_its_latex_size():
+def test_a_pre_workspace_config_keeps_its_latex_size():
     """`rendering.latex_size` only moved; a file written before it must migrate."""
     path = temp_dir() / CONFIG_FILENAME
     path.write_text("rendering:\n  latex_size: 40\n", encoding="utf-8")
-    assert store_at(path).get("fonts.latex_size") == 40
+    assert store_at(path).get("workspace.latex_size") == 40
 
 
-def test_the_new_latex_size_wins_over_the_old_key():
+def test_the_old_fonts_key_wins_over_the_older_rendering_one():
     path = temp_dir() / CONFIG_FILENAME
     path.write_text(
         "rendering:\n  latex_size: 40\nfonts:\n  latex_size: 20\n", encoding="utf-8"
     )
-    assert store_at(path).get("fonts.latex_size") == 20
+    assert store_at(path).get("workspace.latex_size") == 20
 
 
-def test_a_scalar_fonts_value_degrades_instead_of_crashing_the_migration():
+def test_a_scalar_fonts_section_degrades_instead_of_crashing_the_migration():
     """A non-mapping ``fonts`` value must not replace the section: the old
-    ``rendering.latex_size`` still migrates and the other fonts keys keep their
-    defaults."""
+    ``rendering.latex_size`` still migrates and the other workspace keys keep
+    their defaults."""
     path = temp_dir() / CONFIG_FILENAME
     path.write_text("rendering:\n  latex_size: 40\nfonts: hello\n", encoding="utf-8")
     store = store_at(path)
-    assert store.get("fonts.latex_size") == 40
-    assert store.get("fonts.code_size") == DEFAULTS["fonts"]["code_size"]
+    assert store.get("workspace.latex_size") == 40
+    assert store.get("workspace.code_size") == DEFAULTS["workspace"]["code_size"]
+
+
+def test_the_code_theme_and_brackets_move_out_of_appearance():
+    """They were rows of the Interface section, so their keys lived under
+    `appearance`; the section moved them, and the keys moved with them."""
+    path = temp_dir() / CONFIG_FILENAME
+    path.write_text(
+        "appearance:\n  theme: Dark\n  code_theme: github\n  bracket_mode: custom\n"
+        "  bracket_colors: '#ff0000,#00ff00'\n",
+        encoding="utf-8",
+    )
+    store = store_at(path)
+    assert store.get("workspace.code_theme") == "github"
+    assert store.get("workspace.bracket_mode") == "custom"
+    assert store.get("workspace.bracket_colors") == "#ff0000,#00ff00"
+    assert store.get("appearance.theme") == "Dark"      # the rest stays put
+
+
+def test_a_config_from_before_the_rename_keeps_its_faces():
+    """The group was `fonts`; every key in it moved, not just the latex size."""
+    path = temp_dir() / CONFIG_FILENAME
+    path.write_text(
+        "fonts:\n  code_family: Consolas, monospace\n  code_size: 20\n"
+        "  keyboard_size: 18\n  latex_font: Cambria Math\n",
+        encoding="utf-8",
+    )
+    store = store_at(path)
+    assert store.get("workspace.code_family") == "Consolas, monospace"
+    assert store.get("workspace.code_size") == 20
+    assert store.get("workspace.keyboard_size") == 18
+    assert store.get("workspace.latex_font") == "Cambria Math"
+
+
+def test_the_new_group_wins_over_the_keys_it_moved_away_from():
+    """A file the user has since edited through the new page: the old key is
+    stale, so the value under `workspace` is the one to keep."""
+    path = temp_dir() / CONFIG_FILENAME
+    path.write_text(
+        "appearance:\n  code_theme: github\nworkspace:\n  code_theme: solarized\n",
+        encoding="utf-8",
+    )
+    assert store_at(path).get("workspace.code_theme") == "solarized"
 
 
 def test_window_coordinates_and_flags():
@@ -330,7 +373,7 @@ def test_reset_restores_every_default():
     path = temp_dir() / CONFIG_FILENAME
     store = store_at(path)
     store.set("appearance.theme", "Dark")
-    store.set("fonts.latex_size", 40)
+    store.set("workspace.latex_size", 40)
     store.reset()
     assert store.values == DEFAULTS
     assert store_at(path).get("appearance.theme") == "Auto"

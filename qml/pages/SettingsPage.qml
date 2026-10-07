@@ -163,138 +163,6 @@ Item {
                     }
                 }
 
-                // The code colours follow the UI theme, so this picks a FAMILY —
-                // every one of them has a dark and a light member — rather than a
-                // single theme: Atom One is One Dark on a dark UI and One Light on
-                // a light one, and so on for the rest.
-                ExpanderRow {
-                    id: codeThemeExpander
-
-                    Layout.fillWidth: true
-                    title: qsTr("Code theme")
-                    description: qsTr("Colours expressions in the calculator, variables and history. Follows the light/dark mode above.")
-                    icon.name: "ic_fluent_code_20_regular"
-
-                    // The header carries the current choice; the list below is
-                    // the control.
-                    content: Text {
-                        text: settingsVM.codeThemeLabel(settingsVM.codeTheme)
-                        color: Theme.currentTheme.colors.textSecondaryColor
-                    }
-
-                    // One `RadioSettingRow` per family. They carry no background of
-                    // their own, so the group card is what they sit on — see
-                    // `RadioSettingGroup`. (A `SettingItem` that *did* paint would have
-                    // to sit directly in the body: RinUI's corner and divider
-                    // bookkeeping reads the parent. These rows round nothing and
-                    // divide nothing, so a group of their own is free.)
-                    RadioSettingGroup {
-                        Repeater {
-                            objectName: "codeThemeRows"
-
-                            // Ids and blurbs only: the display names come from
-                            // `code_themes.FAMILIES` through the viewmodel, so the
-                            // palette table stays their one home. `visible: false` so
-                            // the layout does not spend spacing on the repeater
-                            // itself before the first item.
-                            visible: false
-
-                            model: [
-                                { key: "one", blurb: qsTr("The one everyone copies. Warm greys, honest colours.") },
-                                { key: "default", blurb: qsTr("The classics — what your muscle memory already sees.") },
-                                { key: "modern", blurb: qsTr("The same taste as Dark+, on a quieter background.") },
-                                { key: "2026", blurb: qsTr("The new kid: more contrast, more glow.") },
-                                { key: "solarized", blurb: qsTr("Low contrast on purpose, and its own bracket colours.") },
-                                { key: "highcontrast", blurb: qsTr("For when you would rather the code just shout.") },
-                                { key: "github", blurb: qsTr("The classic GitHub pair, from the Primer theme.") },
-                                { key: "githubdefault", blurb: qsTr("GitHub's current default — what the site and the editor ship today.") },
-                                { key: "githubcolorblind", blurb: qsTr("GitHub's default pair, retuned for colour blindness.") },
-                                { key: "githubhighcontrast", blurb: qsTr("GitHub's high-contrast pair, for the most separation.") },
-                                { key: "catppuccin", blurb: qsTr("Soothing pastels: Mocha on a dark UI, Latte on a light one.") }
-                            ]
-
-                            delegate: RadioSettingRow {
-                                required property var modelData
-
-                                label: settingsVM.codeThemeLabel(modelData.key)
-                                hint: modelData.blurb
-                                checked: settingsVM.codeTheme === modelData.key
-                                onSelected: settingsVM.codeTheme = modelData.key
-                            }
-                        }
-                    }
-                }
-
-                // Brackets are coloured separately from the code theme's own
-                // spans: the layers come from the theme (or VS Code's defaults
-                // when it names none), or from a list of the user's own.
-                ExpanderRow {
-                    id: bracketsExpander
-
-                    Layout.fillWidth: true
-                    title: qsTr("Bracket colouring")
-                    description: qsTr("Colours the nesting levels of brackets and parentheses in expressions.")
-                    icon.name: "ic_fluent_braces_20_regular"
-
-                    // The header carries the current choice; the rows below are
-                    // the control — the same shape as the code theme above.
-                    content: Text {
-                        text: settingsVM.bracketMode === "custom"
-                            ? page.bracketCustomLabel : page.bracketThemeLabel
-                        color: Theme.currentTheme.colors.textSecondaryColor
-                    }
-
-                    RadioSettingGroup {
-                        RadioSettingRow {
-                            label: page.bracketThemeLabel
-                            hint: qsTr("The code theme's own bracket colours — VS Code's defaults when the family names none.")
-                            checked: settingsVM.bracketMode === "theme"
-                            onSelected: settingsVM.bracketMode = "theme"
-                        }
-
-                        RadioSettingRow {
-                            id: bracketCustomRow
-
-                            label: page.bracketCustomLabel
-                            hint: qsTr("Your own colours, one per nesting level and cycled, as comma-separated #rrggbb.")
-                            checked: settingsVM.bracketMode === "custom"
-                            onSelected: settingsVM.bracketMode = "custom"
-
-                            field: TextField {
-                                id: bracketColorsField
-                                objectName: "bracketColorsField"
-
-                                // Under the hint and at the row's full width: the
-                                // column this lands in is the row's own, and it is
-                                // what absorbs the leftover width. The left margin
-                                // is the hint's, past the circle. Live only while
-                                // this option is the one in use.
-                                Layout.fillWidth: true
-                                Layout.leftMargin: 28
-                                Layout.topMargin: 6
-                                enabled: settingsVM.bracketMode === "custom"
-                                placeholderText: qsTr("e.g. #ff6b6b, #ff9f43, #ffd93d")
-                                text: settingsVM.bracketColors
-                                Component.onCompleted: cursorPosition = 0
-                                onEditingFinished: {
-                                    settingsVM.bracketColors = text
-                                    // The store normalises what it keeps (invalid
-                                    // entries are dropped), so show that back.
-                                    text = Qt.binding(() => settingsVM.bracketColors)
-                                    cursorPosition = 0
-                                }
-                                ToolTip {
-                                    delay: 500
-                                    visible: bracketColorsField.hovered
-                                    text: settingsVM.bracketColors.length > 0
-                                        ? settingsVM.bracketColors
-                                        : qsTr("One colour per nesting level, cycled")
-                                }
-                            }
-                        }
-                    }
-                }
-
                 SettingCard {
                     Layout.fillWidth: true
                     title: qsTr("Background effect")
@@ -484,14 +352,146 @@ Item {
                 }
             }
 
-            // ---- Typography ----
+            // ---- Workspace ----
             ColumnLayout {
                 Layout.fillWidth: true
                 spacing: 3
 
                 Text {
                     typography: Typography.BodyStrong
-                    text: qsTr("Typography")
+                    text: qsTr("Workspace")
+                }
+
+                // The code colours follow the UI theme, so this picks a FAMILY —
+                // every one of them has a dark and a light member — rather than a
+                // single theme: Atom One is One Dark on a dark UI and One Light on
+                // a light one, and so on for the rest.
+                ExpanderRow {
+                    id: codeThemeExpander
+
+                    Layout.fillWidth: true
+                    title: qsTr("Code theme")
+                    description: qsTr("Colours expressions in the calculator, variables and history. Follows the light/dark mode above.")
+                    icon.name: "ic_fluent_code_text_edit_20_regular"
+
+                    // The header carries the current choice; the list below is
+                    // the control.
+                    content: Text {
+                        text: settingsVM.codeThemeLabel(settingsVM.codeTheme)
+                        color: Theme.currentTheme.colors.textSecondaryColor
+                    }
+
+                    // One `RadioSettingRow` per family. They carry no background of
+                    // their own, so the group card is what they sit on — see
+                    // `RadioSettingGroup`. (A `SettingItem` that *did* paint would have
+                    // to sit directly in the body: RinUI's corner and divider
+                    // bookkeeping reads the parent. These rows round nothing and
+                    // divide nothing, so a group of their own is free.)
+                    RadioSettingGroup {
+                        Repeater {
+                            objectName: "codeThemeRows"
+
+                            // Ids and blurbs only: the display names come from
+                            // `code_themes.FAMILIES` through the viewmodel, so the
+                            // palette table stays their one home. `visible: false` so
+                            // the layout does not spend spacing on the repeater
+                            // itself before the first item.
+                            visible: false
+
+                            model: [
+                                { key: "one", blurb: qsTr("The one everyone copies. Warm greys, honest colours.") },
+                                { key: "default", blurb: qsTr("The classics — what your muscle memory already sees.") },
+                                { key: "modern", blurb: qsTr("The same taste as Dark+, on a quieter background.") },
+                                { key: "2026", blurb: qsTr("The new kid: more contrast, more glow.") },
+                                { key: "solarized", blurb: qsTr("Low contrast on purpose, and its own bracket colours.") },
+                                { key: "highcontrast", blurb: qsTr("For when you would rather the code just shout.") },
+                                { key: "github", blurb: qsTr("The classic GitHub pair, from the Primer theme.") },
+                                { key: "githubdefault", blurb: qsTr("GitHub's current default — what the site and the editor ship today.") },
+                                { key: "githubcolorblind", blurb: qsTr("GitHub's default pair, retuned for colour blindness.") },
+                                { key: "githubhighcontrast", blurb: qsTr("GitHub's high-contrast pair, for the most separation.") },
+                                { key: "catppuccin", blurb: qsTr("Soothing pastels: Mocha on a dark UI, Latte on a light one.") }
+                            ]
+
+                            delegate: RadioSettingRow {
+                                required property var modelData
+
+                                label: settingsVM.codeThemeLabel(modelData.key)
+                                hint: modelData.blurb
+                                checked: settingsVM.codeTheme === modelData.key
+                                onSelected: settingsVM.codeTheme = modelData.key
+                            }
+                        }
+                    }
+                }
+
+                // Brackets are coloured separately from the code theme's own
+                // spans: the layers come from the theme (or VS Code's defaults
+                // when it names none), or from a list of the user's own.
+                ExpanderRow {
+                    id: bracketsExpander
+
+                    Layout.fillWidth: true
+                    title: qsTr("Bracket colouring")
+                    description: qsTr("Colours the nesting levels of brackets and parentheses in expressions.")
+                    icon.name: "ic_fluent_braces_20_regular"
+
+                    // The header carries the current choice; the rows below are
+                    // the control — the same shape as the code theme above.
+                    content: Text {
+                        text: settingsVM.bracketMode === "custom"
+                            ? page.bracketCustomLabel : page.bracketThemeLabel
+                        color: Theme.currentTheme.colors.textSecondaryColor
+                    }
+
+                    RadioSettingGroup {
+                        RadioSettingRow {
+                            label: page.bracketThemeLabel
+                            hint: qsTr("The code theme's own bracket colours — VS Code's defaults when the family names none.")
+                            checked: settingsVM.bracketMode === "theme"
+                            onSelected: settingsVM.bracketMode = "theme"
+                        }
+
+                        RadioSettingRow {
+                            id: bracketCustomRow
+
+                            label: page.bracketCustomLabel
+                            hint: qsTr("Your own colours, one per nesting level and cycled, as comma-separated #rrggbb.")
+                            checked: settingsVM.bracketMode === "custom"
+                            onSelected: settingsVM.bracketMode = "custom"
+
+                            field: TextField {
+                                id: bracketColorsField
+                                objectName: "bracketColorsField"
+
+                                // Under the hint and at the row's full width: the
+                                // column this lands in is the row's own, and it is
+                                // what absorbs the leftover width. The left margin
+                                // is the hint's, past the circle. Live only while
+                                // this option is the one in use.
+                                Layout.fillWidth: true
+                                Layout.leftMargin: 28
+                                Layout.topMargin: 6
+                                enabled: settingsVM.bracketMode === "custom"
+                                placeholderText: qsTr("e.g. #ff6b6b, #ff9f43, #ffd93d")
+                                text: settingsVM.bracketColors
+                                Component.onCompleted: cursorPosition = 0
+                                onEditingFinished: {
+                                    settingsVM.bracketColors = text
+                                    // The store normalises what it keeps (invalid
+                                    // entries are dropped), so show that back.
+                                    text = Qt.binding(() => settingsVM.bracketColors)
+                                    cursorPosition = 0
+                                }
+                                ToolTip {
+                                    delay: 500
+                                    visible: bracketColorsField.hovered
+                                    text: settingsVM.bracketColors.length > 0
+                                        ? settingsVM.bracketColors
+                                        : qsTr("One colour per nesting level, cycled")
+                                }
+                            }
+                        }
+                    }
                 }
 
                 // The rows are `ExpanderRow`s rather than cards because the

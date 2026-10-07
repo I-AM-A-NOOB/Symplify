@@ -178,7 +178,7 @@ class MainViewModel(QObject):
 
     @Property(QObject, constant=True)
     def settings(self) -> SettingsViewModel:
-        """The settings viewmodel (appearance, rendering, window, config path)."""
+        """The settings viewmodel (appearance, workspace, window, config path)."""
         return self._settings
 
     @Slot(str)
@@ -211,7 +211,7 @@ class MainViewModel(QObject):
         a QML argument is ``QObject`` — together with whether the *active* theme
         is dark (RinUI resolves ``Auto`` against the OS, so the page asks it, not
         the setting). The colours then come from the family the settings name
-        (``appearance.code_theme``) at that theme: Atom One is One Dark on a dark
+        (``workspace.code_theme``) at that theme: Atom One is One Dark on a dark
         UI and One Light on a light one. The highlighter lives exactly as long as
         the document, which RinUI recreates with the page — which is also what
         re-applies a changed theme or family. Names are resolved against the live

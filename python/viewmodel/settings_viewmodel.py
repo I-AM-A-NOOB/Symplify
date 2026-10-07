@@ -389,31 +389,31 @@ class SettingsViewModel(QObject):
     # --- fonts ------------------------------------------------------------
 
     def _get_code_family(self) -> str:
-        return self._store.get("fonts.code_family")
+        return self._store.get("workspace.code_family")
 
     def _set_code_family(self, families: str) -> None:
-        self._store.set("fonts.code_family", families)
+        self._store.set("workspace.code_family", families)
         self.changed.emit()
 
     def _get_code_size(self) -> int:
-        return int(self._store.get("fonts.code_size"))
+        return int(self._store.get("workspace.code_size"))
 
     def _set_code_size(self, size: int) -> None:
-        self._store.set("fonts.code_size", size)
+        self._store.set("workspace.code_size", size)
         self.changed.emit()
 
     def _get_keyboard_family(self) -> str:
-        return self._store.get("fonts.keyboard_family")
+        return self._store.get("workspace.keyboard_family")
 
     def _set_keyboard_family(self, families: str) -> None:
-        self._store.set("fonts.keyboard_family", families)
+        self._store.set("workspace.keyboard_family", families)
         self.changed.emit()
 
     def _get_keyboard_size(self) -> int:
-        return int(self._store.get("fonts.keyboard_size"))
+        return int(self._store.get("workspace.keyboard_size"))
 
     def _set_keyboard_size(self, size: int) -> None:
-        self._store.set("fonts.keyboard_size", size)
+        self._store.set("workspace.keyboard_size", size)
         self.changed.emit()
 
     def _get_accent_shading(self) -> bool:
@@ -469,10 +469,10 @@ class SettingsViewModel(QObject):
         return bool(self._system_accents.get("light") and self._system_accents.get("dark"))
 
     def _get_latex_font(self) -> str:
-        return self._store.get("fonts.latex_font")
+        return self._store.get("workspace.latex_font")
 
     def _set_latex_font(self, family: str) -> None:
-        self._store.set("fonts.latex_font", family)
+        self._store.set("workspace.latex_font", family)
         self.changed.emit()
 
     def _get_code_font_family(self) -> str:
@@ -592,10 +592,10 @@ class SettingsViewModel(QObject):
     # --- rendering --------------------------------------------------------
 
     def _get_latex_size(self) -> int:
-        return int(self._store.get("fonts.latex_size"))
+        return int(self._store.get("workspace.latex_size"))
 
     def _set_latex_size(self, size: int) -> None:
-        self._store.set("fonts.latex_size", size)
+        self._store.set("workspace.latex_size", size)
         self.latexSizeChanged.emit()
         self.changed.emit()
 
@@ -796,10 +796,10 @@ class SettingsViewModel(QObject):
     backdrop = Property(str, _get_backdrop, _set_backdrop, notify=changed)
 
     def _get_code_theme(self) -> str:
-        return self._store.get("appearance.code_theme")
+        return self._store.get("workspace.code_theme")
 
     def _set_code_theme(self, family: str) -> None:
-        self._store.set("appearance.code_theme", family)
+        self._store.set("workspace.code_theme", family)
         self.changed.emit()
 
     @Slot(str, result=str)
@@ -820,23 +820,23 @@ class SettingsViewModel(QObject):
         value means the family has no opinion on that part and the control keeps
         the UI theme's own colour.
         """
-        background, ink, placeholder = code_surface(self._store.get("appearance.code_theme"), dark)
+        background, ink, placeholder = code_surface(self._store.get("workspace.code_theme"), dark)
         return {"background": background, "ink": ink, "placeholder": placeholder}
 
     codeTheme = Property(str, _get_code_theme, _set_code_theme, notify=changed)
 
     def _get_bracket_mode(self) -> str:
-        return self._store.get("appearance.bracket_mode")
+        return self._store.get("workspace.bracket_mode")
 
     def _set_bracket_mode(self, mode: str) -> None:
         if mode == self._get_bracket_mode():
             return
-        self._store.set("appearance.bracket_mode", mode)
+        self._store.set("workspace.bracket_mode", mode)
         self.changed.emit()
 
     def _get_bracket_colors(self) -> str:
         """The custom palette, as stored (normalised by the store)."""
-        return self._store.get("appearance.bracket_colors")
+        return self._store.get("workspace.bracket_colors")
 
     def _set_bracket_colors(self, colors: str) -> None:
         """Store a custom palette; unusable entries are dropped, not rejected.
@@ -846,7 +846,7 @@ class SettingsViewModel(QObject):
         """
         if colors == self._get_bracket_colors():
             return
-        self._store.set("appearance.bracket_colors", colors)
+        self._store.set("workspace.bracket_colors", colors)
         self.changed.emit()
 
     bracketMode = Property(str, _get_bracket_mode, _set_bracket_mode, notify=changed)
