@@ -640,6 +640,14 @@ scratch/                        # Preserved experiments — NOT part of the app 
   row-dependent toolbar action (delete, edit expression, rename) stayed disabled however the user
   clicked; it reads the first entry of `selectedIndexes` now. A real mouse click hides this, because
   the view acts on the press — one more reason the harness drives the model path and not the mouse.
+- **Qt Quick's wheel step is `wheelScrollLines * 24` pixels, and that hint is the only global
+  lever.** `qquickflickable.cpp`: `wheelScroll = -styleHints()->wheelScrollLines() * 24` — so the
+  stock 3 moved 72px a notch, which reads as sluggish beside Windows' own apps. `main.py` sets 5
+  (120px) right after building the `QApplication`; it applies to every `Flickable` in the process,
+  RinUI's included, and it lives there because the hint only exists once a `QGuiApplication` does.
+  It cannot be measured from Python: Qt Quick delivers wheel events through the platform layer, so
+  a `QWheelEvent` handed to `QApplication.sendEvent` — window exposed, phases set, both tried —
+  never reaches the item. The number comes from the source line above, not from a probe.
 
 ## Rendering / display
 

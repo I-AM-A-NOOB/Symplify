@@ -37,6 +37,13 @@ def main() -> int:
 
     app = QApplication(sys.argv)
 
+    # Qt Quick scrolls a `Flickable` by `wheelScrollLines * 24` pixels per wheel
+    # notch — `qquickflickable.cpp`: `wheelScroll = -styleHints()->wheelScrollLines() * 24`
+    # — so the stock 3 moves 72px a notch, which reads as sluggish next to Windows'
+    # own apps. That hint is the only *global* lever there is: one value for every
+    # scrolling surface, RinUI's included. 5 → 120px per notch.
+    app.styleHints().setWheelScrollLines(5)
+
     # Create the RinUI window shell first (without loading QML) so that the
     # shared engine's root context can receive the viewmodels before the
     # QML tree is instantiated.
