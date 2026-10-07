@@ -625,15 +625,12 @@ Item {
                         showDivider: false
 
                         ComboBox {
-                            // The row hands the action slot its own implicit width, which
-                            // for a text field or a combo is content-driven: the box would
-                            // resize with the font list and none of the three font rows
-                            // would line up. Pin it to roughly two thirds of the row -- the
-                            // label keeps the rest, which is what the wrapped description
-                            // needs.
-                            Layout.fillWidth: true
-                            Layout.preferredWidth: latexFamilyRow.width * 2 / 3
-                            Layout.minimumWidth: latexFamilyRow.width * 2 / 3
+                            // Right-aligned at the width Qt gives it: a combo knows
+                            // what its longest entry needs, and pinning it to two
+                            // thirds of the row only made it disagree with the
+                            // control beside it. The row's filler takes the slack,
+                            // so the box sits against the right edge.
+                            Layout.alignment: Qt.AlignRight
                             // Index 0 is always the built-in font: ziamath's
                             // bundled STIX Two Math, recommended and the only
                             // option that needs no system font at all.

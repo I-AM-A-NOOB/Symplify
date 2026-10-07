@@ -343,11 +343,11 @@ scratch/                        # Preserved experiments — NOT part of the app 
     there is full width, where the same control in the right-hand slot would sit beside the radio at
     its implicit width. Give it `Layout.leftMargin: 28` (the hint's) to line up with the text above
     it. The bracket-colours field is the one instance. The alias needs the column to have an `id`.
-  * **A short-choice control** (theme, backdrop, accent, language) keeps a fixed `150`, and the one
-    control that is neither a text field nor a short choice — the LaTeX family `ComboBox` — still
-    pins `Layout.preferredWidth` **and** `Layout.minimumWidth` to `2 / 3` of its row (both: the
-    preferred alone still gets shrunk, because the label's demand is content-sized too), which lands
-    it at 67% with the label taking the rest. Match the kind of control when adding a row.
+  * **A short-choice control** (theme, backdrop, accent, language) keeps a fixed `150`. The LaTeX
+    family `ComboBox` is the one control that is neither: it is right-aligned at the width Qt gives
+    it (`Layout.alignment: Qt.AlignRight`, no preferred/minimum), because a combo already knows what
+    its longest entry needs and pinning it to a fraction of the row only made it disagree with the
+    control beside it. Match the kind of control when adding a row.
 - **SettingCard / SettingExpander API quirks** (the published docs describe a newer version than the
   installed one): the icon is set with `icon.name:` — assigning `icon:` fails with "read-only
   property"; a `SettingCard`'s bare children land in its **right-hand** slot, while a
