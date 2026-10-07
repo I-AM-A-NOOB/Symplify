@@ -6,6 +6,8 @@ core is ``Calculator``: it owns what an input means, which names resolve and
 what counts as a failure, and answers with ``Success`` or ``Failure``.
 """
 
+import sys
+
 from .calculator import (
     AUGMENTED_OPS,
     ASSIGN_OPS,
@@ -24,6 +26,16 @@ from .variable import (
     is_sympy_name,
     validate_name,
 )
+
+# Python caps int -> str at 4300 digits by default: a guard against a DoS from
+# *untrusted* input (CVE-2020-10735). The input here is the user's own typing
+# (invariant 1), and a calculator has to be able to show the number it just
+# computed — `2**100000` evaluates fine, but its 30103 digits raised ValueError
+# in the viewmodel's `str(result.value)`, so the app computed an answer it could
+# not display and the failure surfaced inside a Qt slot. Raised once, on the
+# package every model consumer imports (the viewmodels and the tests alike),
+# rather than at each of the four places that stringify a value.
+sys.set_int_max_str_digits(0)
 
 __all__ = [
     "AUGMENTED_OPS",

@@ -167,6 +167,12 @@ scratch/                        # Preserved experiments — NOT part of the app 
    it is not shipped either: adopt it the day the app does real polynomial work (degree ≫ 10³,
    resultants, Gröbner). `SYMPY_GROUND_TYPES` still pins the choice for a measurement, and the whole
    suite passes under all three.
+   **Python's 4300-digit cap on `int -> str` is raised process-wide** —
+   `python/model/__init__.py` calls `sys.set_int_max_str_digits(0)` — because the input is the user's
+   own. Without it `2**100000` evaluated to a Success whose 30103 digits raised ValueError in the
+   viewmodel's `str(result.value)`, inside a Qt slot: the app computed an answer it could not
+   display. What keeps a runaway result from stalling the UI is the *renderer's* cap, not this one
+   (see Rendering).
 2. **RinUI's NavigationView destroys & recreates pages on every navigation.**
    Anything that must survive switching pages lives in a ViewModel, not QML page state.
    The Calculator page pattern: VM is the single source of truth; the Segmented control
@@ -699,6 +705,16 @@ scratch/                        # Preserved experiments — NOT part of the app 
   never reaches the item. The number comes from the source line above, not from a probe.
 
 ## Rendering / display
+
+- **LaTeX is not typeset past `MAX_LATEX_CHARS` (1000 characters of source), on purpose.** The cost
+  is linear in the glyph count but the numbers are large: measured on this machine, ~57 ms and
+  0.84 MB of SVG at 1000 characters, and a `2**100000` result — 30103 digits — takes **3.9 s and
+  produces 27 MB**, on the UI thread, once per history card, with the data URL held per entry.
+  `latex_to_svg` returns `''` above the cap, which is the `('', 0, 0)` contract every surface
+  already leans on (`test_latex_style_renders_and_reports_empty`): the strip takes no space and the
+  result line above carries the value, elided to the panel width. The cap is what makes the raised
+  digit cap safe — with `str()` unlimited a result can be arbitrarily long, and this is where that
+  stops.
 
 - LaTeX: `Success.latex` (`python/model/latex.py`'s `render_latex` / `render_latex_definition`, sympy) → **`render_data_url(latex, style)`**
   (`python/latex_render.py`) returns `(data URL, width, height)` — a percent-encoded SVG data URL

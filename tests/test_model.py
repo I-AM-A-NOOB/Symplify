@@ -41,7 +41,7 @@ from python.model.calculator import (
     Success,
 )
 from python.model.variable import VariableManager, is_sympy_name, validate_name
-from python.latex_render import LatexStyle, render_data_url
+from python.latex_render import LatexStyle, MAX_LATEX_CHARS, render_data_url
 from python.settings import DEFAULTS, SettingsStore
 from python.viewmodel.history_viewmodel import HistoryModel
 from python.viewmodel.main_viewmodel import MainViewModel
@@ -161,6 +161,19 @@ def test_unknown_symbol_alone_is_fine():
 # --------------------------------------------------------------------------
 # Failures are classified
 # --------------------------------------------------------------------------
+
+def test_a_result_with_more_digits_than_python_s_default_cap_can_be_shown():
+    """Python caps int -> str at 4300 digits — a guard against a DoS from
+    *untrusted* input (CVE-2020-10735) — and the input here is the user's own.
+    `2**100000` evaluates to a Success whose 30103 digits used to raise
+    ValueError in the viewmodel's `str(result.value)`, inside a Qt slot: the app
+    computed an answer it could not display. `python/model/__init__.py` raises the
+    cap for the process, and this is the case that needs it — it fails without."""
+    result = evaluate("2**100000")
+    assert isinstance(result, Success)
+    assert len(str(result.value)) == 30103
+    assert result.latex != ""      # the latex path stringifies the digits too
+
 
 def test_syntax_error():
     assert bad("x +", ErrorKind.SYNTAX).expression == "x +"
@@ -927,6 +940,18 @@ def test_history_filter_fuzzy_covers_every_field():
     assert len(expressions(model)) == 3
     model.searchText = "x + 1"
     assert expressions(model) == ["x + 1"]
+
+
+def test_a_result_too_long_to_typeset_reports_no_artwork():
+    """The other shape that has to answer ``('', 0, 0)``: a source past
+    ``MAX_LATEX_CHARS``. The cost is linear in the glyph count, but a
+    ``2**100000`` result is 30103 digits — 3.9 s and a 27 MB SVG on the UI
+    thread, once per history card — where the result line above already carries
+    the value and the strip takes no space without artwork. The boundary is the
+    contract: at the cap it still renders, one character over it does not."""
+    at_cap = render_data_url("1" * MAX_LATEX_CHARS, LatexStyle())
+    assert at_cap[0].startswith("data:image/svg+xml")
+    assert render_data_url("1" * (MAX_LATEX_CHARS + 1), LatexStyle()) == ("", 0, 0)
 
 
 def test_latex_style_renders_and_reports_empty():

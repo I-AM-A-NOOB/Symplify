@@ -19,6 +19,16 @@ _SVG_WIDTH_RE = re.compile(r'width="([\d.]+)"')
 _SVG_HEIGHT_RE = re.compile(r'height="([\d.]+)"')
 
 
+#: Refuse to typeset a source longer than this. The cost is linear in the glyph
+#: count, but the numbers are large: measured on this machine, ~57 ms and 0.84 MB
+#: of SVG at 1000 characters, and a `2**100000` result (30103 digits) takes 3.9 s
+#: and produces 27 MB — on the UI thread, once per history card, with the data URL
+#: held per entry. The strip takes no space when there is nothing to render and the
+#: result line above carries the value, so "" is the honest answer: the outcome is
+#: still reported, the app does not stall, and nothing tries to hold 27 MB.
+MAX_LATEX_CHARS = 1000
+
+
 def latex_to_svg(
     latex: str,
     size: Optional[float] = None,
@@ -38,6 +48,8 @@ def latex_to_svg(
             Math. ziamath takes a file, not a family, and fails outright on a
             font without a MATH table rather than falling back to another one.
     """
+    if len(latex) > MAX_LATEX_CHARS:
+        return ""
     try:
         from ziamath.zmath import Latex
 
