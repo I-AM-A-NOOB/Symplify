@@ -82,7 +82,7 @@ Rectangle {
                             Layout.fillHeight: true
                             // The key shows `label` and types `insert`; they are
                             // the same string unless the glyph differs from the
-                            // name it inserts (√ shows, sqrt( types).
+                            // name it inserts (√ shows, sqrt types).
                             text: modelData.label
                             focusPolicy: Qt.NoFocus
                             onClicked: root.keyPressed(modelData.insert)

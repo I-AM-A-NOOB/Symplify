@@ -9,10 +9,10 @@
 basic:
   title: "Basic"
   grid:
-    - ["7", "8", "9", "/", "("]
+    - ["7", "8", "9", "/", ""]
     - ["4", "5", "6", "*", ")"]
-    - ["1", "2", "3", "-", "^"]
-    - ["0", ".", "=", "+", { label: "√", insert: "sqrt(" }]
+    - ["1", "2", "3", "-", "**"]
+    - ["0", ".", "=", "+", { label: "√", insert: "sqrt" }]
 
 alphabet:
   title: "Alphabet"
@@ -24,41 +24,55 @@ alphabet:
 functions:
   title: "Functions"
   grid:
-    - ["sin(", "cos(", "tan("]
-    - ["asin(", "acos(", "atan("]
-    - ["log(", "ln(", "log10(", "exp("]
-    - [{ label: "|x|", insert: "abs(" }, { label: "√", insert: "sqrt(" },
-       { label: "x!", insert: "factorial(" }, { label: "∛", insert: "cbrt(" }]
+    - ["sin", "cos", "tan"]
+    - ["asin", "acos", "atan"]
+    - ["log", "ln", "log10", "exp"]
+    - [
+        { label: "|x|", insert: "abs" },
+        { label: "√", insert: "sqrt" },
+        { label: "x!", insert: "factorial" },
+        { label: "∛", insert: "cbrt" },
+      ]
 
 calculus:
   title: "Calculus"
   grid:
-    - ["limit(", "diff(", "integrate(", "Derivative(", "Integral("]
-    - [{ label: "+∞", insert: "+oo" }, { label: "-∞", insert: "-oo" }, { label: "∞", insert: "zoo" },
-       { label: "π", insert: "pi" }, { label: "e", insert: "E" }]
-    - ["Sum(", "Product(", "summation(", "", ""]
+    - ["limit", "diff", "integrate", "series"]
+    - [{ label: "+∞", insert: "+oo" }, { label: "-∞", insert: "-oo" }, { label: "∞", insert: "zoo" }]
+    - [{ label: "π", insert: "pi" }, { label: "e", insert: "E" }, { label: "i", insert: "I" }]
+    - ["summation", "product"]
 
 algebra:
   title: "Algebra"
   grid:
-    - ["solve(", "expand(", "factor(", "simplify("]
-    - ["collect(", "apart(", "cancel(", "together("]
-    - ["roots(", "poly(", "div(", "rem("]
-    - ["gcd(", "lcm(", "", ""]
+    - ["solve", "expand", "factor", "simplify"]
+    - ["collect", "apart", "cancel", "together"]
+    - ["roots", "poly", "div", "rem"]
+    - ["gcd", "lcm", "", ""]
 
 symbols:
   title: "Symbols"
   grid:
-    - ["+", "-", "*", "/", "^"]
+    - ["+", "-", "*", "/", "**"]
     - ["=", "<", ">", { label: "≤", insert: "<=" }, { label: "≥", insert: ">=" }]
-    - ["(", ")", "|", { label: "π", insert: "pi" }, { label: "e", insert: "E" }]
-    - ["deg", "rad", "%", "!", { label: "√", insert: "sqrt(" }]
+    - ["", ")", "|", { label: "π", insert: "pi" }, { label: "e", insert: "E" }]
+    - ["deg", "rad", "%", "!", { label: "√", insert: "sqrt" }]
 
 constants:
   title: "Constants"
   grid:
-    - [{ label: "π", insert: "pi" }, { label: "e", insert: "E" },
-       { label: "i", insert: "I" }, { label: "∞", insert: "oo" },
-       { label: "∞", insert: "zoo" }]
-    - [{ label: "φ", insert: "GoldenRatio" }, { label: "γ", insert: "EulerGamma" },
-       { label: "G", insert: "Catalan" }, { label: "∞", insert: "inf" }, "nan"]
+    - [
+        { label: "π", insert: "pi" },
+        { label: "e", insert: "E" },
+        { label: "i", insert: "I" },
+        { label: "+∞", insert: "+oo" },
+        { label: "-∞", insert: "-oo" },
+        { label: "∞", insert: "zoo" },
+      ]
+    - [
+        { label: "φ", insert: "GoldenRatio" },
+        { label: "γ", insert: "EulerGamma" },
+        { label: "G", insert: "Catalan" },
+        { label: "infinite", insert: "inf" },
+        { label: "NaN", insert: "nan" },
+      ]
