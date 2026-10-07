@@ -318,6 +318,13 @@ scratch/                        # Preserved experiments — NOT part of the app 
     mutates a third party's internals, twice over (on completion and on expand, to catch lazily built
     content), to say what a group card says declaratively. A row is a row of one list; the list owns
     the surface.
+  * The group card carries **no border**, and that has to be written as `border.width: 0`:
+    `Rectangle`'s border *defaults* to 1px black, so dropping the two lines leaves a black outline
+    rather than none. With a border it looked thicker on the left and right than the header's — the
+    same colour and width, but the group's x lands on a fractional physical pixel (24px page inset +
+    the expander body's 7px padding = 31 logical, ×1.5 = 46.5), and a rounded `Rectangle` draws its
+    border antialiased along the straight edges too, so those two lines spread over two pixels. The
+    surface colour already says where the group is, which is what Win11 does inside an expanded card.
   * The content column carries `Layout.leftMargin: -24`. `SettingItem`'s row has `spacing: 16`, and
     with the label column collapsed RinUI's zero-width filler `Item` still counts as a neighbour
     beside our content, so the item's own inset (58) plus that spacing (16) lands the circle at 74 —

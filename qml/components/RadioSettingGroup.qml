@@ -19,6 +19,11 @@ import RinUI
 Rectangle {
     id: root
 
+    //: For probes and for anyone reading a tree dump: the group is otherwise an
+    //: anonymous `Rectangle`, and "which one is the group" is exactly the question
+    //: a colour or geometry probe asks.
+    objectName: "radioSettingGroup"
+
     default property alias content: column.data
 
     //: Air above and below; each row brings its own vertical padding.
@@ -28,8 +33,18 @@ Rectangle {
     implicitHeight: column.implicitHeight + root.verticalPadding * 2
     color: Theme.currentTheme.colors.cardColor
     radius: Theme.currentTheme.appearance.smallRadius
-    border.width: Theme.currentTheme.appearance.borderWidth
-    border.color: Theme.currentTheme.colors.cardBorderColor
+    //: Explicit, because `Rectangle`'s border *defaults* to 1px black: dropping the
+    //: two lines below is not "no border", it is a black outline.
+    border.width: 0
+    //: No border. The surface already says where the group is, and a 1px border
+    //: *with* a radius is drawn antialiased along its straight edges too: the group's
+    //: x lands on a fractional physical pixel (24px page inset + the expander body's
+    //: 7px padding = 31 logical, ×1.5 = 46.5), so the left and right lines spread over
+    //: two pixels and read as thicker than the header's — which is the same colour and
+    //: width but sits on whole pixels. Win11's own group inside an expanded card has no
+    //: outline either. Wanting one back means either accepting that, or `radius: 0`,
+    //: which draws the border crisply at the cost of square corners inside a rounded
+    //: card.
 
     ColumnLayout {
         id: column
