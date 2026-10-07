@@ -21,6 +21,14 @@ SettingItem {
     property string hint: ""
     //: The setting's value, bound by the caller.
     property bool checked: false
+    //: A control that wants the row's whole width goes here, under the label:
+    //: the column below is this component's own, so it lands inside that column
+    //: rather than beside it in the right-hand slot — and the column is the only
+    //: thing in the row that absorbs the leftover width. Give it
+    //: `Layout.fillWidth: true`, plus a `Layout.leftMargin` of 28 (the hint's)
+    //: if it should line up with the label above it, and a `Layout.topMargin` if
+    //: it needs air: the column's own spacing is 0.
+    property alias field: column.data
 
     //: The user picked this row. The caller writes its setting here, which
     //: comes back down as `checked`.
@@ -59,6 +67,8 @@ SettingItem {
     background: null
 
     ColumnLayout {
+        id: column
+
         //: `SettingItem`'s row carries `spacing: 16`, and with the label column
         //: collapsed RinUI's zero-width filler `Item` still counts as a
         //: neighbour beside this content — so the item's own inset (58) plus

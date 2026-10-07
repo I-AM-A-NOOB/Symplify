@@ -277,16 +277,32 @@ scratch/                        # Preserved experiments — NOT part of the app 
   takes that location over — read its module docstring before touching it — and the consequences are
   an invariant: it is why `import RinUI` must never happen at module level in app code, and why
   `main.py` gets `RinUIWindow` from `prepare()` instead of from `RinUI`.
-- **The settings rows size their input on purpose, not by content.** A `SettingItem` hands its
-  action slot an implicit width, and the row then splits what is left between the label and the
-  control *according to their content widths* — so a control whose size is not pinned resizes with
-  its own text (the LaTeX family combo used to be 46% of its row while the two font-family fields
-  were 61%, and none of the three lined up). The three Typography family rows therefore pin theirs
-  with `Layout.preferredWidth` **and** `Layout.minimumWidth` set to `2 / 3` of the row (both: the
-  preferred alone still gets shrunk, because the label's demand is content-sized too), which lands
-  each at 67% with the label taking the rest. Short-choice rows (theme, backdrop, accent, language)
-  keep a fixed `150` instead — the two shapes are deliberate, so match the kind of control when
-  adding a row.
+- **The settings rows size their input on purpose, not by content**, and there are three shapes.
+  A `SettingItem` hands its action slot an implicit width, and the row then splits what is left
+  between the label and the control *according to their content widths* — so a control whose size is
+  not pinned resizes with its own text.
+  * **A text field goes below its label, at the full width of the row**: `qml/components/
+    SettingFieldRow.qml` (label and hint on top, the control under them). `SettingItem` caps the
+    label column at 60% of the row, so a field beside it can only ever be a fraction — and a field
+    holding a list of font names wants the whole width. Two numbers in that component are
+    load-bearing: the column asks for `Layout.preferredWidth: root.width` (asking to *fill* is not
+    enough — once the label column is collapsed, RinUI's filler `Item` has `fillWidth:
+    leftContent.visible` = false and nothing else in the row absorbs the leftover, so the field
+    would stay at its implicit width), and `Layout.leftMargin: -16` cancels the spacing that the
+    zero-width filler still counts as a neighbour with, landing the label on the same x as every
+    other row's title. Measured on the real page (1100 wide): a field spans 938 of the item's 1040
+    — its content box exactly — at x=88, the same x as the rows above and below it, where `2 / 3`
+    gave 693.
+  * **A control under a radio row's label** goes in `RadioSettingRow`'s `field` slot, which aliases
+    that component's own column: the column is what absorbs the leftover, so a control appended
+    there is full width, where the same control in the right-hand slot would sit beside the radio at
+    its implicit width. Give it `Layout.leftMargin: 28` (the hint's) to line up with the text above
+    it. The bracket-colours field is the one instance. The alias needs the column to have an `id`.
+  * **A short-choice control** (theme, backdrop, accent, language) keeps a fixed `150`, and the one
+    control that is neither a text field nor a short choice — the LaTeX family `ComboBox` — still
+    pins `Layout.preferredWidth` **and** `Layout.minimumWidth` to `2 / 3` of its row (both: the
+    preferred alone still gets shrunk, because the label's demand is content-sized too), which lands
+    it at 67% with the label taking the rest. Match the kind of control when adding a row.
 - **SettingCard / SettingExpander API quirks** (the published docs describe a newer version than the
   installed one): the icon is set with `icon.name:` — assigning `icon:` fails with "read-only
   property"; a `SettingCard`'s bare children land in its **right-hand** slot, while a
@@ -336,6 +352,10 @@ scratch/                        # Preserved experiments — NOT part of the app 
     reach it. With the divider off, that outline is what still reads as a separator between rows
     (measured on the real window: a hairline across every row boundary); a radio row sits on the
     expander body's own colour instead, like the rows in Windows' own settings.
+  * A control that wants the row's whole width is handed in as `field`, which aliases the column
+    below (the radio and its hint) — so the alias needs that column to have an `id`, and the control
+    lands *inside* it, full width, instead of beside the radio in the right-hand slot. The same idea
+    as `SettingFieldRow`, for a row whose label is a radio.
   * The click calls `selected()` **and** restores the `checked` binding
     (`checked = Qt.binding(() => root.checked)`), because Qt writes `checked` itself on the way
     through; the caller just writes its setting in `onSelected`.

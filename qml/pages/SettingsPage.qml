@@ -260,16 +260,18 @@ Item {
                             checked: settingsVM.bracketMode === "custom"
                             onSelected: settingsVM.bracketMode = "custom"
 
-                            TextField {
+                            field: TextField {
                                 id: bracketColorsField
+                                objectName: "bracketColorsField"
 
-                                // The field sits in the row's action slot, the way
-                                // the font rows' fields do, and takes about two
-                                // thirds of it — the label column keeps the rest,
-                                // which is what the wrapped hint needs. Live only
-                                // while this option is the one in use.
-                                Layout.preferredWidth: bracketCustomRow.width * 2 / 3
-                                Layout.minimumWidth: bracketCustomRow.width * 2 / 3
+                                // Under the hint and at the row's full width: the
+                                // column this lands in is the row's own, and it is
+                                // what absorbs the leftover width. The left margin
+                                // is the hint's, past the circle. Live only while
+                                // this option is the one in use.
+                                Layout.fillWidth: true
+                                Layout.leftMargin: 28
+                                Layout.topMargin: 6
                                 enabled: settingsVM.bracketMode === "custom"
                                 placeholderText: qsTr("e.g. #ff6b6b, #ff9f43, #ffd93d")
                                 text: settingsVM.bracketColors
@@ -518,24 +520,19 @@ Item {
                         }
                     }
 
-                    SettingItem {
+                    SettingFieldRow {
                         id: codeFamilyRow
-                        title: qsTr("Font family")
-                        description: page.codeFontNote()
+                        label: qsTr("Font family")
+                        hint: page.codeFontNote()
                         showDivider: false
 
-                        TextField {
+                        field: TextField {
                             id: codeFontField
+                            objectName: "codeFontField"
 
-                            // The row hands the action slot its own implicit width, which
-                            // for a text field or a combo is content-driven: the box would
-                            // resize with the font list and none of the three font rows
-                            // would line up. Pin it to roughly two thirds of the row -- the
-                            // label keeps the rest, which is what the wrapped description
-                            // needs.
+                            // The row owns the width -- it hands the field the whole
+                            // width of the item -- so the field only follows it.
                             Layout.fillWidth: true
-                            Layout.preferredWidth: codeFamilyRow.width * 2 / 3
-                            Layout.minimumWidth: codeFamilyRow.width * 2 / 3
                             placeholderText: qsTr("e.g. Cascadia Mono, Consolas")
                             text: settingsVM.codeFamily
                             Component.onCompleted: cursorPosition = 0
@@ -572,24 +569,19 @@ Item {
                         }
                     }
 
-                    SettingItem {
+                    SettingFieldRow {
                         id: keyboardFamilyRow
-                        title: qsTr("Font family")
-                        description: page.keyboardFontNote()
+                        label: qsTr("Font family")
+                        hint: page.keyboardFontNote()
                         showDivider: false
 
-                        TextField {
+                        field: TextField {
                             id: keyboardFontField
+                            objectName: "keyboardFontField"
 
-                            // The row hands the action slot its own implicit width, which
-                            // for a text field or a combo is content-driven: the box would
-                            // resize with the font list and none of the three font rows
-                            // would line up. Pin it to roughly two thirds of the row -- the
-                            // label keeps the rest, which is what the wrapped description
-                            // needs.
+                            // The row owns the width -- it hands the field the whole
+                            // width of the item -- so the field only follows it.
                             Layout.fillWidth: true
-                            Layout.preferredWidth: keyboardFamilyRow.width * 2 / 3
-                            Layout.minimumWidth: keyboardFamilyRow.width * 2 / 3
                             placeholderText: qsTr("e.g. Cambria, Georgia, serif")
                             text: settingsVM.keyboardFamily
                             Component.onCompleted: cursorPosition = 0
