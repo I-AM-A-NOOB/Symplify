@@ -36,11 +36,6 @@ class CalculatorViewModel(QObject):
     resultChanged = Signal()
     warningOccurred = Signal(str, str)
 
-    #: What the formula area shows while there is no result: typeset notation, so
-    #: the empty state reads as part of the language instead of as a sentence that
-    #: would need a translation per locale.
-    PLACEHOLDER_LATEX = r"\text{result} \in \LaTeX"
-
     def __init__(
         self,
         calculator: Calculator,
@@ -77,8 +72,8 @@ class CalculatorViewModel(QObject):
         #: Theme ink, font size and LaTeX font file, in one value; built by
         #: `MainViewModel`, which owns the settings and sees the theme.
         self._latex_style = LatexStyle()
-        # A fresh page shows the placeholder, so the empty formula area says what
-        # it is for from the first frame.
+        # A fresh page has nothing to typeset: the formula area stays empty and the
+        # outcome box above it carries the placeholder.
         self._refresh_strip()
 
     def _get_input_mode(self) -> int:
@@ -163,19 +158,16 @@ class CalculatorViewModel(QObject):
     def _refresh_strip(self) -> None:
         """Decide what the formula area holds, and render it.
 
-        The result's own LaTeX when it has one; the typeset placeholder while
-        there is no result at all — so the empty area says what it is for, in
-        notation rather than in a sentence that would need translating. A value
-        that has no LaTeX of its own leaves the area empty: it is on the outcome
-        line already, and the placeholder under it would read as a statement
-        about *that* value.
+        The result's own LaTeX, or nothing at all: the area is the formula's alone,
+        and the outcome line above carries whatever there is to *read* — a value, a
+        failure, or the placeholder. (The empty state used to be typeset here, which
+        turned a sentence into artwork and put the placeholder where the formula
+        goes.)
         """
         if self._result_latex:
             self._build_latex_url(self._result_latex)
-        elif self._result_text:
-            self._clear_latex()
         else:
-            self._build_latex_url(self.PLACEHOLDER_LATEX)
+            self._clear_latex()
 
     def set_latex_style(self, style: LatexStyle) -> None:
         """Re-render the current result in a new style.
@@ -214,7 +206,7 @@ class CalculatorViewModel(QObject):
 
     @Slot()
     def clear_result(self) -> None:
-        """Clear the result display area (which then shows the placeholder)."""
+        """Clear the result display area (the outcome box then shows the placeholder)."""
         self._result_text = ""
         self._result_latex = ""
         self._is_error = False

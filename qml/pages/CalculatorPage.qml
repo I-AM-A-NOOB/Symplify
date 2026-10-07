@@ -409,33 +409,46 @@ Item {
                         Layout.fillWidth: true
                         spacing: 8
 
-                        Text {
+                        TextEdit {
+                            id: outcomeBox
+
                             Layout.fillWidth: true
-                            // A RowLayout defaults an item's minimum width to
-                            // its implicit — which for rich text is the *full*
-                            // text's width, so the row would grow past the
-                            // panel instead of squeezing this label. Zero it.
+                            // A RowLayout defaults an item's minimum width to its
+                            // implicit size, so the row would grow past the panel
+                            // instead of squeezing this box. Zero it.
                             Layout.minimumWidth: 0
-                            // The one line that reports the outcome: the value
-                            // — markup, coloured by the same span list the input
-                            // uses, and elided by the viewmodel because
-                            // `Text.elide` is ignored for rich text; or a failure
-                            // — prose, in the critical colour, the substitution
-                            // the History card's result line also makes. The empty
-                            // state is not here: the formula area below carries a
-                            // typeset placeholder, which needs no translation.
+                            // Room for three lines whatever code size the reader
+                            // picked, so the formula below never jumps as the
+                            // outcome changes length.
+                            Layout.preferredHeight: Math.round(settingsVM.codeSize * 4.2)
+                            // What there is to *read*, and the only place that says
+                            // it: the value as markup in the code colours, a
+                            // failure's prose in the critical colour, or the
+                            // placeholder while nothing has been calculated. The
+                            // formula area below is the LaTeX's alone. Selectable —
+                            // a result is something to copy out — but never
+                            // editable, and borderless: a bare `TextEdit` draws no
+                            // background. It wraps instead of eliding (rich text
+                            // ignores `elide`), which is why the viewmodel's
+                            // unelided `highlighted` is the right call here.
                             readonly property bool isProse: calcVM.isError
+                            readonly property bool hasResult: calcVM.resultText !== ""
+                            readOnly: true
+                            selectByMouse: true
+                            persistentSelection: true
+                            wrapMode: TextEdit.Wrap
+                            textFormat: isProse ? TextEdit.PlainText : TextEdit.RichText
                             font: settingsVM.codeFont
-                            textFormat: isProse ? Text.PlainText : Text.RichText
-                            wrapMode: Text.NoWrap
-                            elide: isProse ? Text.ElideRight : Text.ElideNone
-                            color: calcVM.isError
+                            color: isProse
                                 ? Theme.currentTheme.colors.systemCriticalColor
-                                : Theme.currentTheme.colors.textColor
-                            text: calcVM.isError
+                                : (hasResult
+                                    ? Theme.currentTheme.colors.textColor
+                                    : Theme.currentTheme.colors.textSecondaryColor)
+                            text: isProse
                                 ? calcVM.errorMessage
-                                : (vm ? vm.highlightedElided(calcVM.resultText, width,
-                                                             Theme.isDark()) : "")
+                                : (hasResult
+                                    ? (vm ? vm.highlighted(calcVM.resultText, Theme.isDark()) : "")
+                                    : qsTr("result ∈ LaTeX"))
                         }
 
                         Button {

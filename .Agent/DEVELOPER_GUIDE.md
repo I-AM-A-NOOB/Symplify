@@ -722,7 +722,7 @@ scratch/                        # Preserved experiments — NOT part of the app 
   produces 27 MB**, on the UI thread, once per history card, with the data URL held per entry.
   `latex_to_svg` returns `''` above the cap, which is the `('', 0, 0)` contract every surface
   already leans on (`test_latex_style_renders_and_reports_empty`): the strip takes no space and the
-  result line above carries the value, elided to the panel width. The cap is what makes the raised
+  outcome box above carries the value. The cap is what makes the raised
   digit cap safe — with `str()` unlimited a result can be arbitrarily long, and this is where that
   stops.
 
@@ -747,13 +747,10 @@ scratch/                        # Preserved experiments — NOT part of the app 
   resolved to -8 — the formula's top was clipped. It takes `naturalWidth/naturalHeight/source` and
   collapses to zero height when there is no artwork; it carries **no** empty-state text of its own —
   what the area shows is the viewmodel's decision (`CalculatorViewModel._refresh_strip`), which is
-  either the result's artwork, the typeset placeholder, or nothing at all. The Calculator's empty
-  state is that placeholder: `PLACEHOLDER_LATEX = r"\text{result} \in \LaTeX"`, rendered through the
-  same `latex_to_svg` path as a result (so it follows the LaTeX font, size and theme colour), which
-  makes it "notation" rather than a sentence that would need a translation per locale — and it keeps
-  the area's height steady, so the plot area below does not jump between states. A *failure*, and a
-  value that has no LaTeX of its own, are reported on the outcome line instead and leave the area
-  empty (a placeholder under a value would read as a statement about that value).
+  either the result's artwork or nothing at all. The Calculator's empty state is *not* here: the
+  outcome box above the strip carries every piece of text the area has to report — the placeholder, a
+  failure's prose and the value itself — so the formula area is the LaTeX's alone, and a state with no
+  formula collapses it (which also keeps the plot area below from jumping between states).
   `barRoom` (16) is the height of RinUI's overlay bar along the strip's bottom edge — a 6px
   thumb inside a 12px control, plus the 16px arrow `ToolButton`s that overhang it — and is
   deliberately hardcoded against a third party's internals, in this one place.
@@ -829,7 +826,7 @@ One lexer, one span list, two renderers. Anything that colours code contributes 
 - **`Text.elide` is silently ignored for `Text.RichText`** — probed on Qt 6.11:
   plain and styled text truncate, rich text paints at its full painted width and
   bleeds over whatever sits beside it (that was the overflow on the Calculator's
-  result line, the History card's two lines and the Variables cells). The
+  outcome box, the History card's two lines and the Variables cells). The
   escape hatch, `Text.StyledText`, is not one: it parses `<span style="color:…">`
   but renders `&nbsp;` and even `&lt;` **literally**, so switching would break
   the escaping and the `=`-alignment padding. The elision therefore happens on
