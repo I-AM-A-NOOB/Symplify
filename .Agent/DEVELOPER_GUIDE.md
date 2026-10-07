@@ -1447,6 +1447,12 @@ Data-file pitfalls for frozen builds (update this list when you add data-reading
   and the build must produce the exe. It builds *before* it pushes, so a failed build leaves nothing
   remote to clean up. The archive is written **under `build/`** (`make_zip`), next to the tree it
   packages: the repository root is no place for a 100 MB artifact, and `build/` is already ignored.
+  A push that cannot reach GitHub is the boring failure and it arrives *after* the expensive part, so
+  the package is made first and the failure says what is done, what is not, and how to finish:
+  `--publish-only` re-runs just the publishing half — no bump, no build, no arguments (it reads the
+  version from pyproject, insists on a clean tree and that `v<version>` points at HEAD) — pushing,
+  packaging the existing `build/main.dist` and creating the Release, uploading over one a previous
+  attempt had already made.
 
 ## History of routes (read-only branches)
 

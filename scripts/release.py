@@ -129,28 +129,87 @@ def make_zip(version: str, dist_dir: Path = BUILD_DIST) -> Path:
     return Path(archive)
 
 
+def tag_exists(tag: str) -> bool:
+    """True when the local repository has ``tag``, pointed at HEAD.
+
+    The tag has to describe exactly what was built, so a tag that exists but sits on
+    another commit is not a release — it is a stale one.
+    """
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True,
+                          text=True, check=True).stdout.strip()
+    tagged = subprocess.run(["git", "rev-list", "-n", "1", tag], cwd=ROOT,
+                            capture_output=True, text=True)
+    return tagged.returncode == 0 and tagged.stdout.strip() == head
+
+
 def publish(version: str) -> None:
-    """Push the version and the tag, then let `gh` create the Release."""
+    """Push the version and the tag, then let `gh` create the Release.
+
+    Network failures are the boring kind of release failure, and they arrive *after*
+    the expensive part: the package is made first (so it is ready either way), and a
+    push that cannot reach GitHub says what is done, what is not, and the one command
+    that finishes it.
+    """
     tag = f"v{version}"
-    subprocess.run(["git", "push", "origin", "main"], cwd=ROOT, check=True)
-    subprocess.run(["git", "push", "origin", tag], cwd=ROOT, check=True)
-    subprocess.run(["gh", "release", "create", tag, str(make_zip(version)),
-                    "--title", f"Symplify {version}", "--generate-notes"],
-                   cwd=ROOT, check=True)
+    archive = make_zip(version)
+
+    for args in (["git", "push", "origin", "main"], ["git", "push", "origin", tag]):
+        result = subprocess.run(args, cwd=ROOT, capture_output=True, text=True)
+        if result.returncode:
+            detail = (result.stderr or result.stdout).strip()
+            sys.exit(
+                f"pushing {args[-1]} failed:\n{detail}\n"
+                f"\nNothing was published. The build and {archive.name} are ready, and the"
+                f"\ntag is committed locally; when the network is back, finish with:"
+                f"\n\n    uv run python scripts/release.py --publish-only\n"
+            )
+
+    create = subprocess.run(
+        ["gh", "release", "create", tag, str(archive),
+         "--title", f"Symplify {version}", "--generate-notes"],
+        cwd=ROOT, capture_output=True, text=True,
+    )
+    if create.returncode:
+        text = (create.stderr + create.stdout).strip()
+        if "already exists" in text:
+            # A previous attempt got as far as the Release but not the asset.
+            subprocess.run(["gh", "release", "upload", tag, str(archive), "--clobber"],
+                           cwd=ROOT, check=True)
+            print(f"Release {tag} already existed; uploaded {archive.name} to it")
+            return
+        sys.exit(f"`gh release create` failed:\n{text}")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "version",
-        help="'patch' | 'minor' | 'major', or an explicit SemVer like 0.3.5",
+        "version", nargs="?",
+        help="'patch' | 'minor' | 'major', or an explicit SemVer like 0.3.5 "
+             "(not needed with --publish-only, which reads it from pyproject)",
     )
     parser.add_argument("--tag", action="store_true",
                         help="commit and tag v<version> after bumping")
+    parser.add_argument(
+        "--publish-only", action="store_true",
+        help="re-run only the publishing half of --publish (no bump, no build): push the "
+             "version commit and its tag, package the existing build/main.dist and create "
+             "the Release — for a release whose build succeeded but whose push did not",
+    )
     parser.add_argument("--publish", action="store_true",
                         help="implies --tag, then build, package and `gh release create` "
                              "(the release path, since the CI runner cannot build this)")
     args = parser.parse_args()
+
+    if args.publish_only:
+        if repo_is_dirty():
+            sys.exit("working tree is dirty — commit or stash first: a release must "
+                     "come from a committed tree")
+        version_str = ".".join(str(p) for p in read_version())
+        if not tag_exists(f"v{version_str}"):
+            sys.exit(f"no v{version_str} tag at HEAD — nothing to finish; run "
+                     f"`release.py {version_str} --publish` (or bump) instead")
+        publish(version_str)
+        return 0
 
     if args.publish:
         # The tag is what `gh release create` attaches to, so it is not optional.
@@ -160,6 +219,9 @@ def main() -> int:
         if repo_is_dirty():
             sys.exit("working tree is dirty — commit or stash first: a release must "
                      "come from a committed tree")
+
+    if not args.version:
+        parser.error("a version is required unless --publish-only is used")
 
     cur = read_version()
     if re.fullmatch(r"\d+\.\d+\.\d+", args.version):
