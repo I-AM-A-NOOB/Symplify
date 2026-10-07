@@ -637,8 +637,20 @@ Item {
                             model: [qsTr("Default (STIX Two Math)"), ...page.mathFonts]
                             currentIndex: page.indexOf(page.mathFontValues,
                                                        settingsVM.latexFont)
-                            onActivated: (index) =>
-                                settingsVM.latexFont = page.mathFontValues[index]
+                            // The list is built from a cheap scan (does the file
+                            // carry a MATH table?), so a font whose table the
+                            // typesetter cannot actually read is in it. Proving
+                            // that costs a real layout, so it happens here — on
+                            // the one font the user picked. A refusal leaves the
+                            // setting alone, puts the box back and says why.
+                            onActivated: (index) => {
+                                const family = page.mathFontValues[index]
+                                if (settingsVM.trySetLatexFont(family))
+                                    return
+                                currentIndex = page.indexOf(page.mathFontValues,
+                                                            settingsVM.latexFont)
+                                fontRejectDialog.open()
+                            }
                         }
                     }
                 }
@@ -769,6 +781,25 @@ Item {
         title: qsTr("Settings")
         flickable: scroll
         inlineRow: inlineTitle
+    }
+
+    // A font the typesetter cannot read never becomes the setting: the page says
+    // which one it was and why, then the reader can pick another (the built-in
+    // STIX Two Math always works — it is the first entry).
+    Dialog {
+        id: fontRejectDialog
+
+        title: qsTr("That font cannot be used")
+        standardButtons: Dialog.Ok
+
+        Text {
+            Layout.fillWidth: true
+            width: 320
+            wrapMode: Text.WordWrap
+            typography: Typography.Body
+            color: Theme.currentTheme.colors.textColor
+            text: qsTr("%1 carries a math table the typesetter cannot read, so results would render in the built-in font instead. Pick another one.").arg(settingsVM.latexFontError)
+        }
     }
 
     // The accent is applied by MainWindow, which owns it (see applyAccent there).

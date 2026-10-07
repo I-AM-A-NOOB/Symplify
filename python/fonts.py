@@ -171,15 +171,31 @@ def _typesets(path: str) -> bool:
         return False
 
 
+def math_font_typesets(family: str) -> bool:
+    """True when ziamath can actually lay text out with ``family``.
+
+    The expensive half, kept out of the scan that builds the dropdown: a MATH table
+    that fontTools can *find* is not one ziafont can *read* (its coverage parser
+    knows formats 1 and 2; `UnifontEX-Regular·latin.ttf` reports 20), and the only
+    honest test is a trial render — of the file ziamath would actually be handed, so
+    a collection is extracted first. An empty or unknown family means the bundled
+    default, which always works.
+    """
+    path = math_font_path(family)
+    if not path:
+        return True
+    return _typesets(path)
+
+
 @lru_cache(maxsize=1)
 def math_font_choices() -> Tuple[Dict[str, Any], ...]:
     """System fonts that can render math, as ``{family, path, collection}``.
 
-    Cached: the scan reads every installed font (~0.2 s for 500 files here) and
-    trial-renders each MATH candidate, so it must not run per query. "Can render
-    math" is checked by rendering, not by looking for a MATH table: a font ziamath
-    cannot typeset would otherwise sit in the dropdown and silently fall back to the
-    bundled STIX Two Math (see ``latex_to_svg``), which is not what the user picked.
+    Cached: the scan reads the table directory of every installed font (~0.2 s for
+    500 files here), so it must not run per query. The check is deliberately cheap —
+    a MATH table that is *present* — because proving that a font *works* costs a real
+    layout: see ``math_font_typesets``, which the settings page runs on the one font
+    the user picks instead of on every candidate.
     """
     choices: List[Dict[str, Any]] = []
     seen = set()
@@ -188,23 +204,11 @@ def math_font_choices() -> Tuple[Dict[str, Any], ...]:
             key = family.casefold()
             if key in seen:
                 continue
-            # The file ziamath would actually be handed — a collection has to be
-            # extracted first — and the only honest test of whether it works.
-            collection = _is_collection(path)
-            usable = _extract_collection(path, family) if collection else str(path)
-            if not usable or not _typesets(usable):
-                warnings.warn(
-                    f"{family} ({path.name}) cannot be typeset by ziamath; "
-                    "leaving it out of the LaTeX font list",
-                    RuntimeWarning,
-                    stacklevel=2,
-                )
-                continue
             seen.add(key)
             choices.append({
                 "family": family,
                 "path": str(path),
-                "collection": collection,
+                "collection": _is_collection(path),
             })
     return tuple(sorted(choices, key=lambda c: c["family"].casefold()))
 

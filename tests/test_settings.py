@@ -180,6 +180,30 @@ def test_invalid_values_fall_back_to_defaults():
     assert store.get("window.x") is None
 
 
+def test_picking_a_font_that_cannot_be_typeset_is_refused():
+    """The dropdown's scan is cheap, so it can list a font ziamath cannot read.
+    `trySetLatexFont` is where that is proven — with a real layout, hence on the one
+    font the user picked — and a refusal must leave the setting alone and name the
+    family, so the page can say which font it was."""
+    from python.viewmodel import settings_viewmodel as svm
+
+    store = store_at(temp_dir() / CONFIG_FILENAME)
+    viewmodel = svm.SettingsViewModel(store)
+    store.set("workspace.latex_font", "Cambria Math")
+
+    original = svm.math_font_typesets
+    svm.math_font_typesets = lambda family: family != "UnifontExMono"
+    try:
+        assert viewmodel.trySetLatexFont("UnifontExMono") is False
+        assert viewmodel.latexFontError == "UnifontExMono"
+        assert store.get("workspace.latex_font") == "Cambria Math"   # untouched
+        assert viewmodel.trySetLatexFont("Cambria Math") is True
+        assert viewmodel.latexFontError == ""
+        assert store.get("workspace.latex_font") == "Cambria Math"
+    finally:
+        svm.math_font_typesets = original
+
+
 def test_accent_mode_is_validated_and_persisted():
     path = temp_dir() / CONFIG_FILENAME
     store = store_at(path)

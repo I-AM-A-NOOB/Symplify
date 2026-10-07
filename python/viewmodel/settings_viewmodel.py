@@ -34,6 +34,7 @@ from ..fonts import (
     expand_keyword,
     math_font_choices,
     math_font_path,
+    math_font_typesets,
     split_families,
 )
 from ..keyboard_config import label_glyphs
@@ -109,6 +110,7 @@ class SettingsViewModel(QObject):
 
     changed = Signal()
     latexSizeChanged = Signal()
+    latexFontErrorChanged = Signal()
     accentChanged = Signal()
 
     def __init__(
@@ -126,6 +128,8 @@ class SettingsViewModel(QObject):
         """
         super().__init__(parent)
         self._store = store
+        #: The family the last refused pick named, for the page's dialog.
+        self._latex_font_error = ""
         #: OS accent per colour scheme ({False: light, True: dark}); empty when
         #: the platform cannot be asked for both (see _capture_system_accents).
         self._system_accents: dict = {}
@@ -473,6 +477,25 @@ class SettingsViewModel(QObject):
 
     def _set_latex_font(self, family: str) -> None:
         self._store.set("workspace.latex_font", family)
+
+    @Slot(str, result=bool)
+    def trySetLatexFont(self, family: str) -> bool:
+        """Apply ``family``, but only if ziamath can actually typeset with it.
+
+        The scan behind the dropdown is cheap on purpose, so a font whose MATH table
+        is present but unreadable can be in it. Proving it costs a real layout, which
+        is why it happens here — on the one font the user picked — rather than for
+        every candidate. A refusal stores the family for the page's dialog and leaves
+        the setting alone.
+        """
+        if not math_font_typesets(family):
+            self._latex_font_error = family
+            self.latexFontErrorChanged.emit()
+            return False
+        self._latex_font_error = ""
+        self.latexFontErrorChanged.emit()
+        self.latexFont = family
+        return True
         self.changed.emit()
 
     def _get_code_font_family(self) -> str:
@@ -572,6 +595,14 @@ class SettingsViewModel(QObject):
         character would be visible.
         """
         return _chain_missing_glyphs(self._get_keyboard_family(), label_glyphs())
+
+    def _get_latex_font_error(self) -> str:
+        return self._latex_font_error
+
+    #: The family a refused pick named, so the page can say which font it was.
+    latexFontError = Property(
+        str, _get_latex_font_error, notify=latexFontErrorChanged
+    )
 
     def _get_latex_font_path(self) -> str:
         """The font *file* to hand ziamath ('' = its bundled STIX Two Math).

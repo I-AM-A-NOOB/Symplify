@@ -1240,15 +1240,20 @@ backdrop floats up from 10px below while fading in, and carries the page's own t
     list showing only its tail. The body's `SettingItem` description also reports what the chain
     resolves to ("Starts with X, then N fallback(s)") and any glyph no family in it can draw, neither
     of which is visible from the candidate list.
-- **A configured LaTeX font that cannot be parsed falls back to the bundled one.** `python/fonts.py`
-  keeps a font when a `MATH` table is *present* (`_math_families`), which is a cheaper check than
-  parsing it — so a font whose MATH subtable fontTools cannot read still reaches the dropdown and the
-  config, and ziamath **fails outright rather than substituting** a font. A `latex_font` of
-  `UnifontExMono` does exactly that (`ValueError: Bad coverage table format 20` from
-  `UnifontEX-Regular·latin.ttf`), and because every LaTeX surface catches its own failure, it looked
-  like "LaTeX is broken" with an empty Log. `latex_to_svg` now retries without the font and warns
-  with the file and the reason, so the feature survives a bad file and the user is told which one it
-  was.
+- **A config that names a font ziamath cannot read still renders — and picking one is refused.** The
+  dropdown's scan is cheap on purpose (`_math_families` asks whether a `MATH` table is *present*, a
+  directory lookup `TTFont(lazy=True)` answers without parsing anything), so a font whose MATH table
+  fontTools can find but ziafont cannot *read* is in the list: `UnifontEX-Regular·latin.ttf` reports
+  coverage format 20 and ziafont's parser (`ziafont/tables.py:47`) knows 1 and 2, so it fails at
+  layout time with `ValueError: Bad coverage table format 20`. Two defences, because the cost of
+  proving it is a real layout:
+  * **On selection** (`settingsVM.trySetLatexFont`, wired to the ComboBox's `onActivated`): the one
+    font the user picked is trial-rendered (`fonts.math_font_typesets`), and a refusal leaves the
+    setting untouched, puts the box back and opens a dialog naming the font. Keeping this out of the
+    scan is why the dropdown still opens in ~0.3 s rather than ~1.3 s.
+  * **On render** (`latex_to_svg`): a font that slips through anyway — an older config, a font that
+    breaks after a system update — is retried without it, so the feature survives and the Log says
+    which file and why.
 - **Font fallback is a real Qt feature, and the app uses it — but not through QML's `font` group.**
   Qt resolves each character against an ordered family list (`QFont.setFamilies`), so a glyph the
   first face lacks is drawn from the next one that has it. Two consequences shape the code:
