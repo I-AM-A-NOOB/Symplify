@@ -3,6 +3,10 @@ module Symplify.Components
 # CodeSurface is the box behind the calculator's code inputs, in the code theme's
 # own colours.
 CodeSurface 1.0 CodeSurface.qml
+# CopyableLabel is the read-only, borderless text box that reports a result —
+# the calculator's outcome and a history card's lines. Selectable, never editable.
+# Its `fullText` carries what the elided view dropped, so a copy is whole.
+CopyableLabel 1.0 CopyableLabel.qml
 # ExpanderPanel has no in-tree user yet; kept deliberately as the plain-Expander
 # counterpart to ExpanderRow (same cursor fix) for future pages.
 ExpanderPanel 1.0 ExpanderPanel.qml
@@ -18,7 +22,7 @@ PageHeaderRow 1.0 PageHeaderRow.qml
 PageScaffold 1.0 PageScaffold.qml
 # RadioSettingRow is a `SettingItem` whose radio leads its own label — the shape a
 # short list of choices takes, and the one bare `SettingItem` children cannot
-# express (they land on the right).
+# express (they land in the right).
 RadioSettingRow 1.0 RadioSettingRow.qml
 SearchBar 1.0 SearchBar.qml
 SegmentedItem 1.0 SegmentedItem.qml

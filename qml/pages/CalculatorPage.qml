@@ -466,20 +466,20 @@ Item {
                             //: Living inside the scroll area rather than beside the copy
                             //: buttons is what makes a long outcome scroll with the formula
                             //: instead of pushing it out of the window.
-                            TextEdit {
+                            //: The same component the history cards use (see
+                            //: `CopyableLabel`): read-only, borderless, selectable,
+                            //: no right-click menu. The calculator's outcome and a
+                            //: history result line are the same kind of text.
+                            CopyableLabel {
                                 id: outcomeBox
 
                                 Layout.fillWidth: true
                                 Layout.minimumWidth: 0
                                 Layout.preferredHeight: Math.round(settingsVM.codeSize * 4.2)
+                                wrapMode: TextArea.Wrap
+                                textFormat: isProse ? TextArea.PlainText : TextArea.RichText
                                 readonly property bool isProse: calcVM.isError
                                 readonly property bool hasResult: calcVM.resultText !== ""
-                                readOnly: true
-                                selectByMouse: true
-                                persistentSelection: true
-                                wrapMode: TextEdit.Wrap
-                                textFormat: isProse ? TextEdit.PlainText : TextEdit.RichText
-                                font: settingsVM.codeFont
                                 color: isProse
                                     ? Theme.currentTheme.colors.systemCriticalColor
                                     : (hasResult

@@ -259,39 +259,39 @@ Item {
                     // line below: what you typed is as much of a takeaway as
                     // what came back, and it was the one line on the card that
                     // could not be selected. Same dressing as the result line.
-                    QQC2.TextArea {
+                    //: One shared component for both pages' read-only text —
+                    //: selectable, never editable, and without RinUI's right-click
+                    //: menu (a read-only box offers neither Cut nor Paste). The
+                    //: `TapHandler` hands a plain click to the card and leaves a
+                    //: drag to the text: the box owns left presses for selecting,
+                    //: which is what stopped the card's own click from firing.
+                    CopyableLabel {
                         id: inputLine
                         objectName: "inputLine"
 
                         Layout.fillWidth: true
-                        // Rich text's implicit width is the full text, and a
-                        // layout defaults an item's minimum to that — zero it
-                        // so the row squeezes this line instead of overflowing.
                         Layout.minimumWidth: 0
                         Layout.alignment: Qt.AlignVCenter
-                        readOnly: true
-                        selectByMouse: true
-                        persistentSelection: true
-                        wrapMode: TextArea.NoWrap
-                        // A bare `TextEdit` styles itself from RinUI's text
-                        // defaults, so the metrics have to be named: without
-                        // them the line renders a size smaller than the result
-                        // line under it, and the row's height follows.
-                        font: settingsVM.codeFont
-                        topPadding: 0
-                        bottomPadding: 0
-                        leftPadding: 0
-                        rightPadding: 0
                         color: Theme.currentTheme.colors.textColor
-                        // `Text.elide` is ignored for rich text, so the
-                        // expression is elided by the viewmodel, on the plain
-                        // string, to what remains of the line beside the prefix.
-                        textFormat: TextArea.RichText
+                        //: The raw expression, for every copy path (see
+                        //: `CopyableLabel.fullText`: the elided view cannot
+                        //: select what the truncation dropped).
+                        fullText: card.mode === "Assign"
+                            ? card.name + " " + card.op + " " + card.expression
+                            : card.expression
                         text: card.inputPrefix
                             + (vm ? vm.highlightedElided(
-                                        card.expression,
-                                        width - inputPrefixMetrics.width,
-                                        Theme.isDark()) : "")
+                                       card.expression,
+                                       width - inputPrefixMetrics.width,
+                                       Theme.isDark()) : "")
+
+                        TapHandler {
+                            acceptedButtons: Qt.LeftButton
+                            onTapped: {
+                                page.keyboardNavigation = false
+                                page.currentIndex = card.index
+                            }
+                        }
                     }
 
                     // Always visible and enabled -- only the opacity
@@ -339,27 +339,20 @@ Item {
                 // thing you take away, and only the calculator's outcome box
                 // was. It draws no background of its own and sits at its
                 // line height, so the card does not move.
-                QQC2.TextArea {
+                CopyableLabel {
+                    id: resultLine
                     objectName: "resultLine"
+
                     Layout.fillWidth: true
                     Layout.minimumWidth: 0
-                    readOnly: true
-                    selectByMouse: true
-                    persistentSelection: true
-                    // Code text: the aligned `= result` line. The name-length
-                    // padding aligns it under the assignment operator, so it
-                    // has to stay monospace for the alignment to hold. The
-                    // result is elided by the viewmodel to what remains beside
-                    // the padding: `Text.elide` is ignored for rich text.
-                    font: settingsVM.codeFont
+                    wrapMode: card.isError ? TextArea.Wrap : TextArea.NoWrap
+                    textFormat: card.isError ? TextArea.PlainText : TextArea.RichText
                     color: card.isError
                         ? card.errorColor
                         : Theme.currentTheme.colors.textSecondaryColor
-                    wrapMode: card.isError ? TextArea.Wrap : TextArea.NoWrap
-                    // Rich text collapses runs of spaces, so the padding that
-                    // holds `=` under the assignment operator has to be
-                    // non-breaking. A failure is prose, so it stays plain.
-                    textFormat: card.isError ? TextArea.PlainText : TextArea.RichText
+                    //: The whole result, for the copy paths; a failed entry's
+                    //: prose is not elided, so it is the text.
+                    fullText: card.isError ? card.error : card.result
                     text: card.isError
                         ? card.error
                         : card.resultPrefix
@@ -367,6 +360,14 @@ Item {
                                       card.result,
                                       width - resultPrefixMetrics.width,
                                       Theme.isDark()) : "")
+
+                    TapHandler {
+                        acceptedButtons: Qt.LeftButton
+                        onTapped: {
+                            page.keyboardNavigation = false
+                            page.currentIndex = card.index
+                        }
+                    }
                 }
 
                 // Rendered result, horizontally scrollable (see `MathStrip`
@@ -548,6 +549,14 @@ Item {
                         else
                             vm.sendToCode(card.expression)
                     }
+                }
+
+                //: The expression itself, before any of the result items: it is
+                //: what the reader typed, and on a page of cards it is the one
+                //: thing the *input* line above already elides.
+                MenuItem {
+                    text: qsTr("Copy expression")
+                    onTriggered: vm.copyText(card.expression)
                 }
 
                 MenuSeparator {}
