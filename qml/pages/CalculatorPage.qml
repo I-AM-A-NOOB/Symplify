@@ -121,12 +121,36 @@ Item {
                 text: qsTr("Calculator")
             }
 
+            //: The page's one loud action, outside the bar: it is what this page is
+            //: *for*, and it is the only thing here that acts on the input as a
+            //: whole. Accent-styled, which RinUI's `Button` draws as its primary
+            //: fill — `highlighted`, never `flat`, since `flat` outranks
+            //: `highlighted` in the colour choice.
+            Button {
+                id: calculateButton
+
+                highlighted: true
+                text: qsTr("Calculate")
+                //: The accent name from the icon font RinUI ships.
+                icon.name: "ic_fluent_calculator_20_regular"
+                icon.color: enabled
+                    ? Theme.currentTheme.colors.textAccentColor
+                    : Theme.currentTheme.colors.textDisabledColor
+
+                ToolTip {
+                    delay: 500
+                    visible: parent.hovered
+                    text: parent.text
+                }
+
+                onClicked: runCalculation()
+            }
+
             ToolSeparator {}
 
-            //: Every action in this bar is an icon and its tooltip: the bar is
-            //: narrow, and the title already says what the page is. The bar folds
-            //: whatever does not fit behind its own "more" button, so adding an
-            //: action here costs the row nothing.
+            //: The bar's own row of editing actions, each an icon with its
+            //: tooltip. The bar folds whatever does not fit behind its own "more"
+            //: button, so adding an action to it costs the row nothing.
             CommandBar {
                 id: calcCommandBar
 
@@ -134,11 +158,6 @@ Item {
                 //: they hug the left edge this bar was given.
                 contentAlignment: Qt.AlignLeft
 
-                Action {
-                    text: qsTr("Calculate")
-                    icon.name: "ic_fluent_calculator_20_regular"
-                    onTriggered: runCalculation()
-                }
                 Action {
                     text: qsTr("Clear input")
                     icon.name: "ic_fluent_clear_formatting_20_regular"
@@ -154,46 +173,52 @@ Item {
                     icon.name: "ic_fluent_arrow_redo_20_regular"
                     onTriggered: redoInput()
                 }
-                //: Examples, as a submenu rather than a fixed row of its own: the
-                //: bar is narrow, and these five fill the input with a starting
-                //: expression instead of acting on what is there. RinUI's own
-                //: `Menu` holds them (the same one the bar folds into), opened
-                //: under the bar itself — an `Action` has no button of its own to
-                //: anchor to while it is folded away.
-                Action {
-                    text: qsTr("Examples")
-                    icon.name: "ic_fluent_math_formula_20_regular"
-                    onTriggered: examplesMenu.popup(
-                        calcCommandBar.width / 2, calcCommandBar.height + 4)
-                }
             }
 
-            Rin.Menu {
-                    id: examplesMenu
+            ToolSeparator {}
 
-                    MenuItem {
-                        text: "diff(x**2, x)"
-                        onTriggered: setExample("diff(x**2, x)")
-                    }
-                    MenuItem {
-                        text: "integrate(x**2, x)"
-                        onTriggered: setExample("integrate(x**2, x)")
-                    }
-                    MenuItem {
-                        text: "limit(sin(x)/x, x, 0)"
-                        onTriggered: setExample("limit(sin(x)/x, x, 0)")
-                    }
-                    MenuItem {
-                        text: "solve(x**2 - 4, x)"
-                        onTriggered: setExample("solve(x**2 - 4, x)")
-                    }
-                    MenuItem {
-                        text: "Matrix([[1, 2], [3, 4]])"
-                        onTriggered: setExample("Matrix([[1, 2], [3, 4]])")
-                    }
+            //: The examples, as a dropdown of their own rather than a member of the
+            //: bar: they write into the input instead of acting on it, which makes
+            //: them a different kind of thing from the row of actions — and the
+            //: bar's own folding would fold them away as though they were one more
+            //: action. Subtle-styled: the accent on Calculate is the page's one
+            //: shout, and this is the other side of it.
+            DropDownButton {
+                id: examplesButton
+
+                flat: true
+                text: qsTr("Examples")
+                icon.name: "ic_fluent_math_formula_20_regular"
+                icon.color: enabled
+                    ? Theme.currentTheme.colors.textColor
+                    : Theme.currentTheme.colors.textDisabledColor
+                ToolTip {
+                    delay: 500
+                    visible: parent.hovered
+                    text: parent.text
                 }
 
-            Item { Layout.fillWidth: true }
+                MenuItem {
+                    text: "diff(x**2, x)"
+                    onTriggered: setExample("diff(x**2, x)")
+                }
+                MenuItem {
+                    text: "integrate(x**2, x)"
+                    onTriggered: setExample("integrate(x**2, x)")
+                }
+                MenuItem {
+                    text: "limit(sin(x)/x, x, 0)"
+                    onTriggered: setExample("limit(sin(x)/x, x, 0)")
+                }
+                MenuItem {
+                    text: "solve(x**2 - 4, x)"
+                    onTriggered: setExample("solve(x**2 - 4, x)")
+                }
+                MenuItem {
+                    text: "Matrix([[1, 2], [3, 4]])"
+                    onTriggered: setExample("Matrix([[1, 2], [3, 4]])")
+                }
+            }
 
         }
 

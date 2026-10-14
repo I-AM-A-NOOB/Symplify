@@ -259,18 +259,6 @@ Item {
                     CopyableLabel {
                         id: inputLine
                         objectName: "inputLine"
-
-                        Layout.fillWidth: true
-                        Layout.minimumWidth: 0
-                        Layout.alignment: Qt.AlignVCenter
-                        color: Theme.currentTheme.colors.textColor
-                        //: The whole expression, never a truncation of it: the
-                        //: box clips at the row's width, the selection spans all
-                        //: of it, and the copy is what was typed.
-                        text: card.inputPrefix
-                            + (vm ? vm.highlighted(
-                                       card.expression, Theme.isDark()) : "")
-
                         TapHandler {
                             acceptedButtons: Qt.LeftButton
                             onTapped: {
@@ -343,6 +331,12 @@ Item {
                         : card.resultPrefix
                           + (vm ? vm.highlighted(
                                       card.result, Theme.isDark()) : "")
+
+                    onRightClicked: (mx, my) => {
+                        page.keyboardNavigation = false
+                        page.currentIndex = card.index
+                        entryMenu.popup(mx, my)
+                    }
 
                     TapHandler {
                         acceptedButtons: Qt.LeftButton
@@ -489,7 +483,7 @@ Item {
                 onTapped: (eventPoint) => {
                     page.keyboardNavigation = false
                     page.currentIndex = index
-                    entryMenu.popup(eventPoint.position)
+                    entryMenu.popup(eventPoint.scenePosition)
                 }
             }
 
@@ -523,6 +517,14 @@ Item {
             Menu {
                 id: entryMenu
 
+                //: Keep the position `popup()` was given. Without it, RinUI's
+                //: `Menu` animates `x`/`y` towards its own `posX`/`posY`, which
+                //: are derived from `position` (Bottom by default: centred under
+                //: the parent) — so a menu told to open at the pointer lands
+                //: wherever the delegate happens to be instead. `None` is the
+                //: mode that defers to the caller.
+                position: Position.None
+
                 MenuItem {
                     text: qsTr("Send to input")
                     onTriggered: {
@@ -532,14 +534,6 @@ Item {
                         else
                             vm.sendToCode(card.expression)
                     }
-                }
-
-                //: The expression itself, before any of the result items: it is
-                //: what the reader typed, and on a page of cards it is the one
-                //: thing the *input* line above already elides.
-                MenuItem {
-                    text: qsTr("Copy expression")
-                    onTriggered: vm.copyText(card.expression)
                 }
 
                 MenuSeparator {}
@@ -556,6 +550,10 @@ Item {
                     text: qsTr("Copy LaTeX")
                     enabled: !card.isError
                     onTriggered: vm.copyText(card.latex)
+                }
+                MenuItem {
+                    text: qsTr("Copy expression")
+                    onTriggered: vm.copyText(card.expression)
                 }
             }
         }

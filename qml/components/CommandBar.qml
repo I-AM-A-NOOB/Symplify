@@ -11,11 +11,15 @@ import RinUI as Rin
 // is enabled, what is checked or what it does — which is what a hand-written
 // "more" menu gets wrong the first time an action gains a condition.
 //
-// The bar takes the room it is given (`Layout.fillWidth`) and lays its buttons
-// out from the right edge, so the page's title keeps the left. How many fit is
-// recomputed whenever the width, the action list or the theme changes — the theme
-// because icon sizes come from it, and a stale count would keep one button too
-// many on screen.
+// The bar is exactly as wide as the buttons it is showing — no `Layout.fillWidth`:
+// the bar paints nothing of its own, so claiming a whole row's worth of width
+// only chased the *next* item in the row out to the far edge (the Calculator's
+// Examples), and bought folding nothing it did not already have, since a row
+// layout shrinks its children to their available share anyway. Buttons hug the
+// chosen edge, so the page's title keeps the left. How many fit is recomputed
+// whenever the width, the action list or the theme changes — the theme because
+// icon sizes come from it, and a stale count would keep one button too many on
+// screen.
 //
 // This is the QML answer to qfluentwidgets' `CommandBar`, which re-parents real
 // widgets into its overflow menu. QML cannot re-parent declaratively, and doing
@@ -82,7 +86,6 @@ Item {
 
     implicitWidth: row.implicitWidth
     implicitHeight: row.implicitHeight
-    Layout.fillWidth: true
 
     RowLayout {
         id: row
@@ -115,12 +118,19 @@ Item {
                 //: 136, 152, 301, 310 px against 44 for the same button icon-only).
                 //: The label belongs in the tooltip, which is where a bar of icons
                 //: keeps it.
+                //:
+                //: Every action is flat: a bar is a row of icons, and the page's
+                //: loud action (if it has one) is a `Button` of its own outside
+                //: the bar. RinUI's `Button` puts `flat` ahead of `highlighted`
+                //: when it chooses its colour, so an accent action cannot live
+                //: here — see the calculator's `calculateButton`.
                 icon.name: modelData.icon.name
                 icon.color: enabled
                     ? Theme.currentTheme.colors.textColor
                     : Theme.currentTheme.colors.textDisabledColor
-                enabled: modelData.enabled
+                highlighted: false
                 flat: true
+                enabled: modelData.enabled
                 visible: index < root.fitted
                 Layout.alignment: Qt.AlignVCenter
                 onClicked: modelData.trigger()

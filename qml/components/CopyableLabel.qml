@@ -14,9 +14,11 @@ import RinUI
 //: differs.
 //:
 //: No background of its own, so it reads as a label that happens to be
-//: copyable; the control also brings a right-click menu of its own, which is
-//: wrong for a read-only box — it is suppressed below, and the page takes the
-//: right click over with its own menu.
+//: copyable. The control has no right-click menu of its own to remove — a plain
+//: `TextEdit` starts without one, since RinUI attaches its `TextInputMenu` only
+//: to its own `TextArea` — so what is left is to *forward* the right click:
+//: a card's menu must open when the reader clicks its text, not only its
+//: padding, and the card is the thing that knows what the menu holds.
 //:
 //: **Why the text is complete and the box still doesn't grow.** A rich-text
 //: label cannot be elided by Qt (`Text.elide` is ignored for `RichText`), so an
@@ -36,6 +38,14 @@ Item {
     //: outcome box is three lines tall and wants a long result wrapped; a
     //: history card's line stays on one line whatever the text.
     property bool wrap: false
+
+    //: A right click inside the box, with where it happened *in the scene*, which
+    //: is what `Menu.popup()` takes (the same convention RinUI's own text fields
+    //: use: `contextMenu.popup(mouse.scenePosition)`). The card listens: it opens
+    //: its own menu there, same as a click on the card itself. Only the card's
+    //: menu follows the pointer — a keyboard `Menu`-key press has no pointer, and
+    //: that one opens at the item's own position.
+    signal rightClicked(real sceneX, real sceneY)
 
     implicitWidth: edit.implicitWidth
     implicitHeight: edit.implicitHeight
@@ -69,15 +79,17 @@ Item {
         //: result line is too, an error is critical.
         color: Theme.currentTheme.colors.textColor
 
-        //: RinUI attaches its right-click menu (Cut, Paste, Select All) by
-        //: declaring a `TextInputMenu` child, which only its own `TextArea.qml`
-        //: does, so a plain `TextEdit` starts without one — this `MouseArea` is
-        //: still here to keep the right click from falling through to whatever
-        //: the page put under the box.
+        //: The forwarding, as a `MouseArea` and not a `TapHandler`: it has to see
+        //: the *position* of the press (the menu opens there), and `TapHandler`
+        //: hands that over only on a tap it claims. Accepting the right button
+        //: also keeps the event from travelling on to the card's own handler,
+        //: which would open the menu twice — once here, once on the press that
+        //: reaches it anyway.
         MouseArea {
             anchors.fill: parent
             acceptedButtons: Qt.RightButton
             propagateComposedEvents: false
+            onClicked: (mouse) => root.rightClicked(mouse.sceneX, mouse.sceneY)
         }
     }
 }
