@@ -476,8 +476,8 @@ Item {
                                 Layout.fillWidth: true
                                 Layout.minimumWidth: 0
                                 Layout.preferredHeight: Math.round(settingsVM.codeSize * 4.2)
-                                wrapMode: TextArea.Wrap
-                                textFormat: isProse ? TextArea.PlainText : TextArea.RichText
+                                wrapMode: TextEdit.Wrap
+                                textFormat: isProse ? TextEdit.PlainText : TextEdit.RichText
                                 readonly property bool isProse: calcVM.isError
                                 readonly property bool hasResult: calcVM.resultText !== ""
                                 color: isProse

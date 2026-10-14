@@ -345,8 +345,8 @@ Item {
 
                     Layout.fillWidth: true
                     Layout.minimumWidth: 0
-                    wrapMode: card.isError ? TextArea.Wrap : TextArea.NoWrap
-                    textFormat: card.isError ? TextArea.PlainText : TextArea.RichText
+                    wrapMode: card.isError ? TextEdit.Wrap : TextEdit.NoWrap
+                    textFormat: card.isError ? TextEdit.PlainText : TextEdit.RichText
                     color: card.isError
                         ? card.errorColor
                         : Theme.currentTheme.colors.textSecondaryColor
