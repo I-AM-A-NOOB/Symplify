@@ -49,6 +49,11 @@ CMD = [
     # the clcache to make that cheap, and the runner is free but slow.
     "--jobs=1",
     "--windows-console-mode=disable",
+    # The exe's own icon (Explorer, taskbar, alt-tab, the title bar of a windowed
+    # build). `icon/Symplify.ico` holds all nine sizes Windows asks for, so one
+    # flag is enough; regenerate it from the SVG with the command in
+    # `.Agent/DEVELOPER_GUIDE.md`.
+    "--windows-icon-from-ico=icon/Symplify.ico",
     # RinUI (python package + its QML module tree)
     "--include-package=RinUI",
     "--include-package-data=RinUI",
@@ -76,6 +81,9 @@ CMD = [
     "--include-package-data=python",
     # QML views (loaded by path at runtime next to the exe)
     "--include-data-dir=qml=qml",
+    # The application icon, read at runtime for the window and the taskbar; the
+    # same file Nuitka also embeds into the exe above.
+    "--include-data-dir=icon=icon",
     "main.py",
 ]
 

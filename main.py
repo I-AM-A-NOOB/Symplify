@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import qVersion
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
 # The bootstrap owns the RinUI import (and takes RinUI's own config directory
@@ -36,6 +37,13 @@ def main() -> int:
     runtime = prepare(ROOT)
 
     app = QApplication(sys.argv)
+
+    # Every surface that asks the application for its icon — the window's title
+    # bar, the taskbar button, alt-tab — would otherwise show Qt's default. The
+    # .ico is the same file Nuitka embeds into the exe, so the two cannot drift;
+    # it ships with the app (see scripts/build_windows.py), and `ROOT` is the
+    # directory next to it whether this is a checkout or a frozen build.
+    app.setWindowIcon(QIcon(str(ROOT / "icon" / "Symplify.ico")))
 
     # Qt Quick scrolls a `Flickable` by `wheelScrollLines * 24` pixels per wheel
     # notch — `qquickflickable.cpp`: `wheelScroll = -styleHints()->wheelScrollLines() * 24`

@@ -110,6 +110,18 @@ docs/
   architecture.md               # Model-first walkthrough: the two requests, the data flow
                                 # (sources in, sinks out), the write path and the error kinds;
                                 # architecture.svg = layer map
+icon/
+  Symplify.svg                  # The application icon, authored (Illustrator). The only source.
+  Symplify.ico                  # BUILD ARTIFACT, committed: the nine sizes Windows asks for,
+                                # from `magick icon/Symplify.svg -define
+                                # icon:auto-resize=16,20,24,32,40,48,64,128,256 icon/Symplify.ico`.
+                                # Nuitka embeds it in the exe and main.py loads it at runtime,
+                                # so both ship and both read the same file — regenerate after any
+                                # change to the SVG. Do not "optimise" the ICO by hand: this
+                                # ImageMagick (7.1.2) writes BMP entries and silently ignores
+                                # `-compress Zip`, so the file is 381 KB where the same pixels
+                                # as PNG entries would be ~50 KB. It is a committed asset, not
+                                # generated at build time, so a fresh checkout needs no tool.
 scripts/
   build_windows.py              # Nuitka standalone build
   release.py                    # SemVer bump (pyproject + python/version.py), optional tag
@@ -222,6 +234,33 @@ scratch/                        # Preserved experiments — NOT part of the app 
   showed, with the grid growing past the panel and the last column drawing outside the card. Extra
   space in a layout is shared by the *ratio* of the items' preferred sizes, so equal preferred sizes
   plus equal stretch factors are all it takes.
+
+- **An `Action` cannot carry a property of its own.** `Action` is a registered Qt type, so
+  `property bool accent: true` inside its declaration is silently accepted and never seen by
+  anyone — the bar has to be told from the page instead (a `list<string>` on the component, keyed by
+  the action's text). If a bar needs a per-action fact, it arrives as a property of the *bar*.
+- RinUI's `Button` puts **`flat` ahead of `highlighted`** when it picks its colour
+  (`backgroundColor: flat ? subtleSecondaryColor : highlighted ? primaryColor : controlColor`), so a
+  flat accent is not an accent at all. An accent action is a `Button` next to the bar, not a member
+  of it. RinUI's `ToolButton` also **ignores `display`**: it always draws its `text` beside the icon,
+  so `action:` writes the label on the button and every one is as wide as its sentence (measured
+  136/152/301/310 px against 44 icon-only). Bind the icon and put the label in the `ToolTip`.
+- **`Menu.popup(x, y)` takes the item's coordinates and RinUI's `Menu` then moves the menu anyway.**
+  Its `enter` transition animates `x`/`y` to `posX`/`posY`, which are derived from `position`
+  (`Bottom` by default → centred under the parent), so a menu told to open at the pointer lands on
+  its delegate instead — and a card far down a list reports a place it was never at.
+  `position: Position.None` is the mode that defers to the caller (`posX`/`posY` then read `root.x`
+  /`root.y`). What `popup()` itself wants: **scene (window) coordinates**, the same space RinUI's
+  own text fields pass (`contextMenu.popup(mouse.scenePosition)`). A `MouseArea` hands them over as
+  `mouse.sceneX/sceneY`; a `TapHandler`'s `eventPoint` as `eventPoint.scenePosition` — and
+  `eventPoint.position` is the *item's own*, which is what the bug was. Passing a parent item
+  (`popup(item, x, y)`) adds the item's position on top, so a plain two-number call is right for a
+  context menu. Qt clamps the result into the window by itself.
+- A plain `TextEdit` has **no right-click menu of its own** (RinUI attaches its `TextInputMenu` only
+  from `TextArea.qml`), so nothing needs suppressing — what is left is to *forward* the right click,
+  with a `MouseArea` that accepts the right button so the page's own handler does not also fire and
+  open the menu twice. `MouseArea`, not `TapHandler`: it reports the press position on a click it
+  claims, which a context menu needs.
 
 - Import **unversioned** `QtQuick` (`import QtQuick`) where you need current API — `import QtQuick 2.15`
   version-gates newer members (e.g. `currentRow`, `itemAtCell` revisions).
@@ -1395,8 +1434,15 @@ measurable runtime gain in a calculator. Measured on the dev machine: ~11 min pe
 Data-file pitfalls for frozen builds (update this list when you add data-reading deps):
 
 - `ziamath` / `ziafont` fonts, `latex2mathml/unimathsymbols.txt`, RinUI's whole QML tree,
-  `python/keyboard_config.yaml` and `fontTools` (read by `python/fonts.py` to inspect installed
-  fonts) must be included via the `--include-*` flags in `scripts/build_windows.py`.
+  `python/keyboard_config.yaml`, **`icon/`,** and `fontTools` (read by `python/fonts.py` to inspect
+  installed fonts) must be included via the `--include-*` flags in `scripts/build_windows.py`.
+- **The application icon is one file with two jobs.** `--windows-icon-from-ico=icon/Symplify.ico`
+  embeds it in the exe (Explorer, taskbar, the title bar) and `--include-data-dir=icon=icon` ships
+  the same file for `main.py`'s `app.setWindowIcon(...)` at runtime — one artifact, so the two
+  cannot drift. Both read the nine-size ICO in `icon/` (regenerate it from the SVG; see Source
+  layout). Verify the runtime one by checking `QApplication.windowIcon().isNull()` after
+  `setWindowIcon`: Nuitka makes `ROOT` the exe's directory, so a missing `.ico` is a null icon and
+  not an error.
 - Packages whose data is loaded through `importlib.resources` by name
   (e.g. `ziamath.fonts`) need `--include-module=<subpackage>` — Nuitka can't follow string refs.
 - **Include the subpackage you import, not the whole distribution.** `fontTools` was included as a
