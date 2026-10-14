@@ -235,16 +235,7 @@ Item {
             readonly property string resultPrefixPlain:
                 card.isError || card.mode === "Assign"
                     ? "" : "\u00A0".repeat(card.name.length + 1) + "= "
-            TextMetrics {
-                id: inputPrefixMetrics
-                font: settingsVM.codeFont
-                text: card.inputPrefix
-            }
-            TextMetrics {
-                id: resultPrefixMetrics
-                font: settingsVM.codeFont
-                text: card.resultPrefixPlain
-            }
+
 
             contentItem: ColumnLayout {
                 id: cardBody
@@ -273,17 +264,12 @@ Item {
                         Layout.minimumWidth: 0
                         Layout.alignment: Qt.AlignVCenter
                         color: Theme.currentTheme.colors.textColor
-                        //: The raw expression, for every copy path (see
-                        //: `CopyableLabel.fullText`: the elided view cannot
-                        //: select what the truncation dropped).
-                        fullText: card.mode === "Assign"
-                            ? card.name + " " + card.op + " " + card.expression
-                            : card.expression
+                        //: The whole expression, never a truncation of it: the
+                        //: box clips at the row's width, the selection spans all
+                        //: of it, and the copy is what was typed.
                         text: card.inputPrefix
-                            + (vm ? vm.highlightedElided(
-                                       card.expression,
-                                       width - inputPrefixMetrics.width,
-                                       Theme.isDark()) : "")
+                            + (vm ? vm.highlighted(
+                                       card.expression, Theme.isDark()) : "")
 
                         TapHandler {
                             acceptedButtons: Qt.LeftButton
@@ -345,21 +331,18 @@ Item {
 
                     Layout.fillWidth: true
                     Layout.minimumWidth: 0
-                    wrapMode: card.isError ? TextEdit.Wrap : TextEdit.NoWrap
+                    //: An error's prose wraps so none of the message is hidden;
+                    //: a result stays on one line and lets the box clip it.
+                    wrap: card.isError
                     textFormat: card.isError ? TextEdit.PlainText : TextEdit.RichText
                     color: card.isError
                         ? card.errorColor
                         : Theme.currentTheme.colors.textSecondaryColor
-                    //: The whole result, for the copy paths; a failed entry's
-                    //: prose is not elided, so it is the text.
-                    fullText: card.isError ? card.error : card.result
                     text: card.isError
                         ? card.error
                         : card.resultPrefix
-                          + (vm ? vm.highlightedElided(
-                                      card.result,
-                                      width - resultPrefixMetrics.width,
-                                      Theme.isDark()) : "")
+                          + (vm ? vm.highlighted(
+                                      card.result, Theme.isDark()) : "")
 
                     TapHandler {
                         acceptedButtons: Qt.LeftButton
