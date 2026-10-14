@@ -255,19 +255,38 @@ Item {
                     Layout.fillWidth: true
                     spacing: 4
 
-                    QQ.Text {
+                    // A read-only `TextEdit` for the same reason as the result
+                    // line below: what you typed is as much of a takeaway as
+                    // what came back, and it was the one line on the card that
+                    // could not be selected. Same dressing as the result line.
+                    QQC2.TextArea {
+                        id: inputLine
+                        objectName: "inputLine"
+
                         Layout.fillWidth: true
                         // Rich text's implicit width is the full text, and a
                         // layout defaults an item's minimum to that — zero it
                         // so the row squeezes this line instead of overflowing.
                         Layout.minimumWidth: 0
                         Layout.alignment: Qt.AlignVCenter
+                        readOnly: true
+                        selectByMouse: true
+                        persistentSelection: true
+                        wrapMode: TextArea.NoWrap
+                        // A bare `TextEdit` styles itself from RinUI's text
+                        // defaults, so the metrics have to be named: without
+                        // them the line renders a size smaller than the result
+                        // line under it, and the row's height follows.
                         font: settingsVM.codeFont
+                        topPadding: 0
+                        bottomPadding: 0
+                        leftPadding: 0
+                        rightPadding: 0
                         color: Theme.currentTheme.colors.textColor
                         // `Text.elide` is ignored for rich text, so the
                         // expression is elided by the viewmodel, on the plain
                         // string, to what remains of the line beside the prefix.
-                        textFormat: QQ.Text.RichText
+                        textFormat: TextArea.RichText
                         text: card.inputPrefix
                             + (vm ? vm.highlightedElided(
                                         card.expression,
@@ -315,9 +334,18 @@ Item {
                 // critical color and wrapped, since eliding it would hide
                 // the very thing the card is for. Everything else on an
                 // error card (input line, background) stays normal.
-                QQ.Text {
+                // A read-only `TextEdit`, so the result is selectable and
+                // copyable: on a page of calculation cards the result is the
+                // thing you take away, and only the calculator's outcome box
+                // was. It draws no background of its own and sits at its
+                // line height, so the card does not move.
+                QQC2.TextArea {
+                    objectName: "resultLine"
                     Layout.fillWidth: true
                     Layout.minimumWidth: 0
+                    readOnly: true
+                    selectByMouse: true
+                    persistentSelection: true
                     // Code text: the aligned `= result` line. The name-length
                     // padding aligns it under the assignment operator, so it
                     // has to stay monospace for the alignment to hold. The
@@ -327,11 +355,11 @@ Item {
                     color: card.isError
                         ? card.errorColor
                         : Theme.currentTheme.colors.textSecondaryColor
-                    wrapMode: card.isError ? QQ.Text.WordWrap : QQ.Text.NoWrap
+                    wrapMode: card.isError ? TextArea.Wrap : TextArea.NoWrap
                     // Rich text collapses runs of spaces, so the padding that
                     // holds `=` under the assignment operator has to be
                     // non-breaking. A failure is prose, so it stays plain.
-                    textFormat: card.isError ? QQ.Text.PlainText : QQ.Text.RichText
+                    textFormat: card.isError ? TextArea.PlainText : TextArea.RichText
                     text: card.isError
                         ? card.error
                         : card.resultPrefix
@@ -368,6 +396,10 @@ Item {
                 // Timestamp, bottom-right.
                 QQ.Text {
                     Layout.alignment: Qt.AlignRight
+                    // Below the card body as well as beside it: the strip's
+                    // overlay bar sits along the bottom edge, and the timestamp
+                    // used to share the last row with it.
+                    Layout.bottomMargin: 8
                     font.pixelSize: 11
                     color: Theme.currentTheme.colors.textTertialyColor
                     text: card.time

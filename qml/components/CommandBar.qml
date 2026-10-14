@@ -1,8 +1,8 @@
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Controls.Basic 2.15 as QQC2
 import QtQuick.Layouts
 import RinUI
+import RinUI as Rin
 
 // A row of actions that folds whatever does not fit into a menu.
 //
@@ -153,15 +153,43 @@ Item {
         }
     }
 
-    QQC2.Menu {
+    Rin.Menu {
         id: overflowMenu
+
+        //: RinUI's own menu: the padding, rounded corners, acrylic surface and
+        //: shadow a `MenuItem` list is supposed to sit in. QtQuick.Controls'
+        //: `Menu` is a bare box, which is what made the folded actions look
+        //: like a tooltip rather than a menu.
+        //:
+        //: The animation is trimmed to a fade: `Menu`'s own transition also
+        //: drives `height` and `y`, which are for a menu *declared* at a fixed
+        //: spot — this one is popped up at the overflow button, and those
+        //: animations would move it somewhere else.
+        enter: Transition {
+            NumberAnimation {
+                property: "opacity"
+                from: 0.0
+                to: 1.0
+                duration: Utils.animationSpeed
+                easing.type: Easing.OutQuad
+            }
+        }
+        exit: Transition {
+            NumberAnimation {
+                property: "opacity"
+                from: 1.0
+                to: 0.0
+                duration: 150
+                easing.type: Easing.InOutQuad
+            }
+        }
 
         //: Only the folded ones: the menu is the *rest* of the row, not a second
         //: copy of it, so an action is reachable in exactly one place at a time.
         Repeater {
             model: root.actions
 
-            delegate: MenuItem {
+            delegate: Rin.MenuItem {
                 required property int index
                 required property var modelData
 

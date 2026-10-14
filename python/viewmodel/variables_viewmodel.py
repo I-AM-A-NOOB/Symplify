@@ -95,8 +95,14 @@ class VariablesModel(QAbstractTableModel):
                     self._log_info(f"Variable renamed: {name} -> {text}")
                     self._warn_builtin(text)
                 return ok
-            except Exception as e:
+            except ValueError as e:
+                #: The write is refused, so the view keeps the editor open and
+                #: nothing moves. Silence is what made that read as "the table
+                #: ignored my Return": the first Enter *did* run, and this is the
+                #: only thing it could do. The dialog names the reason, and the
+                #: editor keeps the text so it can be corrected where it was typed.
                 self._log_error(f"Failed to rename variable: {e}")
+                self.warningOccurred.emit(text, str(e))
                 return False
 
         try:

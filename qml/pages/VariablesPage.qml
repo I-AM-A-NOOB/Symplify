@@ -23,6 +23,13 @@ Item {
         function onDataChanged() {
             page.rowCount = variablesFilter.rowCount()
             page.dataRevision++
+            //: A list edit — the inline editor or the toolbar's actions — changes
+            //: the model, not the selection, so `onSelectedRowChanged` never runs
+            //: and the panel kept showing the row as it was *before* the edit.
+            //: Typing in a field writes the model, which lands here too, and
+            //: re-reading it then shows what the store actually kept (an
+            //: expression is stored as it parses) rather than what was typed.
+            page.syncDetails()
         }
 
         //: The filter owns the `LatexStyle` (ink, size, font), so a change to it

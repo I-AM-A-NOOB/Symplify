@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 2.15
 import RinUI
+import RinUI as Rin
 import "../components"
 
 Item {
@@ -127,6 +128,8 @@ Item {
             //: whatever does not fit behind its own "more" button, so adding an
             //: action here costs the row nothing.
             CommandBar {
+                id: calcCommandBar
+
                 //: The buttons continue the title rather than close the row, so
                 //: they hug the left edge this bar was given.
                 contentAlignment: Qt.AlignLeft
@@ -151,45 +154,47 @@ Item {
                     icon.name: "ic_fluent_arrow_redo_20_regular"
                     onTriggered: redoInput()
                 }
+                //: Examples, as a submenu rather than a fixed row of its own: the
+                //: bar is narrow, and these five fill the input with a starting
+                //: expression instead of acting on what is there. RinUI's own
+                //: `Menu` holds them (the same one the bar folds into), opened
+                //: under the bar itself — an `Action` has no button of its own to
+                //: anchor to while it is folded away.
+                Action {
+                    text: qsTr("Examples")
+                    icon.name: "ic_fluent_math_formula_20_regular"
+                    onTriggered: examplesMenu.popup(
+                        calcCommandBar.width / 2, calcCommandBar.height + 4)
+                }
             }
+
+            Rin.Menu {
+                    id: examplesMenu
+
+                    MenuItem {
+                        text: "diff(x**2, x)"
+                        onTriggered: setExample("diff(x**2, x)")
+                    }
+                    MenuItem {
+                        text: "integrate(x**2, x)"
+                        onTriggered: setExample("integrate(x**2, x)")
+                    }
+                    MenuItem {
+                        text: "limit(sin(x)/x, x, 0)"
+                        onTriggered: setExample("limit(sin(x)/x, x, 0)")
+                    }
+                    MenuItem {
+                        text: "solve(x**2 - 4, x)"
+                        onTriggered: setExample("solve(x**2 - 4, x)")
+                    }
+                    MenuItem {
+                        text: "Matrix([[1, 2], [3, 4]])"
+                        onTriggered: setExample("Matrix([[1, 2], [3, 4]])")
+                    }
+                }
 
             Item { Layout.fillWidth: true }
 
-            //: Same treatment for the menu: an icon opens it, the tooltip names
-            //: it. The chevron RinUI appends still marks it as a menu.
-            DropDownButton {
-                icon.name: "ic_fluent_math_formula_20_regular"
-                icon.color: enabled
-                    ? Theme.currentTheme.colors.textColor
-                    : Theme.currentTheme.colors.textDisabledColor
-                flat: true
-                ToolTip {
-                    delay: 500
-                    visible: parent.hovered
-                    text: qsTr("Examples")
-                }
-
-                MenuItem {
-                    text: "diff(x**2, x)"
-                    onTriggered: setExample("diff(x**2, x)")
-                }
-                MenuItem {
-                    text: "integrate(x**2, x)"
-                    onTriggered: setExample("integrate(x**2, x)")
-                }
-                MenuItem {
-                    text: "limit(sin(x)/x, x, 0)"
-                    onTriggered: setExample("limit(sin(x)/x, x, 0)")
-                }
-                MenuItem {
-                    text: "solve(x**2 - 4, x)"
-                    onTriggered: setExample("solve(x**2 - 4, x)")
-                }
-                MenuItem {
-                    text: "Matrix([[1, 2], [3, 4]])"
-                    onTriggered: setExample("Matrix([[1, 2], [3, 4]])")
-                }
-            }
         }
 
         // ---- Split content: left input panel / right result panel ----
@@ -405,51 +410,14 @@ Item {
                     anchors.fill: parent
                     spacing: 12
 
+                    //: The copy buttons stand alone now that the outcome box lives
+                    //: in the scroll area below: they read as the panel's actions
+                    //: rather than as part of the result line.
                     RowLayout {
                         Layout.fillWidth: true
                         spacing: 8
 
-                        TextEdit {
-                            id: outcomeBox
-
-                            Layout.fillWidth: true
-                            // A RowLayout defaults an item's minimum width to its
-                            // implicit size, so the row would grow past the panel
-                            // instead of squeezing this box. Zero it.
-                            Layout.minimumWidth: 0
-                            // Room for three lines whatever code size the reader
-                            // picked, so the formula below never jumps as the
-                            // outcome changes length.
-                            Layout.preferredHeight: Math.round(settingsVM.codeSize * 4.2)
-                            // What there is to *read*, and the only place that says
-                            // it: the value as markup in the code colours, a
-                            // failure's prose in the critical colour, or the
-                            // placeholder while nothing has been calculated. The
-                            // formula area below is the LaTeX's alone. Selectable —
-                            // a result is something to copy out — but never
-                            // editable, and borderless: a bare `TextEdit` draws no
-                            // background. It wraps instead of eliding (rich text
-                            // ignores `elide`), which is why the viewmodel's
-                            // unelided `highlighted` is the right call here.
-                            readonly property bool isProse: calcVM.isError
-                            readonly property bool hasResult: calcVM.resultText !== ""
-                            readOnly: true
-                            selectByMouse: true
-                            persistentSelection: true
-                            wrapMode: TextEdit.Wrap
-                            textFormat: isProse ? TextEdit.PlainText : TextEdit.RichText
-                            font: settingsVM.codeFont
-                            color: isProse
-                                ? Theme.currentTheme.colors.systemCriticalColor
-                                : (hasResult
-                                    ? Theme.currentTheme.colors.textColor
-                                    : Theme.currentTheme.colors.textSecondaryColor)
-                            text: isProse
-                                ? calcVM.errorMessage
-                                : (hasResult
-                                    ? (vm ? vm.highlighted(calcVM.resultText, Theme.isDark()) : "")
-                                    : qsTr("result ∈ LaTeX"))
-                        }
+                        Item { Layout.fillWidth: true }
 
                         Button {
                             text: calcVM.inputMode === 1
@@ -486,6 +454,43 @@ Item {
 
                             width: resultScroll.width
                             spacing: 12
+                            //: What there is to *read*, and the only place that says
+                            //: it: the value as markup in the code colours, a failure's
+                            //: prose, or the placeholder while nothing has been calculated.
+                            //: The formula below is the LaTeX's alone. Selectable — a result is
+                            //: something to copy out — but never editable, and borderless: a
+                            //: bare `TextEdit` draws no background. It wraps instead of eliding
+                            //: (rich text ignores `elide`), which is why the viewmodel's
+                            //: unelided `highlighted` is the right call here.
+                            //:
+                            //: Living inside the scroll area rather than beside the copy
+                            //: buttons is what makes a long outcome scroll with the formula
+                            //: instead of pushing it out of the window.
+                            TextEdit {
+                                id: outcomeBox
+
+                                Layout.fillWidth: true
+                                Layout.minimumWidth: 0
+                                Layout.preferredHeight: Math.round(settingsVM.codeSize * 4.2)
+                                readonly property bool isProse: calcVM.isError
+                                readonly property bool hasResult: calcVM.resultText !== ""
+                                readOnly: true
+                                selectByMouse: true
+                                persistentSelection: true
+                                wrapMode: TextEdit.Wrap
+                                textFormat: isProse ? TextEdit.PlainText : TextEdit.RichText
+                                font: settingsVM.codeFont
+                                color: isProse
+                                    ? Theme.currentTheme.colors.systemCriticalColor
+                                    : (hasResult
+                                        ? Theme.currentTheme.colors.textColor
+                                        : Theme.currentTheme.colors.textSecondaryColor)
+                                text: isProse
+                                    ? calcVM.errorMessage
+                                    : (hasResult
+                                        ? (vm ? vm.highlighted(calcVM.resultText, Theme.isDark()) : "")
+                                        : qsTr("result ∈ LaTeX"))
+                            }
 
                             // LaTeX result area: the natural-height rendering,
                             // horizontally scrollable when it is wider than the
