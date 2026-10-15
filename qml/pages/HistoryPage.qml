@@ -270,6 +270,19 @@ Item {
                             + (vm ? vm.highlighted(
                                        card.expression, Theme.isDark()) : "")
 
+                        //: The same right click as the result line's, and the
+                        //: same as a click on the card: the menu belongs to the
+                        //: whole card, not to the padding around its text.
+                        //: `card.mapFromItem` and not a bare `mapFromItem`: this
+                        //: handler's scope is the *label*, so an unqualified call
+                        //: maps from the label to the label — measured, the menu
+                        //: then landed a label's offset away from the pointer.
+                        onRightClicked: (mx, my) => {
+                            page.keyboardNavigation = false
+                            page.currentIndex = card.index
+                            openMenuAt(card.mapFromItem(inputLine, mx, my))
+                        }
+
                         onClicked: {
                             page.keyboardNavigation = false
                             page.currentIndex = card.index
@@ -343,7 +356,7 @@ Item {
                     onRightClicked: (mx, my) => {
                         page.keyboardNavigation = false
                         page.currentIndex = card.index
-                        entryMenu.popup(mx, my)
+                        openMenuAt(card.mapFromItem(resultLine, mx, my))
                     }
 
                     onClicked: {
@@ -487,6 +500,31 @@ Item {
                 }
             }
 
+            //: Open the menu at a point in the *card's* own coordinates.
+            //:
+            //: A menu's position is relative to its parent item, and this menu's
+            //: parent is the delegate — it is declared here so its items can read
+            //: `card`. The pointer therefore has to arrive in this space: the
+            //: scene point the first attempt passed puts the menu a card's height
+            //: further down the page, and the lower the card, the further off.
+            //: `posX`/`posY` and not `popup(x, y)` because RinUI's `Menu` animates
+            //: *towards* those two, so setting them is what both places the menu
+            //: and plays the unfold.
+            function openMenuAt(point) {
+                entryMenu.posX = point.x
+                entryMenu.posY = point.y
+                entryMenu.popup()
+            }
+
+            //: …and RinUI's own place for the keyboard routes, which have no
+            //: pointer: centred under the card, which is what its `Position.Bottom`
+            //: computes from the parent.
+            function openMenuDefault() {
+                entryMenu.posX = (width - entryMenu.width) / 2
+                entryMenu.posY = height + 5
+                entryMenu.popup()
+            }
+
             // Left click (card body) selects the card.
             onClicked: {
                 page.keyboardNavigation = false
@@ -503,7 +541,7 @@ Item {
                 onTapped: (eventPoint) => {
                     page.keyboardNavigation = false
                     page.currentIndex = index
-                    entryMenu.popup(eventPoint.scenePosition)
+                    openMenuAt(eventPoint.position)
                 }
             }
 
@@ -521,29 +559,21 @@ Item {
             }
 
             // Keyboard: menu at the default position (not the pointer).
-            Keys.onReturnPressed: entryMenu.popup()
-            Keys.onEnterPressed: entryMenu.popup()
-            Keys.onSpacePressed: entryMenu.popup()
+            Keys.onReturnPressed: openMenuDefault()
+            Keys.onEnterPressed: openMenuDefault()
+            Keys.onSpacePressed: openMenuDefault()
             Keys.onPressed: (event) => {
                 // Context-menu key / Shift+F10.
                 if (event.key === Qt.Key_Menu
                         || (event.key === Qt.Key_F10
                             && (event.modifiers & Qt.ShiftModifier))) {
-                    entryMenu.popup()
+                    openMenuDefault()
                     event.accepted = true
                 }
             }
 
             Menu {
                 id: entryMenu
-
-                //: Keep the position `popup()` was given. Without it, RinUI's
-                //: `Menu` animates `x`/`y` towards its own `posX`/`posY`, which
-                //: are derived from `position` (Bottom by default: centred under
-                //: the parent) — so a menu told to open at the pointer lands
-                //: wherever the delegate happens to be instead. `None` is the
-                //: mode that defers to the caller.
-                position: Position.None
 
                 MenuItem {
                     text: qsTr("Send to input")

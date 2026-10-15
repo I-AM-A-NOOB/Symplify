@@ -19,9 +19,11 @@ import RinUI
 //: `TextInputMenu` only to its own `TextArea`). What the page gets is a label
 //: that happens to be copyable, and two things wired into it:
 //:
-//: * the right click is *forwarded*, in scene coordinates — a card's menu has to
-//:   open when the reader clicks its text, not only its padding, and the card is
-//:   the thing that knows what the menu holds;
+//: * the right click is *forwarded*, in this label's own coordinates — a card's
+//:   menu has to open when the reader clicks its text, not only its padding, and
+//:   the card is the thing that knows what the menu holds. Local coordinates
+//:   because a menu's position is relative to *its* parent item, so only the card
+//:   can map them where they belong;
 //: * a click is reported as `clicked()`, so a page can select its row from it.
 //:
 //: Both are the label's to report rather than the page's to listen for: a
@@ -56,13 +58,12 @@ Item {
     //: history card's line stays on one line whatever the text.
     property bool wrap: false
 
-    //: A right click inside the box, with where it happened *in the scene*, which
-    //: is what `Menu.popup()` takes (the same convention RinUI's own text fields
-    //: use: `contextMenu.popup(mouse.scenePosition)`). The card listens: it opens
-    //: its own menu there, same as a click on the card itself. Only the card's
-    //: menu follows the pointer — a keyboard `Menu`-key press has no pointer, and
-    //: that one opens at the item's own position.
-    signal rightClicked(real sceneX, real sceneY)
+    //: A right click inside the box, with where it happened *in this label's own
+    //: coordinates*. The listener maps that where it needs it — a menu's position
+    //: is relative to its parent item, so a card hands it `mapFromItem(label, …)`
+    //: rather than the scene point, which is what the first attempt passed and
+    //: what put the menu a card's height below the pointer.
+    signal rightClicked(real localX, real localY)
 
     //: A left click that never became a drag. The page selects its card on one.
     //: A *drag* is not a click and stays with the control, which is what
@@ -140,7 +141,7 @@ Item {
             anchors.fill: parent
             acceptedButtons: Qt.RightButton
             propagateComposedEvents: false
-            onClicked: (mouse) => root.rightClicked(mouse.sceneX, mouse.sceneY)
+            onClicked: (mouse) => root.rightClicked(mouse.x, mouse.y)
         }
     }
 }

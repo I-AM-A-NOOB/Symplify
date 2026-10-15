@@ -11,15 +11,12 @@ import RinUI as Rin
 // is enabled, what is checked or what it does — which is what a hand-written
 // "more" menu gets wrong the first time an action gains a condition.
 //
-// The bar is exactly as wide as the buttons it is showing — no `Layout.fillWidth`:
-// the bar paints nothing of its own, so claiming a whole row's worth of width
-// only chased the *next* item in the row out to the far edge (the Calculator's
-// Examples), and bought folding nothing it did not already have, since a row
-// layout shrinks its children to their available share anyway. Buttons hug the
-// chosen edge, so the page's title keeps the left. How many fit is recomputed
-// whenever the width, the action list or the theme changes — the theme because
-// icon sizes come from it, and a stale count would keep one button too many on
-// screen.
+// The bar spans the row it is given (`Layout.fillWidth`) and lays its buttons out
+// from the right edge, so the page's title keeps the left. How many fit is
+// recomputed whenever the width, the action list or the theme changes — the theme
+// because icon sizes come from it, and a stale count would keep one button too
+// many on screen. A page with something to put *after* the bar — the calculator,
+// whose examples button follows it — turns the fill width off.
 //
 // This is the QML answer to qfluentwidgets' `CommandBar`, which re-parents real
 // widgets into its overflow menu. QML cannot re-parent declaratively, and doing
@@ -86,6 +83,13 @@ Item {
 
     implicitWidth: row.implicitWidth
     implicitHeight: row.implicitHeight
+    //: The bar spans the row it is put in, which is what `contentAlignment` needs
+    //: to hug the *row's* edge rather than its own width: three pages end their
+    //: header row with it and expect their buttons at the right, and a bar sized
+    //: to its buttons would compute `parent.width - width == 0` and sit left.
+    //: A page that wants something *after* the bar turns this off (the
+    //: calculator, whose examples button follows it).
+    Layout.fillWidth: true
 
     RowLayout {
         id: row

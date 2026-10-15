@@ -276,6 +276,28 @@ transparent corner, not `srgba(255,255,255,1)`.
   never showed the problem** — it reads the window's icon live, where the taskbar button caches — so
   "it works in Alt+Tab" is not evidence that the icon is fine. A quick probe: grab the desktop
   (`QScreen.grabWindow(0)`) and look at the button, rather than trusting `QWindow.icon()`.
+- **A context menu declared inside a delegate is positioned relative to that delegate, and RinUI's
+  `Menu` animates *towards* `posX`/`posY` — those two facts decide how to open it.** Four things, all
+  measured on the history cards' menu:
+  * `Menu.popup(x, y)` is not the tool: `posX`/`posY` are. RinUI's `enter` transition animates `x`,
+    `y` and `height` towards values derived from `position`, so a point handed to `popup()` is
+    overwritten by the animation — the reason a right-click "followed the mouse" to a place the mouse
+    had never been. Setting `posX`/`posY` before `popup()` both places the menu and plays the unfold;
+    `position: Position.None` looks like the fix and is not, because with it the transition's `from`
+    and `to` are the same values and nothing animates at all.
+  * **The point must be in the *parent's* coordinates.** `eventPoint.position` from a `TapHandler` on
+    the delegate already is; a scene point (what the first attempt passed) lands a card's height
+    further down, and further off the lower the card sits. A label inside the card maps its own point
+    with `card.mapFromItem(label, x, y)`.
+  * **An unqualified `mapFromItem` in a signal handler maps from the *handler's* object to itself.**
+    `onRightClicked: openMenuAt(mapFromItem(label, …))` declared on a `CopyableLabel` resolves
+    `mapFromItem` on the label — measured, the menu then landed a label's offset from the pointer
+    (20 px off). Name the target item.
+  * Where the pointer route wants `posX`/`posY` at the pointer, the keyboard routes want RinUI's own
+    default — `(width - menu.width) / 2` and `height + 5`, i.e. centred below the item. Both go
+    through `popup()` with no arguments; the difference is only which values `posX`/`posY` hold. (The
+    menu key, `Shift+F10` and Enter all need the *card* to have focus, so a probe has to click one
+    first — otherwise it looks like the handler is broken when nothing has focus at all.)
 - **A bare `QtQuick.TextEdit` is not a Control, so its selection colour is the OS's.** `QtQuick.Controls`
   exports no `TextEdit` at all, so `TextEdit` in a page is the plain Qt Quick item: no background, no
   padding, no chrome to strip — and no palette of its own to theme either. Qt paints its selection with
@@ -790,6 +812,13 @@ transparent corner, not `srgba(255,255,255,1)`.
     `action.shortcut` into a `Text`, and an action without a shortcut hands it an undefined key
     sequence — a warning per item. Qt also writes `checked` itself on click, which would break a
     binding; nothing in these bars is checkable yet.
+  * **The bar spans the row it is given, and that is what `contentAlignment` needs.** Three pages end
+    their header row with the bar and expect the buttons at the right, which happens because the bar
+    fills the row and its inner layout sits at `parent.width - width`. Sizing the bar to its buttons
+    makes that difference zero (`AlignLeft`) — measured on the Variables, History and Log headers,
+    whose actions all moved to the left edge. A page with something *after* the bar turns the fill
+    width off instead: the calculator's examples button follows its bar, and a filling bar chased it
+    to the far edge.
   The Variables bar's details toggle is the one action that never folds — it is a view switch, not one
   of the table's actions, and it sits after a `ToolSeparator` to say so.
 - **Two errors that only exist at runtime, and how they hid.** Both were in `SearchBar`, both silent

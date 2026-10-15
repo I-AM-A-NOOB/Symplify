@@ -157,6 +157,13 @@ Item {
                 //: The buttons continue the title rather than close the row, so
                 //: they hug the left edge this bar was given.
                 contentAlignment: Qt.AlignLeft
+                //: And the bar must not span the row: the examples button follows
+                //: it, and a bar that filled the width would push that button out
+                //: to the far edge (measured: the bar at 486 px of empty space and
+                //: Examples at x=751 before this line). Folding still works — a row
+                //: layout shrinks the bar to its share, which is what the fold
+                //: count reads.
+                Layout.fillWidth: false
 
                 Action {
                     text: qsTr("Clear input")
