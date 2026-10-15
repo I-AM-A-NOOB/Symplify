@@ -77,6 +77,12 @@ Item {
     //: (RinUI's `Button` does the same for its own labels.)
     clip: true
 
+    //: Drop the selection — for a page that knows the reason it was made has
+    //: gone (a history card clears it when another card becomes the current one).
+    function clearSelection() {
+        edit.deselect()
+    }
+
     //: The control inside owns the text; these are forwarded so a page sets them
     //: on the box itself.
     property alias text: edit.text
@@ -89,7 +95,12 @@ Item {
         anchors.fill: parent
         readOnly: true
         selectByMouse: true
-        persistentSelection: true
+        //: Deliberately *not* `persistentSelection`: that keeps the highlight
+        //: painted after the control loses focus, so a line stayed looking
+        //: selected while the reader was somewhere else entirely — clicking
+        //: another card, another page, or the calculator's outcome box left the
+        //: old highlight behind. With Qt's default the highlight goes as soon as
+        //: the focus does, and `selectedText` is still there for a copy.
         wrapMode: root.wrap ? TextEdit.Wrap : TextEdit.NoWrap
         textFormat: TextEdit.RichText
         topPadding: 0
@@ -99,6 +110,12 @@ Item {
         //: The code font is a real `QFont` with the whole family list; see
         //: `settingsVM.codeFont`.
         font: settingsVM.codeFont
+
+        //: And the *state* goes with the paint. Qt keeps `selectedText` when the
+        //: focus goes — the highlight is only hidden — so a box that looks
+        //: unselected would still hold a selection to be copied later. Dropping it
+        //: here is what makes the two agree.
+        onActiveFocusChanged: if (!activeFocus) deselect()
 
         //: A click, recognised by its *effect* rather than by a handler.
         //:

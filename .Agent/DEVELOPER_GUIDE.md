@@ -309,6 +309,18 @@ transparent corner, not `srgba(255,255,255,1)`.
   Set `selectionColor` (and `selectedTextColor`) from the theme, which is what every RinUI text control
   does for exactly this reason (`TextArea`, `TextField` and `TextInput` all say
   `selectionColor: Theme.currentTheme.colors.primaryColor`).
+  **And its selection has to be cancelled explicitly, because focus cannot do it.** A line on a history
+  card never holds focus: the card takes it back the moment it becomes current
+  (`onHighlightedChanged: forceActiveFocus()`, for its own key handlers), so `activeFocus` on a line is
+  false before and after a drag across its text — measured — and neither `persistentSelection: false`
+  nor an `onActiveFocusChanged` hook has anything to work with. (`persistentSelection: true` is worse
+  in the other direction: it keeps the highlight *painted* after the focus goes, so a line goes on
+  looking selected while the reader is elsewhere.) So every click that is not on a line says so
+  explicitly — `page.clearSelections()` for the page and the flickable, the card's `onClicked` for its
+  body, and each line's `clicked` for its sibling — and the card clears its lines when it stops being
+  the current one. The page's handler cannot cover the scroll area on its own: a press that lands on
+  the `Flickable` is consumed there and never reaches the page above it (measured: clicking the empty
+  space below the cards left the selection standing), which is why there is one there too.
 - **A pointer handler cannot watch a click on text, and a `HoverHandler` on a Control's `background`
   cannot see hover over its content.** Both were hit on the history page's cards, and both are about
   *where in the item chain* the pointer actually is:

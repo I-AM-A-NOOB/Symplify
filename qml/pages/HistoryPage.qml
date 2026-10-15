@@ -54,6 +54,31 @@ Item {
         }
     }
 
+    //: End the selection on the current card's lines.
+    //:
+    //: Nothing else can: a line never holds focus here — the card takes it back
+    //: the moment it becomes current (`forceActiveFocus`, for its own key
+    //: handlers), so neither `persistentSelection` nor a focus-out hook has
+    //: anything to work with (measured: `activeFocus` on a line is false before
+    //: and after a drag across its text). So every click that is *not* on a line
+    //: says so explicitly: this one for clicks anywhere else on the page, the
+    //: card's own `onClicked` for its body, and each line's `clicked` for its
+    //: sibling.
+    function clearSelections() {
+        const card = cards.itemAt(page.currentIndex)
+        if (card)
+            card.clearLines()
+    }
+
+    //: Everything the page does not otherwise consume — the title, the gutter,
+    //: the frame around the list. A `TapHandler` and not a `MouseArea`: it claims
+    //: only a tap (the default `DragThreshold`), so flicking the list is
+    //: untouched.
+    TapHandler {
+        acceptedButtons: Qt.LeftButton
+        onTapped: page.clearSelections()
+    }
+
     //: Bring a card into view, which `ListView.positionViewAtIndex` did for us.
     function reveal(index) {
         if (index >= loaded)                  // not loaded yet: load up to it
@@ -87,6 +112,18 @@ Item {
         // The content plus the page's bottom inset, so the last card can be
         // scrolled clear of the edge.
         contentHeight: content.height + frame.inset * 2
+
+        //: The scroll area's own presses — the empty space below the last card.
+        //: The page's handler cannot cover it: a press that lands on the
+        //: `Flickable` is consumed there and never reaches the page above it
+        //: (measured: clicking below the cards left the selection standing).
+        //: Declared inside the Flickable, so it is handed the presses that land on
+        //: the Flickable itself; a press on a card is the card's, and the cards
+        //: clear their own lines.
+        TapHandler {
+            acceptedButtons: Qt.LeftButton
+            onTapped: page.clearSelections()
+        }
 
         //: One batch more as the reader nears the bottom of what is loaded.
         //: These two plus the page's completion cover every state where the
@@ -186,8 +223,17 @@ Item {
             // the Keys handlers actually fire.
             activeFocusOnTab: true
             onHighlightedChanged: {
-                if (highlighted)
+                if (highlighted) {
                     forceActiveFocus()
+                } else {
+                    //: A selection belongs to the card it was made on: when another
+                    //: card becomes the current one, this card's highlight goes with
+                    //: it. Without this a line stayed looking selected after the
+                    //: reader had moved on — clicking the padding, the timestamp or
+                    //: empty space moves no focus, so Qt has nothing to clear it on.
+                    inputLine.clearSelection()
+                    resultLine.clearSelection()
+                }
             }
 
             // Keyboard focus *is* the selection (Fluent list semantics):
@@ -286,6 +332,7 @@ Item {
                         onClicked: {
                             page.keyboardNavigation = false
                             page.currentIndex = card.index
+                            card.clearLines()
                         }
                     }
 
@@ -362,6 +409,7 @@ Item {
                     onClicked: {
                         page.keyboardNavigation = false
                         page.currentIndex = card.index
+                        card.clearLines()
                     }
                 }
 
@@ -500,6 +548,13 @@ Item {
                 }
             }
 
+            //: Drop both lines' selections. Called whenever a click lands
+            //: somewhere other than on those lines — see `page.clearSelections`.
+            function clearLines() {
+                inputLine.clearSelection()
+                resultLine.clearSelection()
+            }
+
             //: Open the menu at a point in the *card's* own coordinates.
             //:
             //: A menu's position is relative to its parent item, and this menu's
@@ -525,10 +580,13 @@ Item {
                 entryMenu.popup()
             }
 
-            // Left click (card body) selects the card.
+            // Left click (card body) selects the card — and ends any selection
+            // the reader had made on one of its lines: they have moved on, and a
+            // highlight that exists to be copied should go with them.
             onClicked: {
                 page.keyboardNavigation = false
                 page.currentIndex = index
+                clearLines()
             }
 
             // Right click selects the card and opens its menu at the
