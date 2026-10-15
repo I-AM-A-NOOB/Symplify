@@ -13,12 +13,29 @@ import RinUI
 //: with the same `font`: all three bind `pixelSize` 14; only the box height
 //: differs.
 //:
-//: No background of its own, so it reads as a label that happens to be
-//: copyable. The control has no right-click menu of its own to remove — a plain
-//: `TextEdit` starts without one, since RinUI attaches its `TextInputMenu` only
-//: to its own `TextArea` — so what is left is to *forward* the right click:
-//: a card's menu must open when the reader clicks its text, not only its
-//: padding, and the card is the thing that knows what the menu holds.
+//: The control is a bare `QtQuick.TextEdit`, not a QQC2 one: `QtQuick.Controls`
+//: exports no `TextEdit` at all, so there is no control chrome to strip, no
+//: background, and no right-click menu of its own (RinUI attaches its
+//: `TextInputMenu` only to its own `TextArea`). What the page gets is a label
+//: that happens to be copyable, and two things wired into it:
+//:
+//: * the right click is *forwarded*, in scene coordinates — a card's menu has to
+//:   open when the reader clicks its text, not only its padding, and the card is
+//:   the thing that knows what the menu holds;
+//: * a click is reported as `clicked()`, so a page can select its row from it.
+//:
+//: Both are the label's to report rather than the page's to listen for: a
+//: handler the page puts on the label sees nothing, because the control takes
+//: the press for its own selection and the press is what a tap is made of.
+//: (Measured: the page's `TapHandler` on a card's line never fired. And a
+//: `TapHandler` *inside* the label, where the press is, fixed the click and
+//: silently broke drag-selection — the handler has to take the grab the control
+//: needs for selecting. Hence `clicked()` is recognised by its effect; see
+//: `onCursorPositionChanged` below.)
+//:
+//: The selection colour is set from the theme because this is not a Control: Qt
+//: would paint the selection with the application palette's highlight, which is
+//: Windows' dark blue and has nothing to do with this app's accent.
 //:
 //: **Why the text is complete and the box still doesn't grow.** A rich-text
 //: label cannot be elided by Qt (`Text.elide` is ignored for `RichText`), so an
@@ -46,6 +63,12 @@ Item {
     //: menu follows the pointer — a keyboard `Menu`-key press has no pointer, and
     //: that one opens at the item's own position.
     signal rightClicked(real sceneX, real sceneY)
+
+    //: A left click that never became a drag. The page selects its card on one.
+    //: A *drag* is not a click and stays with the control, which is what
+    //: `DragThreshold` decides: the handler watches the press, and only a release
+    //: that stayed put is a tap — so selecting a few words still works.
+    signal clicked()
 
     implicitWidth: edit.implicitWidth
     implicitHeight: edit.implicitHeight
@@ -75,9 +98,37 @@ Item {
         //: The code font is a real `QFont` with the whole family list; see
         //: `settingsVM.codeFont`.
         font: settingsVM.codeFont
+
+        //: A click, recognised by its *effect* rather than by a handler.
+        //:
+        //: A handler cannot see it: the control takes the press for its own
+        //: selection, and any handler that watches for a tap has to take that
+        //: press away — measured, a `TapHandler` here (at the default
+        //: `DragThreshold`) worked for the click and made drag-selection stop
+        //: selecting anything at all, which is the worse trade. What a click does
+        //: is move the caret and select nothing, so that is what is watched: the
+        //: caret moving while nothing is selected is a click, and a drag leaves a
+        //: selection behind and stays quiet.
+        onCursorPositionChanged: if (selectedText.length === 0) root.clicked()
         //: The caller owns the ink: an outcome line is secondary text, a history
         //: result line is too, an error is critical.
         color: Theme.currentTheme.colors.textColor
+
+        //: Selection, in the theme's accent. A bare `QtQuick.TextEdit` is not a
+        //: Control, so it has no palette of its own to theme — Qt paints the
+        //: selection with the *application's* palette highlight, which is
+        //: Windows' dark blue and has nothing to do with this app's accent. Every
+        //: RinUI text control sets this line for the same reason (its `TextArea`,
+        //: `TextField` and `TextInput` all say
+        //: `selectionColor: Theme.currentTheme.colors.primaryColor`).
+        //:
+        //: `primaryColor` and not the accent property directly: RinUI derives it
+        //: from the accent `MainWindow.applyAccent()` installs, so this follows a
+        //: theme switch and a custom accent without a binding of its own.
+        selectionColor: Theme.currentTheme.colors.primaryColor
+        //: And the ink *on* that accent: the palette's `highlightedText` is the
+        //: same stale system value, and on the accent it can be unreadable.
+        selectedTextColor: Theme.currentTheme.colors.textOnAccentColor
 
         //: The forwarding, as a `MouseArea` and not a `TapHandler`: it has to see
         //: the *position* of the press (the menu opens there), and `TapHandler`

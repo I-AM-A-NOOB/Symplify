@@ -259,12 +259,20 @@ Item {
                     CopyableLabel {
                         id: inputLine
                         objectName: "inputLine"
-                        TapHandler {
-                            acceptedButtons: Qt.LeftButton
-                            onTapped: {
-                                page.keyboardNavigation = false
-                                page.currentIndex = card.index
-                            }
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 0
+                        Layout.alignment: Qt.AlignVCenter
+                        color: Theme.currentTheme.colors.textColor
+                        //: The whole expression, never a truncation of it: the
+                        //: box clips at the row's width, the selection spans all
+                        //: of it, and the copy is what was typed.
+                        text: card.inputPrefix
+                            + (vm ? vm.highlighted(
+                                       card.expression, Theme.isDark()) : "")
+
+                        onClicked: {
+                            page.keyboardNavigation = false
+                            page.currentIndex = card.index
                         }
                     }
 
@@ -338,12 +346,9 @@ Item {
                         entryMenu.popup(mx, my)
                     }
 
-                    TapHandler {
-                        acceptedButtons: Qt.LeftButton
-                        onTapped: {
-                            page.keyboardNavigation = false
-                            page.currentIndex = card.index
-                        }
+                    onClicked: {
+                        page.keyboardNavigation = false
+                        page.currentIndex = card.index
                     }
                 }
 
@@ -409,9 +414,24 @@ Item {
                     control: card
                     keyboardFocus: card.keyboardNavigation
                 }
+            }
 
-                // On the card, not on the delegate: the delegate is full-bleed, so
-                // a handler there would light the card up from the page gutter.
+            // The card's hover, from an overlay that sits *above* the content.
+            //
+            // Not on the background, which is where this used to be: `background`
+            // is a sibling of `contentItem`, so a pointer over anything the card
+            // holds — its two text lines above all — walks a chain that never
+            // includes the background, and its handler saw nothing. Measured with
+            // the real cursor: over a line's text, `hovered` was false, while the
+            // same pointer over the card's padding reported true. This item is
+            // declared after the content, so it is the topmost thing over the card
+            // and its handler is always in that chain. A plain `Item` accepts no
+            // button, so clicks, drags and the text's own selection still reach
+            // what is underneath.
+            Item {
+                id: hoverOverlay
+
+                anchors.fill: cardBg
                 HoverHandler { id: cardHover }
             }
 

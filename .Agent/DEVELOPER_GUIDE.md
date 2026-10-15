@@ -106,6 +106,13 @@ qml/
                                 #     that geometry lives), RadioSettingRow (a SettingItem whose
                                 #     radio leads its own label), KeyboardPanel, SearchBar,
                                 #   SegmentedItem/SelectorBarItem (focus-indicator shadows)
+                                #   CopyableLabel (the read-only, selectable text box both the
+                                #     calculator's outcome and a history card's two lines use: a
+                                #     bare QtQuick.TextEdit whose selection colour comes from the
+                                #     theme and which forwards its right click and its click — see
+                                #     the two text traps in the list below),
+                                #   CommandBar (a row of `Action`s that folds what does not fit into
+                                #     an overflow menu; see the toolbar bullet under Rendering)
 docs/
   architecture.md               # Model-first walkthrough: the two requests, the data flow
                                 # (sources in, sinks out), the write path and the error kinds;
@@ -269,6 +276,33 @@ transparent corner, not `srgba(255,255,255,1)`.
   never showed the problem** — it reads the window's icon live, where the taskbar button caches — so
   "it works in Alt+Tab" is not evidence that the icon is fine. A quick probe: grab the desktop
   (`QScreen.grabWindow(0)`) and look at the button, rather than trusting `QWindow.icon()`.
+- **A bare `QtQuick.TextEdit` is not a Control, so its selection colour is the OS's.** `QtQuick.Controls`
+  exports no `TextEdit` at all, so `TextEdit` in a page is the plain Qt Quick item: no background, no
+  padding, no chrome to strip — and no palette of its own to theme either. Qt paints its selection with
+  the *application* palette's highlight, which is Windows' dark blue next to an accent-coloured app.
+  Set `selectionColor` (and `selectedTextColor`) from the theme, which is what every RinUI text control
+  does for exactly this reason (`TextArea`, `TextField` and `TextInput` all say
+  `selectionColor: Theme.currentTheme.colors.primaryColor`).
+- **A pointer handler cannot watch a click on text, and a `HoverHandler` on a Control's `background`
+  cannot see hover over its content.** Both were hit on the history page's cards, and both are about
+  *where in the item chain* the pointer actually is:
+  * The text control takes the press for its own selection, so a `TapHandler` on an item *above* the
+    control never fires (measured: the page's `TapHandler` on a line saw nothing). Moving the handler
+    *into* the label, on the `MouseArea` that already sits above the control, works for the click and
+    silently stops drag-selection: the handler has to take the grab that selection needs (measured:
+    `selectedText.length` 12 before, 0 after). The pattern that gives both is to recognise the click by
+    its *effect* — `onCursorPositionChanged: if (selectedText.length === 0) ...` — because a click moves
+    the caret and selects nothing, while a drag leaves a selection behind.
+  * `background` is a **sibling** of `contentItem`, so a pointer over anything the card holds walks a
+    chain that never includes the background and its `HoverHandler` never fires (measured with a real
+    cursor: over a line's text `hovered` was false while the same pointer over the card's padding
+    reported true — and note the padding is *outside* the card's rounded rect only by `cardInset`).
+    An `Item` declared after the content, anchored to the same rect, is topmost and its handler is
+    always in the chain; a plain `Item` accepts no button, so clicks and drags still reach the text.
+  * Corollary for testing either of these: `QTest.mouseMove`/`mouseClick` do **not** produce the hover
+    events a `HoverHandler` waits for, and `SetCursorPos` counts *physical* pixels while Qt's
+    `mapToGlobal` is logical — on this 150% display every probe was off by a third of the screen until
+    the `devicePixelRatio` was multiplied in. Use a real cursor move, and scale the coordinates.
 - **Equal-sized cells in a `GridLayout` need the documented mechanism, not arithmetic.** Every key of
   a keyboard tab is the same size: it sets `Layout.preferredWidth/Height: 1` and the same
   `horizontal/verticalStretchFactor`. Two traps on the way there. A preferred (or minimum) size of
