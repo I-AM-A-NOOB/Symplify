@@ -111,18 +111,21 @@ docs/
                                 # (sources in, sinks out), the write path and the error kinds;
                                 # architecture.svg = layer map
 icon/
-  Symplify.svg                  # The application icon, authored (Illustrator). The only source.
-  Symplify.ico                  # BUILD ARTIFACT, committed: the nine sizes Windows asks for,
-                                # from `magick icon/Symplify.svg -define
-                                # icon:auto-resize=16,20,24,32,40,48,64,128,256 icon/Symplify.ico`.
-                                # Nuitka embeds it in the exe and main.py loads it at runtime,
-                                # so both ship and both read the same file — regenerate after any
-                                # change to the SVG. Do not "optimise" the ICO by hand: this
-                                # ImageMagick (7.1.2) writes BMP entries and silently ignores
-                                # `-compress Zip`, so the file is 381 KB where the same pixels
-                                # as PNG entries would be ~50 KB. It is a committed asset, not
-                                # generated at build time, so a fresh checkout needs no tool.
+  Symplify.svg                  # The application icon, authored (Illustrator). The only source, and
+                                # the file the *running app* draws with (see the icon bullet under
+                                # Building) - the .ico exists for the exe's own resources.
+  Symplify.ico                  # BUILD ARTIFACT, committed: nine sizes (16/20/24/32/40/48/64/128/256)
+                                # as PNG entries, ~31 KB. Nuitka embeds it into the exe; regenerate
+                                # it with scripts/build_icon.py after any change to the SVG.
+icons-png/                      # BUILD ARTIFACT, git-ignored, written by the same script: those
+                                # nine sizes as loose 32-bit PNGs. Kept outside icon/ on purpose -
+                                # build_windows.py ships that whole directory, and nothing in the app
+                                # reads a loose PNG.
+                                #   uv run python scripts/build_icon.py
+
 scripts/
+  build_icon.py                 # Regenerates icon/Symplify.ico + icons-png/ from the SVG (Qt, so no
+                                # external tool - see the icon bullet under Building)
   build_windows.py              # Nuitka standalone build
   release.py                    # SemVer bump (pyproject + python/version.py), optional tag
   extract_themes.py             # Regenerates code_themes.THEMES from upstream (VS Code's five,
@@ -134,6 +137,35 @@ scratch/                        # Preserved experiments — NOT part of the app 
                                 # plotter prototype, the future plotting track's seed
 .github/workflows/build-windows.yml  # Builds on windows-latest for tags v* / manual runs
 ```
+
+**Why the ICO container is packed by hand.** Qt could not be asked for one: it has no ICO writer
+at all (`QImageWriter` has no `ico` format), and ImageMagick's is the one that must not be used - its
+ICO *writer* stores every entry as an uncompressed BMP/DIB whatever you feed it (PNG input, ICO
+input, and `-compress Zip` is silently ignored: upstream issues
+[#2394](https://github.com/ImageMagick/ImageMagick/issues/2394),
+[#8578](https://github.com/ImageMagick/ImageMagick/issues/8578)). That is the difference between
+381 KB and 31 KB for the same pixels, so `pack_ico()` writes the 6-byte header, the 16-byte entries
+and the payloads itself. A BMP/DIB payload would additionally need a hand-laid colour bitmap *plus* a
+1 bpp AND mask to carry alpha - ImageMagick's own BMP writer cannot be reused for that either (it
+drops alpha and writes `biHeight = height`, so readers take the entry for twice as tall as it is) -
+and it only matters to a pre-Vista reader, so it is not written.
+
+ImageMagick is still fine for *reading*: `magick identify icon/Symplify.ico` inspects what we write,
+and it is the easiest way to look at `icons-png/`.
+
+**Why Qt rasterises it.** ImageMagick would have to be installed before the icon can be rebuilt;
+PySide6 is already a hard dependency, and it is the *same* renderer the app draws this SVG with
+(`Icon.qml` renders it in the title bar), so the file and the title bar cannot disagree about how the
+artwork looks. A 1024 px master is rendered once and each size resampled from it, which is what keeps
+the small entries clean - checked against ImageMagick's own master-then-Lanczos pipeline, where the
+two agree to a normalized RMSE of 0.4-2.1% (antialiased edge pixels).
+
+**Alpha is the point of the artwork, so it is audited rather than assumed.** The script samples the
+master's corners and centre and says so when the SVG turns out to be fully opaque, because an
+opaque-white corner is exactly what a lost alpha channel looks like - the `.ico` this repo once
+committed had lost it. A regenerated file can be checked the same way:
+`magick identify -format '%[pixel:p{0,0}]' icon/Symplify.ico` reads `srgba(0,0,0,0)` for a
+transparent corner, not `srgba(255,255,255,1)`.
 
 ## Core rules & invariants
 
@@ -1436,13 +1468,20 @@ Data-file pitfalls for frozen builds (update this list when you add data-reading
 - `ziamath` / `ziafont` fonts, `latex2mathml/unimathsymbols.txt`, RinUI's whole QML tree,
   `python/keyboard_config.yaml`, **`icon/`,** and `fontTools` (read by `python/fonts.py` to inspect
   installed fonts) must be included via the `--include-*` flags in `scripts/build_windows.py`.
-- **The application icon is one file with two jobs.** `--windows-icon-from-ico=icon/Symplify.ico`
-  embeds it in the exe (Explorer, taskbar, the title bar) and `--include-data-dir=icon=icon` ships
-  the same file for `main.py`'s `app.setWindowIcon(...)` at runtime — one artifact, so the two
-  cannot drift. Both read the nine-size ICO in `icon/` (regenerate it from the SVG; see Source
-  layout). Verify the runtime one by checking `QApplication.windowIcon().isNull()` after
-  `setWindowIcon`: Nuitka makes `ROOT` the exe's directory, so a missing `.ico` is a null icon and
-  not an error.
+- **The icon reaches three surfaces through two files, and `icon/` has to ship for two of them.**
+  `--windows-icon-from-ico=icon/Symplify.ico` embeds the `.ico` in the exe (Explorer, the shortcut,
+  the pinned taskbar entry), while `--include-data-dir=icon=icon` ships the directory for the
+  *running* app: `main.py` sets the window icon from `Symplify.svg` — the vector, so every size is
+  drawn rather than resampled — with the `.ico` behind it as a fallback, and `MainWindow.qml` hands
+  the same SVG to RinUI's title bar (`icon:`, which reaches `Icon.qml`'s `Image`). Regenerate both
+  with `uv run python scripts/build_icon.py` after any change to the SVG (see Source layout).
+  Two things this needs that a Qt prune can silently take away, so keep them in mind when editing
+  the lists above: `qt6svg.dll` (in `KEEP_QT_DLLS`) and the two plugins under
+  `PySide6/qt-plugins/` that Qt only loads by name — `imageformats/qsvg.dll` for QML's `Image` and
+  `iconengines/qsvgicon.dll` for `QIcon`. `prune_qt` touches neither the plugin directories nor
+  anything but `qt6*.dll`, which is why they survive today.
+  Verify the runtime icons by checking `QApplication.windowIcon().isNull()` after `setWindowIcon`:
+  Nuitka makes `ROOT` the exe's directory, so a missing file is a null icon and not an error.
 - Packages whose data is loaded through `importlib.resources` by name
   (e.g. `ziamath.fonts`) need `--include-module=<subpackage>` — Nuitka can't follow string refs.
 - **Include the subpackage you import, not the whole distribution.** `fontTools` was included as a
@@ -1457,6 +1496,10 @@ Data-file pitfalls for frozen builds (update this list when you add data-reading
   reason: sympy's `polys.rootisolation` and `polys.polyquinticconst` generate C big enough to exhaust
   MSVC's second pass *on the CI runner* while compiling fine locally (measured: same commit, CI
   `C1002`, local build clean), so the flag trades build time for a compiler that has the memory.
+- **`--jobs=1` is added on CI only** (`CI_JOBS` in `scripts/build_windows.py`, keyed off the `CI` /
+  `GITHUB_ACTIONS` environment). `--low-memory` alone leaves several C compilations running at once,
+  and that is exactly what the GitHub runner could not finish; on a dev machine the local `clcache`
+  makes parallelism cheap and `--low-memory` is enough, so the flag would only cost build time.
 - **A dependency sympy reaches for by name has to be included explicitly, or the frozen app
   silently loses it.** `gmpy2` was one until it was removed (invariant 1 has the measurement that
   decided that): `sympy/external/gmpy.py` imports it inside a `try:` at module scope, and dropping it

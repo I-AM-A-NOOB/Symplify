@@ -6,6 +6,13 @@ FluentWindow {
 
     visible: true
     title: qsTr("Symplify")
+    // The mark in RinUI's own title bar, left of the title. An SVG and not the
+    // .ico: RinUI draws it through `Icon.qml`'s `Image`, which asks for one
+    // 16 px pixmap, and the vector keeps it sharp on a 150%/200% display where
+    // the same request is 24/32 px. Resolved against this file, so it is
+    // `<root>/icon/Symplify.svg` in a checkout and next to the exe when frozen
+    // (`ROOT` is the exe's directory there).
+    icon: Qt.resolvedUrl("../icon/Symplify.svg")
     // Size comes from the settings, read once at creation: assigning the size
     // later (from the viewmodel) and then maximizing leaves the window drawn at
     // the old size with a white border around it on Windows. Setting it here

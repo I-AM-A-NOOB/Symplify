@@ -18,6 +18,11 @@ nuitka_output.txt
 /docs/architecture.html
 /docs/architecture_files/
 
+# Icon rasters, written from icon/Symplify.svg by icon/build-icons.ps1. The .ico
+# is committed because Nuitka embeds it; these loose PNGs are derived from the
+# same SVG by a committed script, and nothing reads them.
+/icons-png/
+
 # Old files
 *.old
 *.old.py

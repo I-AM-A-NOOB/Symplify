@@ -12,6 +12,7 @@ Run from the repository root::
 """
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -42,17 +43,11 @@ CMD = [
     # the same files compiled here, where cl had more room. This is the flag
     # Nuitka documents for exactly that; it costs build time, not correctness.
     "--low-memory",
-    # And one C compilation at a time. `--low-memory` already took the failures
-    # from five to one on the CI runner (`sympy.polys.polyquinticconst`, a 26k-line
-    # C file) — it reduces how many compilations run at once, so going all the way
-    # to one is the same lever, pulled harder. Costs build time; this machine has
-    # the clcache to make that cheap, and the runner is free but slow.
-    "--jobs=1",
     "--windows-console-mode=disable",
     # The exe's own icon (Explorer, taskbar, alt-tab, the title bar of a windowed
     # build). `icon/Symplify.ico` holds all nine sizes Windows asks for, so one
-    # flag is enough; regenerate it from the SVG with the command in
-    # `.Agent/DEVELOPER_GUIDE.md`.
+    # flag is enough; regenerate it from the SVG with `scripts/build_icon.py`
+    # (see `.Agent/DEVELOPER_GUIDE.md`).
     "--windows-icon-from-ico=icon/Symplify.ico",
     # RinUI (python package + its QML module tree)
     "--include-package=RinUI",
@@ -180,6 +175,20 @@ PRUNE_QML_DIRS = (
 )
 
 
+#: One C compilation at a time, but only where the memory is short.
+#:
+#: `--low-memory` alone still runs several compilations at once, and the GitHub
+#: runner could not get through `sympy.polys.polyquinticconst` (a 26k-line
+#: generated C file) that way: MSVC's second pass died with `fatal error C1002:
+#: compiler is out of heap space in pass 2` on the same commit that builds here.
+#: `--jobs=1` is the same lever pulled all the way, and it costs build time —
+#: which is the right trade on a CI runner (free, slow, less memory) and the
+#: wrong one on a dev machine, where the local clcache makes parallelism cheap
+#: and `--low-memory` is enough. So it is applied on CI and not locally; set
+#: `CI=1` to force it anywhere.
+CI_JOBS = os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS")
+
+
 def _size(path: Path) -> int:
     """Bytes under ``path`` (a file or a directory tree)."""
     if path.is_file():
@@ -238,8 +247,14 @@ def main() -> int:
         print(f"Pruned {prune_qt(DIST) / 1e6:.1f} MB from {DIST}")
         return 0
 
+    # Before the script path: Nuitka's parser is happy either way, but keeping
+    # the flags ahead of the positional argument is the shape its own --help and
+    # its docs use.
+    command = CMD[:-1] + (["--jobs=1"] if CI_JOBS else []) + CMD[-1:]
+    if CI_JOBS:
+        print("CI detected: adding --jobs=1 (see the note on CI_JOBS)")
     print("Nuitka build root:", ROOT)
-    code = subprocess.call(CMD, cwd=ROOT)
+    code = subprocess.call(command, cwd=ROOT)
     cleanup_rinui_dir()
     if code == 0:
         print(f"Pruned {prune_qt(DIST) / 1e6:.1f} MB of unused Qt modules")

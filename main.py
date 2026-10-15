@@ -39,11 +39,21 @@ def main() -> int:
     app = QApplication(sys.argv)
 
     # Every surface that asks the application for its icon — the window's title
-    # bar, the taskbar button, alt-tab — would otherwise show Qt's default. The
-    # .ico is the same file Nuitka embeds into the exe, so the two cannot drift;
-    # it ships with the app (see scripts/build_windows.py), and `ROOT` is the
-    # directory next to it whether this is a checkout or a frozen build.
-    app.setWindowIcon(QIcon(str(ROOT / "icon" / "Symplify.ico")))
+    # bar, the taskbar button, alt-tab — would otherwise show Qt's default.
+    #
+    # The SVG comes first because it is the only source and it scales: Qt's
+    # `qsvgicon` engine (shipped in the build, see scripts/build_windows.py)
+    # registers it as scalable, so every request is drawn at the size asked for —
+    # measured: it answers 16 through 512 px, `availableSizes()` reports none
+    # because there is no bound, and the 128 px alt-tab tile is not an upscaled
+    # bitmap. The .ico is added as well and answers only if the SVG engine cannot
+    # load (a pruned plugin, a missing file), so a broken vector still leaves a
+    # real icon instead of Qt's default placeholder; it is also the same file
+    # Nuitka embeds into the exe.
+    icon = QIcon()
+    icon.addFile(str(ROOT / "icon" / "Symplify.svg"))
+    icon.addFile(str(ROOT / "icon" / "Symplify.ico"))
+    app.setWindowIcon(icon)
 
     # Qt Quick scrolls a `Flickable` by `wheelScrollLines * 24` pixels per wheel
     # notch — `qquickflickable.cpp`: `wheelScroll = -styleHints()->wheelScrollLines() * 24`
