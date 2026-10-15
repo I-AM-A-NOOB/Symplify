@@ -93,6 +93,22 @@ def main() -> int:
     vm.install_log_capture()
 
     window.load(ROOT / "qml" / "MainWindow.qml")
+
+    # And once more now that the QML has built the window. This is not
+    # belt-and-braces: without it the taskbar button is a blank square.
+    #
+    # `app.setWindowIcon` above gives every window created afterwards this icon,
+    # and Qt does put it on the window — measured on the live HWND, `ICON_SMALL`
+    # and `ICON_BIG` both hold our artwork. But the shell snapshots a taskbar
+    # button's icon when the button appears, and by then RinUI has changed the
+    # window's flags (`FluentWindowBase.Component.onCompleted` clears
+    # `FramelessWindowHint`), which makes Qt recreate the native window
+    # underneath the shell's feet — so what the button took was the *class* icon
+    # Qt registers, `IDI_APPLICATION`, an empty square. Alt+Tab never showed the
+    # problem because it reads the window's icon live; the button re-reads only
+    # when the icon changes, which is exactly what this does.
+    window.root_window.setIcon(icon)
+
     return app.exec()
 
 

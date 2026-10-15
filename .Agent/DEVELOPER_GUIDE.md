@@ -257,6 +257,18 @@ transparent corner, not `srgba(255,255,255,1)`.
 
 ## Known RinUI / Qt traps (learned the hard way)
 
+- **The taskbar button's icon is a snapshot, and RinUI moves the ground under it.** The window's
+  icon has to be in place when the shell *creates* the taskbar button. `app.setWindowIcon` is not
+  enough: RinUI's `FluentWindowBase.Component.onCompleted` clears `FramelessWindowHint` after the
+  window is already shown, and changing window flags makes Qt **recreate the native window**, so what
+  the button took was the *class* icon Qt registers — `IDI_APPLICATION`, an empty square. `main.py`
+  therefore calls `window.root_window.setIcon(icon)` again right after `load()`, which is what makes
+  the button re-read it. Measured on the live HWND, which is the only way to tell the two apart:
+  `WM_GETICON`'s `ICON_SMALL`/`ICON_BIG` hold our artwork (transparent corners, ~60% of the image
+  see-through) while `GetClassLongPtr(GCLP_HICONSM)` holds a different, mostly-opaque icon. **Alt+Tab
+  never showed the problem** — it reads the window's icon live, where the taskbar button caches — so
+  "it works in Alt+Tab" is not evidence that the icon is fine. A quick probe: grab the desktop
+  (`QScreen.grabWindow(0)`) and look at the button, rather than trusting `QWindow.icon()`.
 - **Equal-sized cells in a `GridLayout` need the documented mechanism, not arithmetic.** Every key of
   a keyboard tab is the same size: it sets `Layout.preferredWidth/Height: 1` and the same
   `horizontal/verticalStretchFactor`. Two traps on the way there. A preferred (or minimum) size of
@@ -1480,8 +1492,10 @@ Data-file pitfalls for frozen builds (update this list when you add data-reading
   `PySide6/qt-plugins/` that Qt only loads by name — `imageformats/qsvg.dll` for QML's `Image` and
   `iconengines/qsvgicon.dll` for `QIcon`. `prune_qt` touches neither the plugin directories nor
   anything but `qt6*.dll`, which is why they survive today.
-  Verify the runtime icons by checking `QApplication.windowIcon().isNull()` after `setWindowIcon`:
-  Nuitka makes `ROOT` the exe's directory, so a missing file is a null icon and not an error.
+  Verify a runtime icon by grabbing the desktop and looking at the taskbar button — not by asking
+  `QApplication.windowIcon()`, which is non-null even when the button shows the wrong thing (see the
+  taskbar-icon trap in the list above). Nuitka makes `ROOT` the exe's directory, so a missing file is
+  a null icon and not an error.
 - Packages whose data is loaded through `importlib.resources` by name
   (e.g. `ziamath.fonts`) need `--include-module=<subpackage>` — Nuitka can't follow string refs.
 - **Include the subpackage you import, not the whole distribution.** `fontTools` was included as a
