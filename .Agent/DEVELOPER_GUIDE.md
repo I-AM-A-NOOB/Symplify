@@ -50,6 +50,10 @@ python/
                                 # OS convention), atomic YAML read/write, validation. Zero Qt.
   rinui_bootstrap.py            # Takes RinUI's own config directory over and injects our
                                 # settings; `prepare(ROOT)` is the ONLY way to import RinUI.
+  window_icon.py                # Puts the app's .ico on the *window class* (Windows only): Qt does
+                                # not put QApplication's icon on a window, so the class icon is what
+                                # the shell falls back to while a window is still being built — see
+                                # the icon bullet under Building.
   window_drag.py                # Replaces RinUI's WinEventManager with one whose title-bar drag
                                 # is a real caption press, and flags the drag so RinUI's own
                                 # onPositionChanged move is skipped. Windows only.
@@ -1555,6 +1559,13 @@ Data-file pitfalls for frozen builds (update this list when you add data-reading
   `PySide6/qt-plugins/` that Qt only loads by name — `imageformats/qsvg.dll` for QML's `Image` and
   `iconengines/qsvgicon.dll` for `QIcon`. `prune_qt` touches neither the plugin directories nor
   anything but `qt6*.dll`, which is why they survive today.
+  **The window class carries the icon too, and that is what covers the start-up.** Qt does not put
+  `QApplication`'s icon on a window — measured on the live HWND, `WM_GETICON` holds nothing until
+  something calls `QWindow.setIcon` — so what the shell shows while a window is still being built is
+  the *class* icon Qt registered, `IDI_APPLICATION`: the blank square that appeared "until the UI
+  finished rendering", and sometimes for good. `python/window_icon.py` makes both class icons ours
+  with `LoadImageW` + `SetClassLongPtrW`, after which even that fallback is right (measured: the
+  class icon's transparency went from ~16% to ~59%, matching the icon).
   Verify a runtime icon by grabbing the desktop and looking at the taskbar button — not by asking
   `QApplication.windowIcon()`, which is non-null even when the button shows the wrong thing (see the
   taskbar-icon trap in the list above). Nuitka makes `ROOT` the exe's directory, so a missing file is

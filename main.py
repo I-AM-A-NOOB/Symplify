@@ -14,6 +14,7 @@ from PySide6.QtWidgets import QApplication
 
 # The bootstrap owns the RinUI import (and takes RinUI's own config directory
 # over, see python/rinui_bootstrap.py). Never import RinUI above this line.
+from python import window_icon
 from python.rinui_bootstrap import prepare
 from python.keyboard_config import load_keyboard_tabs
 from python.viewmodel.main_viewmodel import MainViewModel
@@ -96,6 +97,8 @@ def main() -> int:
 
     # And once more now that the QML has built the window. This is not
     # belt-and-braces: without it the taskbar button is a blank square.
+    # (Its class icon is set too, because that is what the shell falls back to
+    # while this window is still being built — see `python/window_icon.py`.)
     #
     # `app.setWindowIcon` above gives every window created afterwards this icon,
     # and Qt does put it on the window — measured on the live HWND, `ICON_SMALL`
@@ -108,6 +111,8 @@ def main() -> int:
     # problem because it reads the window's icon live; the button re-reads only
     # when the icon changes, which is exactly what this does.
     window.root_window.setIcon(icon)
+    window_icon.apply_to_window_class(window.root_window,
+                                      ROOT / "icon" / "Symplify.ico")
 
     return app.exec()
 
