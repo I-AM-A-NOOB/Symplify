@@ -445,9 +445,9 @@ transparent corner, not `srgba(255,255,255,1)`.
   the app's answer, and one line of it is all a field needs — `CodeContextMenu { editor: thatControl }`:
   a `MouseArea` that claims the right button (`z: 1`, above the editor's `contentItem`, or the press
   never arrives — measured: without it nothing in the component runs), opens RinUI's `TextInputMenu`
-  at the pointer in its *own* coordinates (the menu is declared inside the `MouseArea`), and carries
-  the close-and-reopen hand-off `HistoryCard` uses, because a second gesture on an open menu cannot
-  just be re-popped.
+  at the pointer in its *own* coordinates (the menu is declared inside the `MouseArea`), and re-opens
+  it there on the next gesture — no hand-off and no fade, because of the exit animation it does not
+  have.
   * **Switching Qt's menu off takes two lines, and both are Qt's contract.** `T.ContextMenu.menu: null`
     alone is not enough — the request then carries on to the next item with a menu and opens *that*
     one, which is the flash of an unthemed QQC2 menu in front of ours. `QQuickContextMenu::event()`
@@ -461,6 +461,18 @@ transparent corner, not `srgba(255,255,255,1)`.
     object re-runs it the next time it reads the value — measured: a field-level `null` held for the
     first clicks and then handed the request to Qt's menu again. Our own `MouseArea` has no such value
     to come back.
+  * **The menu has no exit animation, and that is what lets a re-open be a plain call.** RinUI's `Menu`
+    fades out over 150 ms, and that fade plays *at the old point* before a new one fades in: measured
+    across a second right click elsewhere in the field, opacity 0.96 → 0.0 over 100 ms at the first
+    point, then the popup jumping and fading in — a blink where an open should be. With `exit: null`
+    the gesture is indistinguishable from a first click (measured: a single 0 → 1 fade, already at the
+    new point by the first 20 ms sample). Dismissing is unaffected — the popup hides either way, just
+    without the fade, which is what a native menu does too — and because the close is then synchronous
+    (measured: `popup()` straight after it takes), `place()` can close an open menu and re-open it in
+    one call instead of the `onClosed` hand-off `HistoryCard` needs. That card's menu keeps its fade
+    and keeps the hand-off; this one needs neither, and it is the exit animation that decides which
+    shape a menu has. (`Shift+F10` while a menu is open reaches nothing either way: the popup holds
+    the focus the shortcut is gated on.)
   * **The editor is not always ours, which is why this is a component and not three lines per page.**
     `CodeField`/`CodeArea` and RinUI's `TextField`s take the one line; the Calculator's Code box takes
     the same component as a *sibling* of the box (`editor: codeArea.textArea`, filling the same rect,
@@ -471,10 +483,10 @@ transparent corner, not `srgba(255,255,255,1)`.
     and the settings fields, the Code box): a right click opens exactly one `TextInputMenu` whose
     top-left is *at the pointer* — read off the rendered pixels (the changed-pixel box of a
     before/after grab starts 2px up-left, which is the menu's shadow), not from `x`/`y` alone; a
-    second right click elsewhere in the field moves the menu there; a press *on* the open menu leaves
-    it standing instead of summoning Qt's; and `Shift+F10` with the field focused opens one at
-    RinUI's own place for a keyboard route (centred just under the field), which is what the attached
-    menu used to cover.
+    second right click elsewhere in the field moves the menu there as a plain open — one fade-in, at
+    the new point, sampled every 20 ms; a press *on* the open menu leaves it standing instead of
+    summoning Qt's; and `Shift+F10` with the field focused opens one at RinUI's own place for a
+    keyboard route (centred just under the field), which is what the attached menu used to cover.
 
 - Import **unversioned** `QtQuick` (`import QtQuick`) where you need current API — `import QtQuick 2.15`
   version-gates newer members (e.g. `currentRow`, `itemAtCell` revisions).

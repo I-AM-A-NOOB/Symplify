@@ -60,24 +60,7 @@ MouseArea {
     //: coordinates and the press position needs no mapping. (`mouse.scenePosition`,
     //: `mouse.sceneX/sceneY` and `Item.window` are all absent from this build's QML
     //: — measured — and `mapToItem(null, …)` answers nothing.)
-    onClicked: (mouse) => root.openAt(mouse.x, mouse.y)
-
-    //: The one door, and the *second* gesture is why it is not a one-liner (the
-    //: same shape as `HistoryCard.openMenu`). RinUI's `Menu` drives its `x`/`y`
-    //: from `posX`/`posY` through its `enter` transition, so a point handed to
-    //: `popup()` on an *open* menu moves nothing; every gesture therefore closes
-    //: what is open and opens again, and the re-open waits for `onClosed` — a QQC2
-    //: `Popup` keeps `visible` true until its exit transition has finished, so a
-    //: `popup()` straight after `close()` is silently swallowed. `pendingPoint` is
-    //: that hand-off, and is null unless a re-open asked for it.
-    function openAt(x, y) {
-        if (menu.visible) {
-            pendingPoint = Qt.point(x, y)
-            menu.close()
-            return
-        }
-        place(x, y)
-    }
+    onClicked: (mouse) => root.place(mouse.x, mouse.y)
 
     //: The keyboard route, which has no pointer: centred just under the field,
     //: the app's own place for it (`HistoryCard.openMenuDefault`). Centring by
@@ -87,30 +70,46 @@ MouseArea {
         place((width - menu.width) / 2, height + 5)
     }
 
-    //: RinUI's `Menu` animates `x`/`y` towards `posX`/`posY`, so the two are set
-    //: together and `popup()` is called with no arguments (what `HistoryCard`
-    //: does, and the only shape measured to land where it is told to).
+    //: RinUI's `Menu` drives its `x`/`y` from `posX`/`posY` through its `enter`
+    //: transition, so the two are set together and `popup()` is called with no
+    //: arguments — assigning them on an *open* menu would move nothing, which is
+    //: why an open one is closed first. That close is a plain call and not the
+    //: `onClosed` hand-off `HistoryCard` needs, because this menu has no exit
+    //: animation (below): the popup is hidden and `closed` is emitted inside
+    //: `close()` itself, so the `popup()` that follows it takes (measured: an
+    //: `openDefault()` on an open menu moved it from (150, 17) to (9.5, 39)).
+    //: (Give the menu an exit animation and this needs that hand-off back — a QQC2
+    //: `Popup` keeps `visible` true until the exit has finished, and swallows a
+    //: `popup()` that does not wait for it.)
+    //:
+    //: A right click never arrives with the menu open — the press outside it
+    //: closes it inside the press, and a press on it never reaches this
+    //: `MouseArea` — and neither does `Shift+F10` while it is open, since the
+    //: popup holds the focus the shortcut is gated on. The guard is for the one
+    //: route that can: a window that loses and regains focus with a menu still up.
     function place(x, y) {
+        if (menu.visible)
+            menu.close()
         menu.posX = x
         menu.posY = y
         menu.popup()
     }
-
-    //: Set only while a second gesture waits for the open menu to close.
-    property var pendingPoint: null
 
     TextInputMenu {
         id: menu
 
         target: root.editor
 
-        onClosed: {
-            if (root.pendingPoint) {
-                const p = root.pendingPoint
-                root.pendingPoint = null
-                root.place(p.x, p.y)
-            }
-        }
+        //: No exit animation on purpose. The menu is re-opened at a new point on
+        //: the next gesture, and RinUI's 150 ms fade-out plays *at the old point*
+        //: before the new one fades in — measured, a second right click elsewhere
+        //: in the field showed the menu at the first point fading 0.96 → 0.0 over
+        //: 100 ms, then the popup jumping and fading in: one blink where a plain
+        //: open should be. Without it, that gesture is indistinguishable from a
+        //: first click (measured: a single fade-in, at the new point). Dismissing
+        //: is unaffected — the popup hides either way, just without the fade,
+        //: which is what a native menu does too.
+        exit: null
     }
 
     //: Shift+F10 is what Qt's attached menu used to cover. A `Shortcut` and not a
