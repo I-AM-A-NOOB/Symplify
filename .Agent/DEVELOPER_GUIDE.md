@@ -1577,11 +1577,30 @@ backdrop floats up from 10px below while fading in, and carries the page's own t
   - **Coverage is reported per chain, not per family.** A glyph is only a problem when *no* family
     in the list can draw it, which is the case Qt cannot rescue; that is what
     `codeMissingGlyphs` / `keyboardMissingGlyphs` show, alongside `*FallbackCount` ("then 2
-    fallbacks"). The measurement uses `QRawFont.glyphIndexesForString` (glyph 0 = `.notdef`), cached
-    per family. The obvious `QFontMetrics.inFont()` is **unusable**: it answers `True` for every
+    fallbacks"). The measurement uses `QRawFont.glyphIndexesForString` (glyph 0 = `.notdef`), asked
+    **once per family for the whole glyph set** — the per-family answer *is* that set's missing
+    subset, so asking it one character at a time throws that away and rebuilds the `QRawFont` for
+    every (family, character) pair. That is what the `lru_cache` on it is for, and what it cost:
+    measured against the code chain (3 families, `CODE_GLYPHS`, i.e. 96 pairs) **216 ms** that way
+    and **9 ms** batched, for a chain that reports nothing missing either way. The obvious
+    `QFontMetrics.inFont()` is **unusable**: it answers `True` for every
     character of every family (Qt's substitution hides the gap), so it would report full coverage
     for a face that draws tofu. `python/fonts.py` holds only the *file-level* truth (fontTools, for
     ziamath); the Qt-side check lives in the viewmodel, keeping the model layer Qt-free.
+  - **The Settings page's build pays all of the above, because the collapsible font rows are built
+    eagerly.** Measured: in a harness whose *first* built page it is, the page becomes ready at
+    ~1.09 s — that first page also pays the QML engine's warm-up for every shared component, which
+    is why the four pages built after it cost 24-183 ms each; built a second time, with the
+    viewmodel's caches warm, the same page costs ~340 ms. Which of those properties the *build*
+    reads was measured the other way round, since a build leaves their caches warm: after two
+    builds, a first read of `mathFonts`, `codeMissingGlyphs`, `codeFallbackCount` and `codeFont` all
+    answer in 0.1-0.4 ms — they had already been computed, so the rows are read at creation and
+    their cost is on the load path, not on the expand. Per-property, first read in a fresh process:
+    `codeMissingGlyphs` 216 ms (of which ~90 ms is the one-time `QFontDatabase.families()`
+    population, and ~125 ms the font builds), `mathFonts` 158 ms (the MATH-table scan, cached per
+    process in `fonts.py`), `keyboardMissingGlyphs` 9 ms — and 4.6 ms on *every* later read, because
+    `label_glyphs()` re-parses `keyboard_config.yaml` each time (`load_keyboard_tabs` is not
+    cached).
   - **A font that claims coverage gets no fallback.** Qt falls back only when the earlier face
     *reports* it lacks the glyph. A broken or odd font can therefore defeat the chain: the installed
     `Fixedsys` is a bitmap face DirectWrite refuses to load (`CreateFontFaceFromHDC() failed`), yet

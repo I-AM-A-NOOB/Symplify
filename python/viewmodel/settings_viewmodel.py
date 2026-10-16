@@ -68,16 +68,24 @@ def _chain_missing_glyphs(families: str, glyphs: str) -> str:
     is drawn by a later one; only a glyph no entry has would show as a tofu box.
     Without a running application there is nothing to measure, so the answer is
     "nothing missing" rather than a false accusation.
+
+    One `QRawFont` per family, not one per (family, character): the per-family
+    answer is already the *set* of glyphs it cannot draw, so asking it about one
+    character at a time threw that away and rebuilt the font for every pair —
+    measured at 216 ms for the code chain (about 1.8 ms a build, and the chain
+    reports nothing missing), which is what the dropdown's row waits for. Asking
+    once per family keeps the same answer and makes the cache in
+    `_family_missing_glyphs` — keyed by (family, glyphs) for exactly this reason —
+    do its job.
     """
     if not glyphs or QGuiApplication.instance() is None:
         return ""
     chain = installed_chain(families)
     if not chain:
         return glyphs
+    unwritable = [_family_missing_glyphs(family, glyphs) for family in chain]
     return "".join(
-        char
-        for char in glyphs
-        if all(char in _family_missing_glyphs(family, char) for family in chain)
+        char for char in glyphs if all(char in missing for missing in unwritable)
     )
 
 
