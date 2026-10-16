@@ -167,11 +167,20 @@ scripts/
   build_icon.py                 # Regenerates icon/Symplify.ico + icons-png/ from the SVG (Qt, so no
                                 # external tool - see the icon bullet under Building)
   build_windows.py              # Nuitka standalone build
-  release.py                    # SemVer bump (pyproject + python/version.py), optional tag
+  release.py                    # SemVer bump (pyproject + python/version.py), optional tag, and
+                                # the packaging the release path uses: the portable zip and the
+                                # setup executable (see the packaging bullets under Versioning)
   extract_themes.py             # Regenerates code_themes.THEMES from upstream (VS Code's five,
                                 # GitHub's four, Atom One, Catppuccin — three source kinds, see the
                                 # theme bullet under Rendering)
   cheat-sheet.md                # Human quick reference
+installer/
+  Symplify.iss                  # Inno Setup 7 script for the installed copy (system config
+                                # location, Start Menu/desktop shortcuts, uninstaller). Compiled by
+                                # scripts/release.py, which passes the version, the platform, the
+                                # architecture and the Nuitka output directory in as /D defines —
+                                # never edit a version into it. It installs the tree and must NOT
+                                # create `data/` (see the packaging bullets under Versioning).
 scratch/                        # Preserved experiments — NOT part of the app and not
                                 # maintained with it: test_plot.py is the SymPy->GLSL GPU
                                 # plotter prototype, the future plotting track's seed
@@ -1389,7 +1398,9 @@ backdrop floats up from 10px below while fading in, and carries the page's own t
   convention — `%APPDATA%\Symplify\` (Windows, falls back to `%LOCALAPPDATA%`),
   `$XDG_CONFIG_HOME/symplify/` (Linux, falls back to `~/.config/symplify/`),
   `~/Library/Application Support/Symplify/` (macOS). The settings page shows the resolved path and
-  mode, and clicking that row opens the folder.
+  mode, and clicking that row opens the folder. The **portable download is what ships that empty
+  `data/`** and the installer is what must not (see the packaging bullets under Versioning) — this
+  one `is_dir()` test is the whole of the switch.
 - Appearance is applied through RinUI's `ThemeManager` (the QML `Theme` singleton wraps it), injected
   before the window exists so the first frame is already themed. Theme and backdrop apply fine
   through the Python slots.
@@ -1813,19 +1824,62 @@ Data-file pitfalls for frozen builds (update this list when you add data-reading
   with `fatal error C1002` (out of heap) on sympy's own generated C —
   `polys.polyquinticconst`, 26k lines — while the same commit builds locally in ~4 minutes.
   `--low-memory` and `--jobs=1` took the failures from five files to one and still not through: it
-  is the runner's memory, not the options. Releases are built locally
-  (`scripts/build_windows.py` → `Compress-Archive` → `gh release create`); 0.5.0 was made that way.
+  is the runner's memory, not the options. Releases are built locally, and since 0.6.0
+  `scripts/release.py … --publish` is the whole of it (0.5.0 was made by hand this way, with
+  `Compress-Archive`).
   `scripts/release.py … --publish` chains the whole thing — bump, commit, tag, build, package, push,
   `gh release create` — with two gates: the tree must be clean (checked before anything is written)
   and the build must produce the exe. It builds *before* it pushes, so a failed build leaves nothing
-  remote to clean up. The archive is written **under `build/`** (`make_zip`), next to the tree it
-  packages: the repository root is no place for a 100 MB artifact, and `build/` is already ignored.
+  remote to clean up. The downloads are written **under `build/`** (`make_zip`, `make_installer`),
+  next to the tree they package: the repository root is no place for a 100 MB artifact, and `build/`
+  is already ignored.
   A push that cannot reach GitHub is the boring failure and it arrives *after* the expensive part, so
   the package is made first and the failure says what is done, what is not, and how to finish:
   `--publish-only` re-runs just the publishing half — no bump, no build, no arguments (it reads the
   version from pyproject, insists on a clean tree and that `v<version>` points at HEAD) — pushing,
   packaging the existing `build/main.dist` and creating the Release, uploading over one a previous
   attempt had already made.
+- **The packaging is one invariant spread over three files** — `scripts/release.py` (the zip),
+  `installer/Symplify.iss` (the setup) and `python/settings.py` (what portable means) — and the names
+  carry what a download has to say: `Symplify-v<version>-<platform>-<arch>-<kind>`, so
+  `…-windows-x64-portable.zip` and `…-windows-x64-setup.exe` (`artifact_name`, `host_arch`;
+  `PLATFORM` is a constant rather than `sys.platform` because Windows is the only platform that
+  ships, and a Linux/macOS artefact should be a value there, not a rename of every file). **`x64`, not
+  `amd64`** — that is Windows' spelling, the DLLs in the build agree with it
+  (`libcrypto-3-x64.dll`), and Inno Setup calls it `x64compatible`; `platform.machine()` reports
+  `AMD64` and `ARCH_TOKENS` is the one place that maps the two.
+- **The zip's top-level folder is `Symplify`, not Nuitka's `main.dist`** (`PORTABLE_ROOT`) — `make_zip`
+  walks the tree and renames on the way *into* the archive, so the build directory keeps the name
+  every other step knows (build script, `--prune-only`, this guide). The same walk writes an **empty
+  `Symplify/data/`** entry (`zf.mkdir`, `PORTABLE_DATA_DIR`), and that folder is the whole of portable
+  mode: `resolve_config_dir` in python/settings.py tests `(root / "data").is_dir()`, so extracting
+  the archive is the portable installation and the settings land in `data/config.yaml`. Two ways to
+  break it: a *file* named `data` would not match (`is_dir()`), and the folder needs an entry of its
+  own because an empty directory survives extraction only if the archive lists it — measured with
+  PowerShell's `Expand-Archive` (what Explorer uses), which leaves `data` out otherwise.
+- **The installer must not ship `data/`, on purpose.** An installed copy would put its settings in the
+  install directory (Program Files, or `%LOCALAPPDATA%\Programs` for the per-user default), which is
+  the wrong place for something the user edits and which an uninstall would then delete. So
+  `installer/Symplify.iss` installs the tree and never creates that folder; the portable zip is the
+  download that has it. Verified both ways: an installed copy honours `%APPDATA%\Symplify`, an
+  extracted zip writes `<extracted>\Symplify\data\config.yaml` and touches nothing outside it.
+- **Inno Setup 7, found rather than hardcoded** (`find_iscc`): `ISCC` from the environment, else the
+  newest `Inno Setup */ISCC.exe` under `%LOCALAPPDATA%\Programs`, `ProgramFiles`, `ProgramFiles(x86)`,
+  else `PATH`. That it *is* 7 matters: the script uses `SetupArchitecture=x64` (a 64-bit Setup, so
+  the LZMA2 dictionary is not capped at 1 GB and the compressor needs no separate process) and
+  `WizardStyle=modern dynamic`, neither of which Inno Setup 6 understands. The decisions in the
+  script worth not rediscovering: `PrivilegesRequired=lowest` +
+  `PrivilegesRequiredOverridesAllowed=dialog` (no UAC prompt for a calculator; an all-users install is
+  one dialog choice, `/ALLUSERS` for a script), `MinVersion=10.0.17763` (Qt 6.11's floor — Setup's own
+  default is Windows 7 SP1, so without it the installer happily installs an app that cannot start),
+  `CloseApplications=yes` (an upgrade replaces a running copy instead of failing on a locked file) and
+  `Compression=lzma2/ultra64` + `SolidCompression=yes` (78 s and 64 MB against the zip's 97 MB).
+  The script refuses to compile without `MyAppVersion`, so an unversioned setup cannot be built by
+  accident; its other defaults are what the IDE compiles with.
+- The `AppId` is a GUID with the architecture appended: that is what makes an upgrade replace the
+  previous installation instead of sitting next to it, while still letting an arm64 build be installed
+  on the same machine later without either one uninstalling the other. Never change it — a new `AppId`
+  orphans every existing installation from its uninstaller.
 
 ## History of routes (read-only branches)
 

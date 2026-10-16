@@ -48,7 +48,7 @@ uv run python scripts/build_windows.py   # -> build/main.dist/symplify.exe
 ```
 
 A GitHub Actions workflow (`.github/workflows/build-windows.yml`) produces the
-same artifact on `windows-latest` — trigger it manually or on a `v*` tag push.
+same artifact on `windows-latest` — trigger it manually.
 
 ### Releases & versioning
 
@@ -61,8 +61,25 @@ uv run python scripts/release.py minor          # 0.1.0 -> 0.2.0
 uv run python scripts/release.py minor --tag    # also commit + tag v0.2.0
 ```
 
-Tags named `vX.Y.Z` trigger the Windows packaging workflow, so the release
-flow is: bump → tag → CI builds and uploads `symplify.exe`.
+Releases are built and published from a local machine — the GitHub runner runs
+out of memory on this build — and one command does the whole thing:
+
+```bash
+uv run python scripts/release.py minor --publish   # bump, tag, build, package, publish
+```
+
+It makes the two downloads a release carries, both named after what they run on
+(`windows-x64` today, so a second platform would add files rather than rename
+these):
+
+| Download | What it is |
+|---|---|
+| `Symplify-v<version>-windows-x64-portable.zip` | Extract it and run `Symplify\symplify.exe`. The folder carries an empty `data\`, which is what puts the app in portable mode: settings go to `data\config.yaml` and nothing outside the extracted folder is touched. |
+| `Symplify-v<version>-windows-x64-setup.exe` | The installer (Inno Setup 7): per-user by default with an all-users option, Start Menu and optional desktop shortcuts, an option to launch the app at the end, and a proper uninstaller. An installed copy has no `data\` folder, so its settings live in `%APPDATA%\Symplify\config.yaml`. |
+
+Building the installer needs [Inno Setup 7](https://jrsoftware.org/isdl.php)
+(`winget install JRSoftware.InnoSetup.7`) — the packaging script finds it, and
+`ISCC` in the environment overrides that.
 
 ## Architecture
 
@@ -176,7 +193,7 @@ The accent colour has three modes: **Default** (RinUI's own purple), **System** 
 
 The location is chosen at launch:
 
-1. **Portable** — if a `data` folder sits next to the app (`symplify.exe`, or the repository root when running from source), the file is `data/config.yaml` and nothing outside that folder is touched. Delete or move the folder to go back to the system location.
+1. **Portable** — if a `data` folder sits next to the app (`symplify.exe`, or the repository root when running from source), the file is `data/config.yaml` and nothing outside that folder is touched. Delete or move the folder to go back to the system location. The portable download ships that empty folder, which is exactly what makes it portable out of the box; the installer ships none, so an installed copy uses the system location.
 2. **System** — otherwise the OS convention: `%APPDATA%\Symplify\config.yaml` (Windows), `$XDG_CONFIG_HOME/symplify/config.yaml` (Linux), `~/Library/Application Support/Symplify/config.yaml` (macOS).
 
 The file is meant to be hand-editable (comments and unknown keys survive, invalid values fall back to their defaults), and a location that cannot be written is not fatal — the app keeps running with the values applied in memory and says so on the settings page. RinUI's own `RinUI/config` folder is never created: its theme/backdrop/accent settings live in this file instead.
