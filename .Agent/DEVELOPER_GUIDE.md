@@ -1140,34 +1140,46 @@ One lexer, one span list, two renderers. Anything that colours code contributes 
   depends on its `width` — safe from loops because the layout width no longer
   reads the implicit width.
 - **The colours come from a theme *family*, not from a single theme.** `python/code_themes.py` holds
-  one entry per family — Atom One, VS Code Dark+/Light+, Dark/Light Modern, Dark/Light 2026,
-  Solarized, High Contrast, GitHub Dark/Light together with its Default, Colorblind and High
-  Contrast variants, and Catppuccin (Mocha on a dark UI, Latte on a light one) — and **every
+  one entry per family — Atom One, VS Code Default, VS Code Modern, VS Code 2026, Visual Studio,
+  Solarized, High Contrast, GitHub (together with its Default, Colorblind and High Contrast
+  variants), Catppuccin and Ayu — and **every
   family listed in `FAMILIES` has a dark and a light member**, so
   `code_style.theme(family, dark)` always answers: it returns `(styles, bracket_colors)` for the
   half that matches the UI. `workspace.code_theme` names the family and the *page* passes
   `Theme.isDark()`, so the two compose — the family says which colours, the UI theme says which half
   of it. A family that could answer for only one side would leave the code bare the moment the UI
   flipped, which is the point of pairing them.
+  **A label names the family, not its two halves** — the family *is* a dark member and a light one,
+  so upstream's pair spelling is noise in a list of families: "Dark+ / Light+" is VS Code's default
+  pair, "Dark Modern / Light Modern" its modern one, and "GitHub Dark Default / Light Default" is
+  simply GitHub Default. No slashes, and no word the family already implies; the ids are the store's
+  contract and the labels are what the page shows.
   The data is **baked into the repository** — the app reads neither a VS Code install nor the network
   at run time. `scripts/extract_themes.py` regenerates **every** family, each side pinned to what
   upstream actually offers, and it knows **three kinds of source** because upstreams differ in what
-  they commit: `("raw", repo, ref, path)` for a theme file committed in a repository — VS Code's five
-  paired themes from `microsoft/vscode` at `VSCODE_REF`, Atom One Dark/Light from the two `akamud`
-  repositories; `("npm", package, version, path)` for Catppuccin, whose theme files are build
+  they commit: `("raw", repo, ref, path)` for a theme file committed in a repository — VS Code's six
+  paired themes from `microsoft/vscode` at `VSCODE_REF` (the two `theme-defaults` pairs, the 2026
+  pair, `dark_vs`/`light_vs` — the pair it names after Visual Studio — Solarized and High Contrast),
+  Atom One Dark/Light from the two `akamud` repositories, and ayu's Dark/Light from
+  `ayu-theme/vscode-ayu` at `AYU_REF`; `("npm", package, version, path)` for Catppuccin, whose theme
+  files are build
   artifacts published in `@catppuccin/vscode` (jsDelivr serves a package file as plain text, so this
   needs no unpacking); and `("vsix", publisher, extension, version, member)` for GitHub's, whose
   repository commits only the generator, whose npm package carries no themes and whose releases carry
   no assets — the published extension archive is the only pinnable form of the built JSON, so that
   one source is a zip the script reads with the stdlib (one download per version, cached for the
   run). Pinning is what makes it reproducible — the same ref always yields the same table, and a
-  re-extraction reproduces the committed one family by family — so bumping a pin is a reviewable
-  change rather than a background drift. Two things come with reading upstream files rather than an
+  re-extraction reproduces the committed one family by family, `--write` splicing it into the file
+  rather than printing four hundred lines to paste. That splice is why `render()` emits the file's
+  own *shape* (one style per line, and the note on the one colour the app overrides) instead of
+  `repr`-dumping the dicts: the committed table was hand-shaped once, and a writer that reformatted
+  it would lose the note and churn every line on the next run, which is exactly what a reviewer has
+  to be able to trust it not to do. Two things come with reading upstream files rather than an
   installed editor: they are **JSONC** (`//` comments and trailing commas, which VS Code's own build
   strips from the copies it ships), and their `include` chains have to be followed by hand (only
   `raw` sources can include others). Both are handled in the script; a fetch that cannot reach the
   network fails loudly, and the committed data is unaffected.
-  The table also carries three entries that are **unused material** — `githubdimmed`,
+  The table also carries four entries that are **unused material** — `githubdimmed`, `ayumirage`,
   `catppuccinfrappe` and `catppuccinmacchiato` — flavours that exist on one side only (each has a
   `dark` layer and no `light` one), kept for later and deliberately left out of `FAMILIES`, which is
   both the list the page offers and the one the store validates against, so nothing can select

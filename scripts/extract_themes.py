@@ -2,9 +2,15 @@
 """Turn VS Code's and other editors' themes into the palette data for the app.
 
 Maintenance script. Run it after a VS Code update — or when a theme source moves —
-and replace the `THEMES` table in `python/code_themes.py` with what it prints:
+and put the result into the `THEMES` table in `python/code_themes.py`:
 
-    uv run python scripts/extract_themes.py
+    uv run python scripts/extract_themes.py            # print the table
+    uv run python scripts/extract_themes.py --write    # ...or splice it in place
+
+`--write` replaces the `THEMES` block and nothing else — the rest of that file is
+hand-written (the families' labels, the bracket defaults, the overrides) — which is
+what keeps the committed table byte-identical to what a re-extraction produces
+without a four-hundred-line paste.
 
 Sources are **raw files on GitHub, pinned to a tag or a commit**, rather than the
 local VS Code install. That way the extraction works on any machine (no VS Code
@@ -24,8 +30,10 @@ Two things about the input:
 
 import io
 import json
+import sys
 import urllib.request
 import zipfile
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 #: The VS Code release the bundled themes are taken from. Kept in step with the
@@ -46,6 +54,13 @@ CATPPUCCIN_VERSION = "3.18.1"
 GITHUB_PUBLISHER = "GitHub"
 GITHUB_EXTENSION = "github-vscode-theme"
 GITHUB_VERSION = "6.3.5"
+
+#: ayu's VS Code port: plain theme files at the repository root, maintained by the
+#: theme's own organisation (`ayu-theme/vscode-ayu` is a fork of `dempfi/ayu`, the
+#: Sublime original, which is where the VS Code files live). Pinned by commit, like
+#: Atom One — the release tags here track the extension's version, not the file
+#: list this reads.
+AYU_REF = "2c6feb7215bf7ca6c8c9a51066f255025df3a5b9"
 
 #: A theme's provenance. Three kinds, because the upstreams differ in what they
 #: actually commit:
@@ -92,6 +107,10 @@ THEME_SOURCES: Dict[str, Tuple[Optional[Source], Optional[Source]]] = {
                _vscode("theme-defaults/themes/light_modern.json")),
     "2026": (_vscode("theme-defaults/themes/2026-dark.json"),
              _vscode("theme-defaults/themes/2026-light.json")),
+    #: VS Code's other built-in pair, the one it names after the editor it came
+    #: from — "Dark (Visual Studio)" / "Light (Visual Studio)".
+    "visualstudio": (_vscode("theme-defaults/themes/dark_vs.json"),
+                     _vscode("theme-defaults/themes/light_vs.json")),
     "solarized": (_vscode("theme-solarized-dark/themes/solarized-dark-color-theme.json"),
                   _vscode("theme-solarized-light/themes/solarized-light-color-theme.json")),
     "highcontrast": (_vscode("theme-defaults/themes/hc_black.json"),
@@ -106,7 +125,10 @@ THEME_SOURCES: Dict[str, Tuple[Optional[Source], Optional[Source]]] = {
                            _github("extension/themes/light-high-contrast.json")),
     "catppuccin": (_npm(CATPPUCCIN_PACKAGE, CATPPUCCIN_VERSION, "themes/mocha.json"),
                    _npm(CATPPUCCIN_PACKAGE, CATPPUCCIN_VERSION, "themes/latte.json")),
+    "ayu": (("raw", "ayu-theme/vscode-ayu", AYU_REF, "ayu-dark.json"),
+            ("raw", "ayu-theme/vscode-ayu", AYU_REF, "ayu-light.json")),
     #: Unused material, one side only.
+    "ayumirage": (("raw", "ayu-theme/vscode-ayu", AYU_REF, "ayu-mirage.json"), None),
     "githubdimmed": (_github("extension/themes/dark-dimmed.json"), None),
     "catppuccinfrappe": (_npm(CATPPUCCIN_PACKAGE, CATPPUCCIN_VERSION,
                               "themes/frappe.json"), None),
@@ -446,6 +468,14 @@ def palette(source: Source, variant: str) -> Tuple[Dict[str, str], List[str], st
 
 
 def render() -> str:
+    """The `THEMES` table, in the shape `python/code_themes.py` keeps it in.
+
+    That file is *not* plain machine output: the styles sit one per line, the
+    strings are double-quoted, and the one colour this app overrides carries a
+    note saying so. Writing the table any other way would reformat four hundred
+    lines and drop that note on the first re-extraction, so the shape is part of
+    the writer — `--write` has to be a no-op on an unchanged table.
+    """
     lines = ["{"]
     for family, (dark_source, light_source) in THEME_SOURCES.items():
         lines.append(f'    "{family}": {{')
@@ -453,18 +483,57 @@ def render() -> str:
             if source is None:
                 continue            # unused material: this family has one side
             styles, brackets, background, ink, placeholder = palette(source, variant_for(family, name))
-            styles.update(OVERRIDES.get(family, {}))
+            overridden = OVERRIDES.get(family, {})
+            styles.update(overridden)
             lines.append(f'        "{name}": {{')
-            lines.append(f'            "styles": {styles!r},')
+            lines.append('            "styles": {')
+            for style, color in styles.items():
+                note = (
+                    "    # ours, not the theme's — see OVERRIDES in "
+                    "scripts/extract_themes.py" if style in overridden else ""
+                )
+                lines.append(f'                {json.dumps(style)}: {json.dumps(color)},{note}')
+            lines.append("            },")
             lines.append(f'            "brackets": {brackets!r},')
-            lines.append(f'            "background": "{background}",')
-            lines.append(f'            "ink": "{ink}",')
-            lines.append(f'            "placeholder": "{placeholder}",')
+            lines.append(f'            "background": {json.dumps(background)},')
+            lines.append(f'            "ink": {json.dumps(ink)},')
+            lines.append(f'            "placeholder": {json.dumps(placeholder)},')
             lines.append("        },")
         lines.append("    },")
     lines.append("}")
     return "\n".join(lines)
 
 
+#: The line `--write` looks for, and the file it splices the table into. Everything
+#: else in that file is hand-written and is left exactly as it is.
+THEMES_MARKER = "THEMES: Dict[str, Dict[str, ThemeLayer]] = {"
+TARGET = Path(__file__).resolve().parents[1] / "python" / "code_themes.py"
+
+
+def write_into(path: Path = TARGET) -> None:
+    """Replace the ``THEMES`` block in ``path`` with what :func:`render` prints.
+
+    The block runs from the marker to the closing brace that ends it at column 0.
+    A missing marker is an error rather than a guess — a table spliced into the
+    wrong place is worse than a run that stops.
+    """
+    text = path.read_text(encoding="utf-8")
+    start = text.find(THEMES_MARKER)
+    if start < 0:
+        raise SystemExit(f"{path}: no `{THEMES_MARKER}`")
+    end = text.find("\n}", start + len(THEMES_MARKER))
+    if end < 0:
+        raise SystemExit(f"{path}: the THEMES block has no closing brace")
+    # `render()` prints the braces too, so only its body is taken.
+    path.write_text(
+        text[:start] + THEMES_MARKER + render()[1:] + text[end + 2:],
+        encoding="utf-8",
+    )
+    print(f"wrote {len(THEME_SOURCES)} families into {path}")
+
+
 if __name__ == "__main__":
-    print(render())
+    if "--write" in sys.argv[1:]:
+        write_into()
+    else:
+        print(render())

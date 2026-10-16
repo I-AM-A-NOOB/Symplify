@@ -10,16 +10,21 @@ Data, not logic — and deliberately keyed by *style name* rather than by
 
 * ``one`` — Atom One Dark / Light, from `akamud/vscode-theme-onedark` and its light
   counterpart.
-* ``default``/``modern``/``2026``/``solarized``/``highcontrast`` — VS Code's own
-  built-in paired themes, from `microsoft/vscode`.
+* ``default``/``modern``/``2026``/``visualstudio``/``solarized``/``highcontrast`` —
+  VS Code's own built-in paired themes, from `microsoft/vscode`. ``visualstudio`` is
+  the pair it names after the editor it came from ("Dark (Visual Studio)" /
+  "Light (Visual Studio)"): the same ``#1e1e1e`` surface as ``default``, differing
+  in the scopes it leaves undifferentiated.
 * ``github``/``githubdefault``/``githubcolorblind``/``githubhighcontrast`` — GitHub's
   Dark/Light themes and their variants, from `primer/github-vscode-theme`. That
   repository commits the generator rather than the built JSON, so these are read
   from the published extension archive (see ``scripts/extract_themes.py``).
 * ``catppuccin`` — Mocha on a dark UI and Latte on a light one, from
   `catppuccin/vscode`.
+* ``ayu`` — Ayu Dark / Light, from `ayu-theme/vscode-ayu`, the theme's own
+  organisation's VS Code port of the Sublime original.
 
-Three more entries — ``githubdimmed``, ``catppuccinfrappe`` and
+Four more entries — ``githubdimmed``, ``ayumirage``, ``catppuccinfrappe`` and
 ``catppuccinmacchiato`` — are **unused material**: flavours that exist on one side
 only, kept here for later and deliberately left out of :data:`FAMILIES`, so no
 setting can select them (each has a ``dark`` layer and no ``light`` one).
@@ -70,18 +75,27 @@ class ThemeLayer(TypedDict):
 #: list the settings page offers *and* the one the store validates against, so a
 #: family missing here (the unused material in :data:`THEMES`) cannot be chosen
 #: even by hand-editing the config.
+#:
+#: **A label names the family, not its two halves.** A family *is* a dark member
+#: and a light one, so upstream's own pair spelling is noise in a list of
+#: families: "Dark+ / Light+" is VS Code's default pair, "Dark Modern / Light
+#: Modern" is its modern one, and "GitHub Dark Default / Light Default" is simply
+#: GitHub Default. No slashes, and no word a family already implies — which also
+#: keeps the labels short enough to read as a list.
 FAMILIES = (
     ("one", "Atom One"),
-    ("default", "VS Code Dark+ / Light+"),
-    ("modern", "VS Code Dark Modern / Light Modern"),
-    ("2026", "VS Code Dark 2026 / Light 2026"),
+    ("default", "VS Code Default"),
+    ("modern", "VS Code Modern"),
+    ("2026", "VS Code 2026"),
+    ("visualstudio", "Visual Studio"),
     ("solarized", "Solarized"),
     ("highcontrast", "High Contrast"),
-    ("github", "GitHub Dark / Light"),
-    ("githubdefault", "GitHub Dark Default / Light Default"),
-    ("githubcolorblind", "GitHub Dark Colorblind / Light Colorblind"),
-    ("githubhighcontrast", "GitHub Dark High Contrast / Light High Contrast"),
-    ("catppuccin", "Catppuccin Mocha / Latte"),
+    ("github", "GitHub"),
+    ("githubdefault", "GitHub Default"),
+    ("githubcolorblind", "GitHub Colorblind"),
+    ("githubhighcontrast", "GitHub High Contrast"),
+    ("catppuccin", "Catppuccin"),
+    ("ayu", "Ayu"),
 )
 
 #: Default family — the one the app shipped with before this setting existed.
@@ -223,6 +237,36 @@ THEMES: Dict[str, Dict[str, ThemeLayer]] = {
             "background": "#ffffff",
             "ink": "#202020",
             "placeholder": "#999999",
+        },
+    },
+    "visualstudio": {
+        "dark": {
+            "styles": {
+                "number": "#b5cea8",
+                "constant": "#569cd6",
+                "callable": "#569cd6",
+                "variable": "#b5cea8",
+                "operator": "#569cd6",
+                "unknown": "#f44747",
+            },
+            "brackets": [],
+            "background": "#1e1e1e",
+            "ink": "#d4d4d4",
+            "placeholder": "#a6a6a6",
+        },
+        "light": {
+            "styles": {
+                "number": "#098658",
+                "constant": "#0000ff",
+                "callable": "#0000ff",
+                "variable": "#098658",
+                "operator": "#0000ff",
+                "unknown": "#cd3131",
+            },
+            "brackets": [],
+            "background": "#ffffff",
+            "ink": "#000000",
+            "placeholder": "#767676",
         },
     },
     "solarized": {
@@ -431,6 +475,52 @@ THEMES: Dict[str, Dict[str, ThemeLayer]] = {
             "background": "#eff1f5",
             "ink": "#4c4f69",
             "placeholder": "#a5a8b6",
+        },
+    },
+    "ayu": {
+        "dark": {
+            "styles": {
+                "number": "#ff8f40",
+                "constant": "#d2a6ff",
+                "callable": "#e6c08a",
+                "variable": "#bfbdb6",
+                "operator": "#f29668",
+                "unknown": "#d95757",
+            },
+            "brackets": [],
+            "background": "#10141c",
+            "ink": "#bfbdb6",
+            "placeholder": "#353c4a",
+        },
+        "light": {
+            "styles": {
+                "number": "#fa8532",
+                "constant": "#a37acc",
+                "callable": "#e59645",
+                "variable": "#5c6166",
+                "operator": "#f2a191",
+                "unknown": "#e65050",
+            },
+            "brackets": [],
+            "background": "#fcfcfc",
+            "ink": "#5c6166",
+            "placeholder": "#bfc5cd",
+        },
+    },
+    "ayumirage": {
+        "dark": {
+            "styles": {
+                "number": "#ffa659",
+                "constant": "#dfbfff",
+                "callable": "#d9be98",
+                "variable": "#cccac2",
+                "operator": "#f29e74",
+                "unknown": "#ff6666",
+            },
+            "brackets": [],
+            "background": "#242936",
+            "ink": "#cccac2",
+            "placeholder": "#4a5261",
         },
     },
     "githubdimmed": {
