@@ -477,6 +477,12 @@ class SettingsViewModel(QObject):
 
     def _set_latex_font(self, family: str) -> None:
         self._store.set("workspace.latex_font", family)
+        # `changed` is this property's notify and the signal `MainViewModel`
+        # re-assembles the shared `LatexStyle` on, so the emit is what makes a pick
+        # take effect: without it the family is stored while every surface goes on
+        # rendering the previous font (and the row's own "In use: …" note stays
+        # stale) until some unrelated setting happens to move.
+        self.changed.emit()
 
     @Slot(str, result=bool)
     def trySetLatexFont(self, family: str) -> bool:
@@ -496,7 +502,6 @@ class SettingsViewModel(QObject):
         self.latexFontErrorChanged.emit()
         self.latexFont = family
         return True
-        self.changed.emit()
 
     def _get_code_font_family(self) -> str:
         """The primary family of the code list (for display: "In use: …")."""

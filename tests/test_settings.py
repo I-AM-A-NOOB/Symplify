@@ -138,16 +138,50 @@ def test_the_settings_page_offers_exactly_the_families_the_data_has():
     drift: a family added to the data but not to the page is selectable through
     the config and invisible in the UI — which is exactly what happened when
     GitHub's and Catppuccin's families were added. `FAMILIES` is the contract;
-    this holds the page to it, in order."""
+    this holds the page to it, in order.
+
+    The list lives in the Workspace section (`qml/components/
+    SettingsWorkspaceSection.qml`) since the Settings page became a frame around
+    five section components; the contract is the same wherever it is written."""
     from python.code_themes import family_ids
 
-    page = (REPO_ROOT / "qml" / "pages" / "SettingsPage.qml").read_text(encoding="utf-8")
-    # The page has other `model: [...]` blocks (the appearance combos); the one
-    # that holds `key:` entries is the code-theme list.
-    model = next(block for block in re.findall(r"model:\s*\[(.*?)\]", page, re.S)
+    section = (REPO_ROOT / "qml" / "components" / "SettingsWorkspaceSection.qml").read_text(
+        encoding="utf-8")
+    # The section has other `model: [...]` blocks (the appearance combos live in
+    # the Interface section); the one that holds `key:` entries is the code-theme list.
+    model = next(block for block in re.findall(r"model:\s*\[(.*?)\]", section, re.S)
                  if "key:" in block)
     listed = re.findall(r'key:\s*"([^"]+)"', model)
     assert listed == family_ids(), listed
+
+
+def test_the_components_directory_and_its_qmldir_agree():
+    """`qmldir` is the component library's inventory, and the repo's own rule makes
+    it documentation that has to stay true — so it is checked, not trusted.
+
+    It had drifted both ways: five of the components the pages import most
+    (`CodeArea`, `CodeField`, `CommandBar`, `RadioSettingGroup`, `SettingFieldRow`)
+    were missing from it while two with no page-level user were listed, and one of
+    its comments documented a `fullText` property `CopyableLabel` does not have.
+    Nothing imports the module by URI (`import "../components"` resolves by file
+    name), so nothing ever complained."""
+    components = REPO_ROOT / "qml" / "components"
+    directives = {"module", "pragma", "depends", "prefer", "singleton", "internal",
+                  "typeinfo", "classname"}
+    listed = set()
+    for line in (components / "qmldir").read_text(encoding="utf-8").splitlines():
+        line = line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        head = line.split()[0]
+        if head not in directives:
+            listed.add(head)
+
+    present = {path.stem for path in components.glob("*.qml")}
+    assert listed == present, {
+        "in the tree, not in qmldir": sorted(present - listed),
+        "in qmldir, not in the tree": sorted(listed - present),
+    }
 
 
 def test_unknown_keys_survive_a_write():
@@ -202,6 +236,49 @@ def test_picking_a_font_that_cannot_be_typeset_is_refused():
         assert store.get("workspace.latex_font") == "Cambria Math"
     finally:
         svm.math_font_typesets = original
+
+
+def test_a_picked_latex_font_is_announced_and_reaches_the_renderers():
+    """A successful pick has to be *announced*, not only stored.
+
+    `latexFont` notifies on `changed`, and `MainViewModel` re-assembles the one
+    `LatexStyle` all three LaTeX surfaces are handed on that signal — so a setter
+    that writes the store without emitting leaves the family persisted, every
+    surface rendering the previous font and the row's own "In use: …" note stale,
+    until some unrelated setting happens to move. (The emit used to sit after
+    `return True`, where it could never run.)
+
+    The path resolution is patched rather than the font picked, so the test holds
+    with no math font installed: `_latex_style` is what the renderers were actually
+    handed, and comparing it against a *resolved* path is what makes the difference
+    visible.
+    """
+    from python.viewmodel import settings_viewmodel as svm
+    from python.viewmodel.main_viewmodel import MainViewModel
+
+    store = store_at(temp_dir() / CONFIG_FILENAME)
+    view_model = MainViewModel(store)
+
+    original_typesets = svm.math_font_typesets
+    original_path = svm.math_font_path
+    svm.math_font_typesets = lambda family: True
+    svm.math_font_path = lambda family: f"/math-fonts/{family}.ttf" if family else ""
+    try:
+        # The built-in STIX: no family, no font file.
+        assert view_model.settings.latexFont == ""
+        assert view_model.calculator._latex_style.font == ""
+
+        announced = []
+        view_model.settings.changed.connect(lambda: announced.append(1))
+        assert view_model.settings.trySetLatexFont("Test Math") is True
+
+        assert announced, "the pick must announce itself on `changed`"
+        assert view_model.settings.latexFont == "Test Math"
+        assert view_model.settings.latexFontPath == "/math-fonts/Test Math.ttf"
+        assert view_model.calculator._latex_style.font == "/math-fonts/Test Math.ttf"
+    finally:
+        svm.math_font_typesets = original_typesets
+        svm.math_font_path = original_path
 
 
 def test_accent_mode_is_validated_and_persisted():

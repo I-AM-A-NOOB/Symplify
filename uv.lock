@@ -1,10 +1,6 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.11"
-resolution-markers = [
-    "python_full_version >= '3.12'",
-    "python_full_version < '3.12'",
-]
 
 [[package]]
 name = "darkdetect"
@@ -230,6 +226,19 @@ wheels = [
 ]
 
 [[package]]
+name = "qmlmathplot"
+version = "0.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyside6" },
+    { name = "sympy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/d0/ba/887c3416e209406d302bceaf65920f3c50bd6db72109f85d04e3f02f24bc/qmlmathplot-0.2.0.tar.gz", hash = "sha256:47957ee7db0dda02993b583848a7f9234f8c50c9a2d060defbf44d932c76e970", size = 79023, upload-time = "2026-10-10T00:50:19.919Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/cc/24/551bb79b8a1df0ec3df000b47244494ab6954a0e44754140df5951f7e370/qmlmathplot-0.2.0-py3-none-any.whl", hash = "sha256:4a42967818a9fd1e6cdfd73a568ec4f53f2aba2f1e157851323096478c07c736", size = 81569, upload-time = "2026-10-10T00:50:18.385Z" },
+]
+
+[[package]]
 name = "rinui"
 version = "0.4.4.1"
 source = { registry = "https://pypi.org/simple" }
@@ -263,6 +272,7 @@ dependencies = [
     { name = "fonttools" },
     { name = "pyside6" },
     { name = "pyyaml" },
+    { name = "qmlmathplot" },
     { name = "rinui" },
     { name = "sympy" },
     { name = "ziamath" },
@@ -278,6 +288,7 @@ requires-dist = [
     { name = "fonttools", specifier = ">=4.0" },
     { name = "pyside6", specifier = ">=6.11.2" },
     { name = "pyyaml", specifier = ">=6.0.3" },
+    { name = "qmlmathplot", specifier = ">=0.2.0" },
     { name = "rinui", specifier = ">=0.4.4.1" },
     { name = "sympy", specifier = ">=1.14.0" },
     { name = "ziamath", specifier = ">=0.13" },

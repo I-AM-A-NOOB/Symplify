@@ -92,31 +92,60 @@ qml/
                                 # pinned bottom; do NOT give items position:Top — RinUI caps that
                                 # section at 20% height and it scrolls/splits badly on short windows)
   pages/                        # Calculator / Variables / History / Log / Settings
-  components/                   # Reusable pieces (+ qmldir):
+  components/                   # Reusable pieces (+ qmldir, whose list is held to the
+                                # directory by `test_the_components_directory_and_its_qmldir_agree`):
                                 #   CodeSurface (a code input's box, in the code theme's colours),
                                 #   CodeField / CodeArea (the two code inputs themselves — font,
                                 #     surface, ink, and the highlighter on the area's document — so
                                 #     the calculator's Assign row and the Variables editors cannot
                                 #     drift apart; each page keeps its own keys),
+                                #   CodeContextMenu (the app's context menu for a text input, and
+                                #     the press that opens it: one line per field, and the field's
+                                #     own Qt menu switched off with it — see the context-menu
+                                #     bullet under the trap list),
                                 #   ExpanderRow / ExpanderPanel (RinUI expanders that keep
                                 #     their content's text cursors),
                                 #   PageScaffold (the frame every page shares: title, actions and
                                 #     the floating bar they ride into) together with the two pieces
                                 #     it assembles — PageHeader (the bar that fades in as the
                                 #     inline title scrolls away) and PageHeaderRow (that title,
-                                #     plus the room the actions need),
-                                #   HScrollView, LatexImage, MathStrip (the formula area: HScrollView
-                                #     + LatexImage + the room its overlay bar needs — the one place
-                                #     that geometry lives), RadioSettingRow (a SettingItem whose
-                                #     radio leads its own label), KeyboardPanel, SearchBar,
-                                #   SegmentedItem/SelectorBarItem (focus-indicator shadows)
+                                #     plus the room the actions need) — and PageBody (the body
+                                #     under it: the inset read back off the scaffold, the attached
+                                #     scroll bar, and the height the page scrolls to),
+                                #   MathStrip (the formula area: HScrollView + LatexImage + the
+                                #     room its overlay bar needs — the one place that geometry
+                                #     lives; HScrollView and LatexImage are its pieces),
+                                #   RadioSettingRow / RadioSettingGroup / SettingFieldRow (the
+                                #     settings-row shapes RinUI's own SettingItem cannot express;
+                                #     SettingRowBase is the SettingItem both rows are built on),
+                                #   KeyboardPanel, SearchBar, CommandBar (a row of `Action`s that
+                                #     folds what does not fit into an overflow menu; see the
+                                #     toolbar bullet under Rendering),
+                                #   HistoryCard (one history card: the delegate the History page's
+                                #     `Repeater` builds, one per entry — the page hands it `host`
+                                #     and `scroller`; it is where the card's `= `-alignment, hover,
+                                #     accent bar, focus ring, context menu and keys live),
+                                #   VariableCellEditor (the Variables table's inline cell editor:
+                                #     the view opens it on the edited cell, and it feeds
+                                #     `cellDelegate.pendingText` — the delegate does the write),
+                                #   VariableDetailsPanel (the Variables page's details panel: the
+                                #     selected variable, its two fields and the row's actions — the
+                                #     page hands it `host`),
+                                #   Settings{Interface,Workspace,Language,File,About}Section (the
+                                #     Settings page's five sections, one component each: a section
+                                #     owns its state and its dialog, the page only its frame and
+                                #     order),
+                                #   MessageDialog / WarningDialog (the one message box, and that
+                                #     plus the wiring to a viewmodel's `warningOccurred`),
+                                #   Tip (a ToolTip with the app's delay and the control it is
+                                #     shown for),
+                                #   SegmentedItem/SelectorBarItem (focus-indicator shadows; the ring
+                                #     itself is ProjectFocusIndicator),
                                 #   CopyableLabel (the read-only, selectable text box both the
                                 #     calculator's outcome and a history card's two lines use: a
                                 #     bare QtQuick.TextEdit whose selection colour comes from the
                                 #     theme and which forwards its right click and its click — see
-                                #     the two text traps in the list below),
-                                #   CommandBar (a row of `Action`s that folds what does not fit into
-                                #     an overflow menu; see the toolbar bullet under Rendering)
+                                #     the two text traps in the list below)
 docs/
   architecture.md               # Model-first walkthrough: the two requests, the data flow
                                 # (sources in, sinks out), the write path and the error kinds;
@@ -253,11 +282,15 @@ transparent corner, not `srgba(255,255,255,1)`.
 7. **The Variables and History pages bind to search-filtered proxies** (`variablesFilter`,
    `historyFilter`) — `QSortFilterProxyModel`s over the shared models, so a query never disturbs the
    data the calculator writes into. Two consequences: every row index a page builds must come from
-   the **proxy** (the table's selection model, `beginEdit`, the cell delegate — a source index there
+   **proxy** (the table's selection model, `beginEdit`, the cell delegate — a source index there
    silently edits the wrong row), and a count that gates an *action* rather than "nothing to show"
    (e.g. Clear history) must read the **source** model. The match modes' order is a contract: the
-   combo boxes pass their index straight through, so the enums in `search.py` and the `modeLabels`
-   lists in the pages must stay in the same order (the tests assert it).
+   mode menu passes its index straight through, so the enums in `search.py` and the `modeLabels`
+   lists in the pages must stay in the same order (the tests assert the enums; they do not read the
+   QML lists). And the query lives in the proxy, not in the box: `SearchBar` is handed the filter it
+   drives (`filter: historyFilter`) and **adopts** what that filter still holds when the page is
+   rebuilt — the page does not survive a navigation while the proxy does, so a box that started
+   empty would otherwise show a list still filtered by a query the reader cannot see.
 8. **Settings live in our own file, and only `settingsVM` writes them.** `python/settings.py` owns
    the location (portable `<root>/data/config.yaml` if that folder exists, else the OS config
    directory) and the YAML; `python/rinui_bootstrap.py` takes RinUI's own persistence over and
@@ -302,6 +335,21 @@ transparent corner, not `srgba(255,255,255,1)`.
     through `popup()` with no arguments; the difference is only which values `posX`/`posY` hold. (The
     menu key, `Shift+F10` and Enter all need the *card* to have focus, so a probe has to click one
     first — otherwise it looks like the handler is broken when nothing has focus at all.)
+  * **A second gesture on an open menu needs a close first, and the re-open has to wait for it.**
+    Every context menu in this app is opened per gesture — "a right-click always lands a menu at the
+    pointer" — and the card's menu is the shape that gets there: one `openMenu(x, y)` door, and if
+    `entryMenu.visible` it remembers the point, calls `close()`, and re-opens from the menu's
+    `onClosed`. Both halves are measured. Setting `posX`/`posY` on an *open* menu moves nothing (its
+    `x`/`y` are driven by the `enter` transition, which has already run): a second right-click at a
+    new point left the menu exactly where the first had put it, and a third one moved it to
+    `x=864, y=-150` — off the window, which is the flash the History page used to show. And
+    `popup()` *immediately* after `close()` is swallowed, because a QQC2 `Popup` keeps `visible`
+    true until its exit transition has finished (measured: the menu stayed closed) — hence the
+    `onClosed` hand-off rather than a one-line close-then-open. A probe that drives this needs the
+    window active (`requestActivate()` + `QTest.qWaitForWindowActive`), calls the card's own
+    `openMenuAt` (a synthetic right-click does not reach a QML `TapHandler`), and reads the popups
+    out of `Item.data` rather than `children` — a `Popup` is not an `Item`, so a `children` walk
+    never sees any menu at all.
 - **A bare `QtQuick.TextEdit` is not a Control, so its selection colour is the OS's.** `QtQuick.Controls`
   exports no `TextEdit` at all, so `TextEdit` in a page is the plain Qt Quick item: no background, no
   padding, no chrome to strip — and no palette of its own to theme either. Qt paints its selection with
@@ -366,24 +414,78 @@ transparent corner, not `srgba(255,255,255,1)`.
   (`Bottom` by default → centred under the parent), so a menu told to open at the pointer lands on
   its delegate instead — and a card far down a list reports a place it was never at.
   `position: Position.None` is the mode that defers to the caller (`posX`/`posY` then read `root.x`
-  /`root.y`). What `popup()` itself wants: **scene (window) coordinates**, the same space RinUI's
-  own text fields pass (`contextMenu.popup(mouse.scenePosition)`). A `MouseArea` hands them over as
-  `mouse.sceneX/sceneY`; a `TapHandler`'s `eventPoint` as `eventPoint.scenePosition` — and
-  `eventPoint.position` is the *item's own*, which is what the bug was. Passing a parent item
-  (`popup(item, x, y)`) adds the item's position on top, so a plain two-number call is right for a
-  context menu. Qt clamps the result into the window by itself.
+  /`root.y`). What `popup()` wants is a point in **the coordinates of the item the menu is declared
+  in**, so where the menu is declared is the whole question: a child of the anchor item gives that
+  item's own coordinates (`HistoryCard`), a child of the attached `ContextMenu` object gives the
+  *window's* (the bullet below). The scene-coordinate spellings this note used to recommend do not
+  exist in this build's QML at all — `mouse.scenePosition`, `mouse.sceneX/sceneY`, `Item.window` and
+  `mapToScene` are absent, and `mapToItem(null, …)` answers nothing (all measured) — so a
+  `MouseArea` that needs the point maps it with `mapToItem(item, …)` or, better, declares the menu
+  inside itself and passes `mouse.x`/`mouse.y` unchanged. A `TapHandler`'s `eventPoint.position` is
+  the *item's own*, which is what the bug was. Passing a parent item (`popup(item, x, y)`) adds the
+  item's position on top, so a plain two-number call is right for a context menu. Qt clamps the
+  result into the window by itself (measured: a menu 181 wide asked for at window x=605 of a 760-wide
+  window came back at 579).
 - A plain `TextEdit` has **no right-click menu of its own** (RinUI attaches its `TextInputMenu` only
   from `TextArea.qml`), so nothing needs suppressing — what is left is to *forward* the right click,
   with a `MouseArea` that accepts the right button so the page's own handler does not also fire and
   open the menu twice. `MouseArea`, not `TapHandler`: it reports the press position on a click it
-  claims, which a context menu needs.
+  claims, which a context menu needs. (A *text field* is the other case — Qt's style packs do give it
+  a menu, at the caret: see the bullet below.)
+- **Every Qt style pack gives a text field its own context menu, and for a *text input* that menu
+  opens at the caret — so a right click is two menus until it is switched off.** `ContextMenu` is an
+  attached type (a C++ `QQuickContextMenu` in `QtQuick.Templates`, since 6.9) that each style's
+  `TextField.qml`/`TextArea.qml` points at a `TextEditingContextMenu`; on a request it maps the event
+  position into the attachee item and pops that menu there. Two measured facts make it unusable here:
+  the position it gets is the **cursor rectangle** (the Assign name field, text "xy": a right click at
+  the field's far right opened the menu at x=25, the same click with the caret moved to 0 gave x=9,
+  and moving the click itself changed nothing), and it arrives in the *attachee's* coordinates while
+  the popup renders them in the *window's* (the field sits at scene (45, 88) and the menu opened at
+  (25, 17) — the caret, shifted by the field's own position). `qml/components/CodeContextMenu.qml` is
+  the app's answer, and one line of it is all a field needs — `CodeContextMenu { editor: thatControl }`:
+  a `MouseArea` that claims the right button (`z: 1`, above the editor's `contentItem`, or the press
+  never arrives — measured: without it nothing in the component runs), opens RinUI's `TextInputMenu`
+  at the pointer in its *own* coordinates (the menu is declared inside the `MouseArea`), and carries
+  the close-and-reopen hand-off `HistoryCard` uses, because a second gesture on an open menu cannot
+  just be re-popped.
+  * **Switching Qt's menu off takes two lines, and both are Qt's contract.** `T.ContextMenu.menu: null`
+    alone is not enough — the request then carries on to the next item with a menu and opens *that*
+    one, which is the flash of an unthemed QQC2 menu in front of ours. `QQuickContextMenu::event()`
+    accepts the request and stops it propagating only when the menu is null **and** `requested` is
+    connected, so the component says both. That is what
+    `T.ContextMenu.onRequested: (position) => {}` is doing there: an empty handler that is
+    load-bearing, not a leftover.
+  * **It is declared on our `MouseArea`, not on the field.** The request reaches the topmost item over
+    the field first, and that item is ours. On a field the same `null` is not durable: the base style's
+    `ContextMenu.menu: TextEditingContextMenu { … }` is a **deferred** property, and the attached
+    object re-runs it the next time it reads the value — measured: a field-level `null` held for the
+    first clicks and then handed the request to Qt's menu again. Our own `MouseArea` has no such value
+    to come back.
+  * **The editor is not always ours, which is why this is a component and not three lines per page.**
+    `CodeField`/`CodeArea` and RinUI's `TextField`s take the one line; the Calculator's Code box takes
+    the same component as a *sibling* of the box (`editor: codeArea.textArea`, filling the same rect,
+    `visible` with the box), because its editor is an item inside RinUI's `ScrollableTextArea` and no
+    page can reach it. `editor` is what the menu's Cut/Copy/Paste act on, and it is `required`, so a
+    field cannot be wired to nothing.
+  * **How it was verified** (all measured, all five surfaces — Assign name/value, both search fields
+    and the settings fields, the Code box): a right click opens exactly one `TextInputMenu` whose
+    top-left is *at the pointer* — read off the rendered pixels (the changed-pixel box of a
+    before/after grab starts 2px up-left, which is the menu's shadow), not from `x`/`y` alone; a
+    second right click elsewhere in the field moves the menu there; a press *on* the open menu leaves
+    it standing instead of summoning Qt's; and `Shift+F10` with the field focused opens one at
+    RinUI's own place for a keyboard route (centred just under the field), which is what the attached
+    menu used to cover.
 
 - Import **unversioned** `QtQuick` (`import QtQuick`) where you need current API — `import QtQuick 2.15`
   version-gates newer members (e.g. `currentRow`, `itemAtCell` revisions).
 - RinUI's `TableView` sets `acceptedButtons: Qt.NoButton`, which kills its built-in
   edit triggers; the Variables page overrides it back to `Qt.LeftButton` and wires real editing
   (`flags()` `ItemIsEditable` + `model.setData`). Its `itemAtCell(a, b)` is `(column, row)`.
-  The page also brings its **own** `TableView.editDelegate`, because the base delegate's editor is a
+  The page also brings its **own** `TableView.editDelegate` — now
+  `qml/components/VariableCellEditor.qml`, which the page instantiates with
+  `host: page` and `cellDelegate: cell` (`cellDelegate`, not `cell`: a property named `cell` fed
+  `cell: cell` at the same site is the self-reference loop the guide warns about under
+  *PageHeaderRow*) — because the base delegate's editor is a
   bare `QQC2.TextField` and a `TextField` has **no `textDocument`** — only `TextArea`/`TextEdit` do,
   which is what the code highlighter attaches to (the calculator's Assign value is a `TextArea` for
   the same reason). Five things about that slot, each measured:
@@ -438,17 +540,17 @@ transparent corner, not `srgba(255,255,255,1)`.
 - `Item.visualFocus` / `Item.focusReason` **do not exist on plain `Item`** in Qt 6 (they live on
   `Control`). `FocusIndicator.control` MUST therefore be a Control (`ItemDelegate`, `Button`, …),
   not a plain `Item` — otherwise its `visible` binding throws `ReferenceError` and falls back to
-  the default `visible: true`, so the focus ring shows **always**. The History page's card is an
-  `ItemDelegate` (`import QtQuick.Controls.Basic 2.15 as QQC2`), with `highlighted:
-  ListView.isCurrentItem`, `onActiveFocusChanged` → `historyList.currentIndex = index` (keyboard
-  focus selects the card), and `FocusIndicator { control: card }`. Its list is `Rin.ListView`
-  with `focusPolicy: Qt.NoFocus` so Ctrl+Tab lands on the cards (`activeFocusOnTab`), not the view.
+  the default `visible: true`, so the focus ring shows **always**. The history card
+  (`qml/components/HistoryCard.qml`) is an `ItemDelegate` (`import QtQuick.Controls.Basic 2.15 as
+  QQC2`) with `FocusIndicator { control: card }`; it was the History page's inline delegate until the
+  card moved out of the page (the page now hands it `host` and `scroller`).
 - A History card renders as an **error card** when the model's `error` role is non-empty, and the
   only thing that changes is the result line: the failure text replaces the `= result` line, in
   `systemCriticalColor` and *wrapped* rather than elided (eliding hides the very reason the card
   exists). The input line, the background and the timestamp stay normal, there is no LaTeX strip
   (a failed request has no value), and the copy menu items are disabled. The role must be declared
-  as `required property string error` on the delegate — without that line the role lands nowhere,
+  as `required property string error` on the card (`qml/components/HistoryCard.qml` — the delegate
+  root, which is where roles land) — without that line the role lands nowhere,
   `card.error` is `undefined`, and `card.error !== ""` marks **every** card as an error (the only
   clue is `Unable to assign [undefined] to QString` in the console).
 - **A `ListView` has no `moveCurrentIndexUp/Down()`** — those methods belong to `GridView`; calling
@@ -512,12 +614,15 @@ transparent corner, not `srgba(255,255,255,1)`.
   (`components/BasicInput/RadioButton.qml` — QQC2's, restyled), but like QQC2's it only unchecks its
   **siblings**: buttons in different parents are independent. A short list of choices is therefore
   `qml/components/RadioSettingRow.qml` — a `SettingItem` whose radio leads its own label, with the
-  exclusivity driven by the caller's setting. Three things in it are load-bearing and easy to undo by
-  accident:
+  exclusivity driven by the caller's setting. It and `SettingFieldRow` (the label-over-full-width-
+  control shape a text field needs) are both built on `qml/components/SettingRowBase.qml`, which owns
+  the two `Binding`s below, the label/hint shape and the column; each subclass states only the three
+  numbers it measures differently (`contentInset`, `contentSpacing`, `contentPreferredWidth`). Three
+  things are load-bearing and easy to undo by accident:
   * The base's `title`/`description` are **pinned empty with a `Binding`** (not an expression, and with
     `restoreMode: Binding.RestoreNone`), so an instance cannot re-open the item's left label column:
     with that column visible the content moves to the *right-hand* slot and the radio trails the text
-    — the one thing this row exists to avoid.
+    — the one thing these rows exist to avoid.
   * Its `background` is **null on purpose** ("it is one row of a list, and the list owns the surface"),
     so a body of radio rows needs a surface — and it gets one of its own:
     `qml/components/RadioSettingGroup.qml`, a card in `cardColor` (the colour the header and every
@@ -628,7 +733,9 @@ transparent corner, not `srgba(255,255,255,1)`.
   `verticalScrollBar` alias removes an attached bar**: the assignment raises no warning and does
   nothing, because the bar binds `policy` itself — only declaring `ScrollBar.vertical: null` on the
   view drops it. The pages therefore keep what the view already had: `Rin.ListView` attaches RinUI's
-  bar itself, and the `Flickable` pages add `Rin.ScrollBar.vertical: Rin.ScrollBar {}`. The same rule
+  bar itself, and the four `Flickable` pages used to add `Rin.ScrollBar.vertical: Rin.ScrollBar {}`
+  each — that line now lives once, in `qml/components/PageBody.qml`, which is also the one place the
+  Flickable's `clip`/`contentWidth`/`contentHeight` choreography is written. The same rule
   decides the Variables table's *own* pair: the columns are computed from that view's width (they
   always fit) and it is given every row's height (the *page* scrolls), so both bars are inert — yet
   Qt drew both, `size == 1.000` and visible, as a full-width empty strip under the rows. Setting
@@ -664,6 +771,15 @@ transparent corner, not `srgba(255,255,255,1)`.
   `window.findChildren(QObject)` from PySide6 does not reach it (nor the `Image` inside its
   `MathStrip`). A harness that needs their geometry has to ask from QML — walk `children` and match
   on `objectName`, as `qml/components/…` hooks like `sendBtn` and `codeThemeRows` exist for.
+- **A `Dialog` and a `ToolTip` are not `QQuickItem`s.** They are `Popup`s, so a probe that filters
+  `findChildren(QObject)` by `isinstance(…, QQuickItem)` finds neither — and the failure looks like
+  "the dialog never opened" / "the field has no tip", which is how two of these probes were
+  misread. Match on the class name (`"MessageDialog" in o.metaObject().className()`) and read the
+  properties with `property()`; the dialog's own `body`/`title` are its contract, not the `Text`
+  child inside it. Measured while checking the shared dialogs, together with the neighbouring fact
+  that a `Tip` declared inside a `Control` is parented to the **control** and not to its
+  `contentItem` (`codeFontField`'s tip's `parent` is the `TextField`), which is what makes
+  `visible: parent.hovered` work inside a settings field too.
 - **Never resize a RinUI window while it is being created and then maximize it.** The window fills
   the screen but its content stays drawn in the pre-resize rectangle, surrounded by a white border,
   and later resizes never repair it — while Qt reports the correct window state *and* content size,
@@ -1218,7 +1334,15 @@ backdrop floats up from 10px below while fading in, and carries the page's own t
   (they had lived in `appearance`). Layout follows RinUI's own gallery
   (`examples/pages/Settings.qml`): a section is a `ColumnLayout { spacing: 3 }` holding a
   **`Typography.BodyStrong`** subtitle and then one card per row, and the sections are separated by
-  the outer column's spacing. Subtitle size is the gallery's, not a guess — `BodyStrong` renders at
+  the outer column's spacing. **Each section is its own component**
+  (`qml/components/Settings{Interface,Workspace,Language,File,About}Section.qml`), which is all the
+  page ever was: it keeps the frame (`PageBody` + `PageScaffold`) and the order, and a section keeps
+  its own state — the label/value pairs its combos pass their index through, `indexOf` (three lines,
+  and the one duplication left: Interface and Workspace each have a copy) and its own dialog (the
+  font refusal lives with the LaTeX row, the reset confirmation with the row that opens it). The
+  code-theme family list moved into the Workspace section with everything else, which is why
+  `test_the_settings_page_offers_exactly_the_families_the_data_has` reads *that* file.
+  Subtitle size is the gallery's, not a guess — `BodyStrong` renders at
   the theme's `bodyStrongSize` (14 pt, weight 600), i.e. *the same size as a card title but bolder*;
   `Typography.Subtitle` (20 pt) is one size too large and reads as a second page heading. Most rows
   are `SettingCard`s; a `SettingExpander` is used only where a row carries a second row of its own
@@ -1380,9 +1504,13 @@ backdrop floats up from 10px below while fading in, and carries the page's own t
   `contentHeight` carries one extra inset (`+ frame.inset * 2`) so the last card clears the bottom
   edge. **The inset is read back, not restated**: every page used to write `x: 24` / `y: 24` /
   `width: scroll.width - 48` by hand next to the `inset` it passed the scaffold, so moving an inset
-  meant finding four or five literals — and Variables, whose inset is 12, had its own set. The body
-  now binds `frame.inset`, which is the same one-way hand-off as `actionsWidth`/`headerHeight` and
-  cannot drift from it.
+  meant finding four or five literals — and Variables, whose inset is 12, had its own set. That
+  arithmetic now lives in `qml/components/PageBody.qml`, which takes the scaffold (`frame:`) and reads
+  `inset` off it, so a page cannot disagree with the frame it hands the title bar to; the page's own
+  content is one child of the body's inset box. A page that maps something's `y` into the viewport
+  (History's cards, the Variables table's rows) asks `contentBox.y` for the content's origin in the
+  scroller rather than restating the inset — the Variables `reveal` used to leave it out and scrolled
+  one row 12px short, where History had always counted it.
 - **The Workspace group** (`workspace.*`) is what the section of the same name owns — how code is
   coloured, how brackets are coloured, and the three faces. The faces, all applied live:
   - **Code** (`code_family`/`code_size`): the expression surfaces — the calculator's two inputs
@@ -1409,7 +1537,12 @@ backdrop floats up from 10px below while fading in, and carries the page's own t
   * **On selection** (`settingsVM.trySetLatexFont`, wired to the ComboBox's `onActivated`): the one
     font the user picked is trial-rendered (`fonts.math_font_typesets`), and a refusal leaves the
     setting untouched, puts the box back and opens a dialog naming the font. Keeping this out of the
-    scan is why the dropdown still opens in ~0.3 s rather than ~1.3 s.
+    scan is why the dropdown still opens in ~0.3 s rather than ~1.3 s. A *successful* pick assigns
+    `latexFont`, and that property's setter is what emits `changed` — the notify `MainViewModel`
+    re-assembles the shared `LatexStyle` on, i.e. what actually re-renders every LaTeX surface and
+    refreshes the row's own "In use: …". An emit inside `trySetLatexFont` (after its `return True`)
+    never ran, so the family was persisted while every surface kept rendering the previous font until
+    some unrelated setting moved: the emit belongs in the setter, where every writer gets it.
   * **On render** (`latex_to_svg`): a font that slips through anyway — an older config, a font that
     breaks after a system update — is retried without it, so the feature survives and the Log says
     which file and why.
@@ -1709,8 +1842,10 @@ minimum is its real limit; the pages cap it with `Layout.maximumWidth: implicitW
 natural, shrink when short) and must not impose a smaller floor of their own. The match mode used to
 be a 118px `ComboBox` — a fifth of the toolbar, spent on a choice made about once a session, and the
 thing that used to sit on the trash icon when the row ran short. It is now a flat icon button (the
-funnel) whose tooltip names the current mode and whose menu carries the labels; the signal
-(`searchRequested(text, mode)`) did not change, so the pages did not either. The front window's
+funnel) whose tooltip names the current mode and whose menu carries the labels. The box owns the
+query: it is handed the filter it drives and writes every query into it, so there is no
+`searchRequested` signal and no per-page handler, and it adopts that filter's state when it is built
+(see the proxy rule in *Core rules*). The front window's
 minimum is 860px (`MainWindow.qml`) and the panel takes 320, so the tight case is real — and the
 toolbar's answer to it is the `CommandBar` fold above, not a wider row.
 
@@ -1761,7 +1896,16 @@ reader had clicked — two selected rows, one of them stale. `selectRow` uses
 `setCurrentIndex(index, ClearAndSelect | Current)` for that reason.
 
 **The details panel** (a toolbar toggle, closed by default) shows the selected variable and its two
-fields, and duplicates or deletes the row. Three things about it are worth keeping:
+fields, and duplicates or deletes the row. It is its own component,
+`qml/components/VariableDetailsPanel.qml` — the page hands it `host` (everything it shows is the
+page's state: which row is selected, the definition read through `dataRevision`, `sidebarOpen`,
+`panelWidth`, and the row's two actions), it owns the two fields and the `syncDetails`/`applyDetails`
+pair that reads and writes them, and it calls `host.refreshTableLayout()` when its width animation
+stops (see the traps above — the animation's last frame is not the final width). One thing about the
+move: the two functions are called by the *page* (its `onSelectedRowChanged` and the proxy's
+`onDataChanged`), so a page that keeps calling `page.syncDetails()` gets a `ReferenceError:
+nameField is not defined` — the fields live in the panel now. Four more things about it are worth
+keeping:
 
 - **It shows one LaTeX line, not a name beside an expression.** sympy typesets the *name* too —
   `alpha` is `\alpha` — so a plain-text name next to a Greek expression reads as two different
@@ -1804,6 +1948,11 @@ disabled. It also holds the accent ramp to the recorded vectors — an offline c
 shell cannot be asked anything in a test; when the derivation changes, re-verify against
 `windowsthemefinetuner` (which owns the full 484-vector corpus and the live comparator) and
 re-sample `tests/golden_accent_palettes.json` from it rather than editing the numbers by hand.
+Two QML-side contracts live there too, both read as text because neither needs a QML engine: the
+settings page's code-theme list holds `code_themes.FAMILIES` in order, and
+`qml/components/qmldir` holds the component directory (every `*.qml` listed, every entry a file) —
+that inventory had drifted to fifteen of twenty files, the five missing ones being the components the
+pages import most, because nothing imports the module by URI and so nothing ever complained.
 
 When changing QML pages, a short manual/app-launch check plus scanning the startup console for QML
 warnings is still the baseline; GUI smoke scripts stay throwaway (kept out of git). Remember the

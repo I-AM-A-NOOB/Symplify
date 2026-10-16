@@ -17,6 +17,12 @@ import RinUI
 QQC2.TextField {
     id: field
 
+    //: The app's context menu, at the pointer — and the press that opens it. It
+    //: claims the right button, so the caret, the selection and the left-button
+    //: cursor are still the editor's, and it switches Qt's own attached menu off
+    //: (see `CodeContextMenu`).
+    CodeContextMenu { editor: field }
+
     //: The code theme's colours for the current appearance; the UI theme's are
     //: the fallback for a theme that leaves a slot empty.
     readonly property var surface: settingsVM.codeSurface(Theme.isDark())

@@ -1,29 +1,81 @@
 module Symplify.Components
 
-# CodeSurface is the box behind the calculator's code inputs, in the code theme's
-# own colours.
+#: The component library's inventory. Kept complete on purpose: nothing imports this
+#: module by URI (`import "../components"` resolves by file name), so a missing entry
+#: never complained — it had drifted to fifteen of twenty files, five of them the ones
+#: the pages import most. `test_the_components_directory_and_its_qmldir_agree` holds
+#: this list to the directory.
+
+# CodeSurface is the box behind a code input, in the code theme's own colours.
 CodeSurface 1.0 CodeSurface.qml
-# CopyableLabel is the read-only, borderless text box that reports a result —
-# the calculator's outcome and a history card's lines. Selectable, never editable.
-# Its `fullText` carries what the elided view dropped, so a copy is whole.
+# CodeField / CodeArea are the two code inputs themselves — font, surface, ink, and the
+# highlighter on the area's document — so the calculator's Assign row and the Variables
+# editors cannot drift apart. Each page keeps its own keys.
+CodeArea 1.0 CodeArea.qml
+CodeField 1.0 CodeField.qml
+# CodeContextMenu is the app's context menu for a text input, and the press that opens
+# it: every code and text field gets one (Qt's own attached menu anchors to the caret,
+# not to the pointer).
+CodeContextMenu 1.0 CodeContextMenu.qml
+# CommandBar is a row of `Action`s that folds what does not fit into an overflow menu
+# (see the toolbar bullet under Rendering).
+CommandBar 1.0 CommandBar.qml
+# CopyableLabel is the read-only, borderless text box that reports a result — the
+# calculator's outcome and a history card's lines. Selectable, never editable, and
+# whole: the text is never truncated, the outer item clips it.
 CopyableLabel 1.0 CopyableLabel.qml
 # ExpanderPanel has no in-tree user yet; kept deliberately as the plain-Expander
 # counterpart to ExpanderRow (same cursor fix) for future pages.
 ExpanderPanel 1.0 ExpanderPanel.qml
 ExpanderRow 1.0 ExpanderRow.qml
 HScrollView 1.0 HScrollView.qml
+# HistoryCard is one history card — the delegate the History page's Repeater builds
+# (the page hands it `host` and `scroller`).
+HistoryCard 1.0 HistoryCard.qml
 KeyboardPanel 1.0 KeyboardPanel.qml
 LatexImage 1.0 LatexImage.qml
 # MathStrip is the formula area itself: HScrollView + LatexImage + the room the
 # overlay bar needs. LatexImage is its inner renderer, not a page-level type.
 MathStrip 1.0 MathStrip.qml
+# MessageDialog is the one message box (title, wrapped body, buttons); WarningDialog is
+# that plus the wiring to a viewmodel's `warningOccurred`.
+MessageDialog 1.0 MessageDialog.qml
+WarningDialog 1.0 WarningDialog.qml
+# PageBody is a page's scrolling body: the inset, the attached bar and the height it
+# scrolls to, in the one place all four scaffold pages share.
+PageBody 1.0 PageBody.qml
 PageHeader 1.0 PageHeader.qml
 PageHeaderRow 1.0 PageHeaderRow.qml
 PageScaffold 1.0 PageScaffold.qml
-# RadioSettingRow is a `SettingItem` whose radio leads its own label — the shape a
-# short list of choices takes, and the one bare `SettingItem` children cannot
-# express (they land in the right).
+# RadioSettingRow is a `SettingItem` whose radio leads its own label — the shape a short
+# list of choices takes, and the one bare `SettingItem` children cannot express (they
+# land in the right-hand slot). `SettingRowBase` is the `SettingItem` both row shapes
+# are built on, and RadioSettingGroup is the surface those rows sit on (they paint none
+# of their own); SettingFieldRow is the label-over-full-width-control shape a text
+# field needs.
+SettingRowBase 1.0 SettingRowBase.qml
 RadioSettingRow 1.0 RadioSettingRow.qml
+RadioSettingGroup 1.0 RadioSettingGroup.qml
+SettingFieldRow 1.0 SettingFieldRow.qml
 SearchBar 1.0 SearchBar.qml
+# ProjectFocusIndicator is the focus ring both shadows below use (the radius and the
+# probe objectName live there once).
+ProjectFocusIndicator 1.0 ProjectFocusIndicator.qml
 SegmentedItem 1.0 SegmentedItem.qml
 SelectorBarItem 1.0 SelectorBarItem.qml
+# VariableCellEditor is the Variables table's inline cell editor (the view opens it
+# on the edited cell; the delegate writes what it holds).
+VariableCellEditor 1.0 VariableCellEditor.qml
+# VariableDetailsPanel is the Variables page's details panel (the selected variable,
+# its two fields and the row's actions); the page hands it `host`.
+VariableDetailsPanel 1.0 VariableDetailsPanel.qml
+# The Settings page's five sections, one component each: the page keeps the frame and
+# the order, and a section keeps its own state (its label/value pairs) and its own dialog.
+SettingsInterfaceSection 1.0 SettingsInterfaceSection.qml
+SettingsWorkspaceSection 1.0 SettingsWorkspaceSection.qml
+SettingsLanguageSection 1.0 SettingsLanguageSection.qml
+SettingsFileSection 1.0 SettingsFileSection.qml
+SettingsAboutSection 1.0 SettingsAboutSection.qml
+# Tip is a `ToolTip` with the app's own manners: the delay every tip waits, and the
+# control it is shown for.
+Tip 1.0 Tip.qml

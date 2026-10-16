@@ -69,28 +69,16 @@ Item {
         }
     }
 
-    Flickable {
+    PageBody {
         id: logScroll
 
+        frame: frame
         anchors.fill: parent
-        clip: true
-        contentWidth: width
-        // The content plus the same 24px again at the bottom, so the newest line
-        // can be scrolled clear of the edge.
-        contentHeight: content.height + frame.inset * 2
-
-        // RinUI's own bar, attached to this flickable — the same bar RinUI's
-        // ListView attaches for the History page.
-        Rin.ScrollBar.vertical: Rin.ScrollBar {}
-
-
 
         Item {
             id: content
 
-            x: frame.inset
-            y: frame.inset
-            width: logScroll.width - frame.inset * 2
+            width: parent.width
             height: headerRow.height + logText.height
 
             PageHeaderRow {

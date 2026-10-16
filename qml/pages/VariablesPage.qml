@@ -29,7 +29,7 @@ Item {
             //: Typing in a field writes the model, which lands here too, and
             //: re-reading it then shows what the store actually kept (an
             //: expression is stored as it parses) rather than what was typed.
-            page.syncDetails()
+            details.syncDetails()
         }
 
         //: The filter owns the `LatexStyle` (ink, size, font), so a change to it
@@ -96,31 +96,6 @@ Item {
               + variablesFilter.cellAt(page.selectedRow, 1)
     }
 
-    //: Load the panel's fields from the selected row. Assignments, not bindings:
-    //: the user types in them, and a binding would fight the typing.
-    function syncDetails() {
-        if (page.selectedRow < 0) {
-            nameField.text = ""
-            valueField.text = ""
-            return
-        }
-        nameField.text = variablesFilter.cellAt(page.selectedRow, 0)
-        valueField.text = variablesFilter.cellAt(page.selectedRow, 1)
-    }
-
-    //: Write both fields back, through the same door the table's cell editors use —
-    //: the proxy forwards to the source, which renames (column 0) or re-parses
-    //: (column 1) — and only what changed, so an untouched field is not re-parsed.
-    function applyDetails() {
-        if (page.selectedRow < 0)
-            return
-        const row = page.selectedRow
-        if (nameField.text !== variablesFilter.cellAt(row, 0))
-            variablesFilter.setData(variablesFilter.modelIndex(row, 0), nameField.text, 0)
-        if (valueField.text !== variablesFilter.cellAt(row, 1))
-            variablesFilter.setData(variablesFilter.modelIndex(row, 1), valueField.text, 0)
-    }
-
     //: A copy of the selected variable under a fresh name — the same rule the
     //: toolbar's add uses — selected and revealed the same way.
     function duplicateVariable() {
@@ -134,7 +109,7 @@ Item {
         }
     }
 
-    onSelectedRowChanged: page.syncDetails()
+    onSelectedRowChanged: details.syncDetails()
 
     //: Select a row. `TableView` has no `selectRow` in this RinUI build — the call
     //: silently failed, so `+` added a variable without selecting it — and the
@@ -176,7 +151,11 @@ Item {
         if (row < 0 || row >= page.rowCount)
             return
         const pitch = varTable.rowHeightProvider(0) + varTable.rowSpacing
-        const top = tableCard.y + varTable.y + row * pitch
+        //: The content's own origin: the box sits at the page inset, and the table
+        //: inside `content`, so the row's absolute top needs both (the History page's
+        //: `reveal` has always counted its inset; this one used to leave it out and
+        //: scroll a row 12px short).
+        const top = varsScroll.contentBox.y + tableCard.y + varTable.y + row * pitch
         const bottom = top + pitch - varTable.rowSpacing
         if (top < varsScroll.contentY)
             varsScroll.contentY = Math.max(0, top - 12)
@@ -192,35 +171,33 @@ Item {
         varTable.edit(variablesFilter.modelIndex(page.selectedRow, column))
     }
 
+    //: Re-run the table's column provider. The details panel's width animates, and
+    //: the columns are computed from the view's own width — which the view does not
+    //: re-ask when it changes; the panel calls this when its animation stops, which
+    //: is the only moment that decides it (see `VariableDetailsPanel`).
+    function refreshTableLayout() {
+        varTable.forceLayout()
+    }
+
     // The body scrolls as a page, the shape Log and History use, so the table can be
     // as tall as its rows. A `TableView` paints only what fits its own height, so it
     // is given `contentHeight`: with nothing left for it to scroll, its own bars stay
     // hidden and the wheel passes straight through to this flickable (measured — see
     // the guide). That is what makes the page sticky: the title row and the actions
     // ride up into `PageScaffold`'s floating bar while the rows scroll under them.
-    Flickable {
+    PageBody {
         id: varsScroll
 
+        frame: frame
         anchors.left: parent.left
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         anchors.right: details.left
-        clip: true
-        contentWidth: width
-        // The content plus the page's bottom inset, so the last row can be scrolled
-        // clear of the edge.
-        contentHeight: content.height + frame.inset * 2
-
-        //: RinUI's own bar, attached to this flickable — the bar the other pages
-        //: attach, so a page carries one scroll bar and it sits at the window edge.
-        Rin.ScrollBar.vertical: Rin.ScrollBar {}
 
         Column {
             id: content
 
-            x: frame.inset
-            y: frame.inset
-            width: varsScroll.width - frame.inset * 2
+            width: parent.width
             spacing: 10
 
             //: The title, and the row the actions ride until the bar takes over.
@@ -241,7 +218,7 @@ Item {
 
                 width: parent.width
                 height: Math.max(varTable.height,
-                                 varsScroll.height - content.y - 12
+                                 varsScroll.height - varsScroll.contentBox.y - 12
                                      - headerRow.height - content.spacing)
 
                 // Exactly as tall as its rows, and no taller: the view builds a
@@ -348,166 +325,9 @@ Item {
                         // `editing = false` is the switch the view listens to, and a
                         // `TextArea` never raises it on its own (it has no
                         // `editingFinished`).
-                        TableView.editDelegate: FocusScope {
-                            id: cellEditor
-
-                            objectName: "cellEditor"
-                            width: parent.width
-                            height: parent.height
-
-                            //: The page needs a handle on the open editor: clicking
-                            //: another cell has to commit it before the selection moves,
-                            //: and only the editor knows which of its two fields is live.
-                            Component.onCompleted: page.activeEditor = cellEditor
-                            Component.onDestruction: {
-                                if (page.activeEditor === cellEditor)
-                                    page.activeEditor = null
-                            }
-
-                            //: Commit whichever field this column is editing.
-                            function commitVisible() {
-                                close()
-                            }
-
-                            //: Close the session. The write belongs to the delegate (see
-                            //: its `onEditingChanged`): this only ends the edit, so every
-                            //: gesture — a click elsewhere, a `Shortcut`, Escape — reaches
-                            //: the model by the same road.
-                            function close() {
-                                cell.editing = false
-                            }
-
-                            //: The commit gesture, as a window `Shortcut` rather than a
-                            //: `Keys` handler on the editor. A `TextArea` is a text
-                            //: control: it consumes Return for itself before the
-                            //: attached `Keys` object ever sees the event (measured —
-                            //: the key reaches the editor, the handler never runs, and
-                            //: the session closes with nothing written). `Shortcut`s are
-                            //: dispatched by the window *ahead* of the key event, so
-                            //: this one always fires — and listing the Ctrl variants
-                            //: gives the editor the same confirm gesture the calculator
-                            //: uses, on both columns. `enabled` keeps it to the open
-                            //: editor: nothing else in the app wants Return.
-                            //: `Ctrl+Return` (to match the calculator) and plain Return,
-                            //: which the view would otherwise close without a write. A
-                            //: `Shortcut` is dispatched ahead of the key event, so it
-                            //: reaches us where a `Keys` handler on the editor does not —
-                            //: a text control eats Return for itself first.
-                            Shortcut {
-                                enabled: cell.editing
-                                sequences: ["Return", "Enter", "Ctrl+Return", "Ctrl+Enter"]
-                                context: Qt.WindowShortcut
-                                onActivated: cellEditor.close()
-                            }
-
-                            //: Escape too, and for the same reason: it has to clear what was
-                            //: typed *before* the session ends, or the delegate's write on
-                            //: the session ending saves the edit the reader just rejected.
-                            //: A `Shortcut` runs ahead of the key event, a `Keys` handler on
-                            //: the text control does not.
-                            Shortcut {
-                                enabled: cell.editing
-                                sequences: ["Escape"]
-                                context: Qt.WindowShortcut
-                                onActivated: {
-                                    cell.pendingText = ""
-                                    cellEditor.close()
-                                }
-                            }
-
-                            // Neither control raises `editingFinished` for us: a
-                            // `TextArea` never has one, and the base delegate's `TextField`
-                            // only did because the framework ended the session when focus
-                            // left it. So leaving the editor — for another cell, another
-                            // control, a click on the page — has to end the session
-                            // itself, and the delegate writes what was typed when it does.
-                            property bool tookFocus: false
-
-                            function watchFocus(item) {
-                                //: The delegate is captured now, by value: the callback can
-                                //: outlive the id lookup (it runs while the editor is being
-                                //: destroyed), and `cell` is then a `ReferenceError`.
-                                const owner = cell
-
-                                item.activeFocusChanged.connect(function () {
-                                    if (item.activeFocus)
-                                        cellEditor.tookFocus = true
-                                    else if (cellEditor.tookFocus && owner.editing)
-                                        //: `owner.editing` first: losing focus is part of
-                                        //: the editor being destroyed, and calling into it
-                                        //: then throws. If the session is already over,
-                                        //: there is nothing to close.
-                                        cellEditor.close()
-                                })
-                            }
-
-                            // Column 0 renames, and edits exactly like the calculator's
-                            // Assign name field: the code font, the code surface, plain
-                            // ink — nothing highlights a name.
-                            // A `CodeField`: the code font on the code surface, in
-                            // plain ink — nothing highlights a name. It keeps its own
-                            // height (RinUI's field height) on the cell's centre line,
-                            // inset 4px from the column edges: stretched to the row it
-                            // would meet the lines above and below.
-                            CodeField {
-                                id: nameEditor
-
-                                objectName: "nameEditor"
-                                anchors.verticalCenter: parent.verticalCenter
-                                anchors.left: parent.left
-                                anchors.right: parent.right
-                                anchors.leftMargin: 4
-                                anchors.rightMargin: 4
-                                visible: cell.column === 0
-                                focus: visible
-                                placeholderText: qsTr("name")
-                                onTextChanged: cell.pendingText = text
-                                text: model.display !== undefined ? `${model.display}` : ""
-                                Component.onCompleted: {
-                                    if (!visible)
-                                        return
-                                    cellEditor.watchFocus(nameEditor)
-                                    selectAll()
-                                }
-                                //: Return is the delegate's `Shortcut`; nothing to do here
-                                //: (the editor's `pendingText` is what gets written).
-                                readOnly: false
-                            }
-
-                            // Column 1 re-parses the expression, so it edits in the
-                            // colours the read-only cell is painted in: `CodeArea`
-                            // carries the highlighter, on the editor's own document, for
-                            // as long as the editor lives.
-                            CodeArea {
-                                id: valueEditor
-
-                                objectName: "valueEditor"
-                                anchors.verticalCenter: parent.verticalCenter
-                                anchors.left: parent.left
-                                anchors.right: parent.right
-                                anchors.leftMargin: 4
-                                anchors.rightMargin: 4
-                                visible: cell.column === 1
-                                focus: visible
-                                wrapMode: TextEdit.NoWrap
-                                text: model.display !== undefined ? `${model.display}` : ""
-                                onTextChanged: cell.pendingText = text
-                                Component.onCompleted: {
-                                    if (!visible)
-                                        return
-                                    cellEditor.watchFocus(valueEditor)
-                                    selectAll()
-                                }
-                                //: Escape abandons the edit. Return is the delegate's
-                                //: `Shortcut` — a text control eats it here.
-                                Keys.onPressed: (event) => {
-                                    if (event.key === Qt.Key_Escape) {
-                                        event.accepted = true
-                                        cell.pendingText = ""
-                                        cellEditor.close()
-                                    }
-                                }
-                            }
+                        TableView.editDelegate: VariableCellEditor {
+                            host: page
+                            cellDelegate: cell
                         }
 
                         // RinUI's own contentItem hardcodes its label font
@@ -560,126 +380,10 @@ Item {
     // is nothing to typeset, the raw entry), the two fields that make it, and the
     // row's own actions. Fixed rather than scrolled: the table narrows beside it,
     // so both stay where the reader left them.
-    Rectangle {
+    VariableDetailsPanel {
         id: details
 
-        anchors.top: parent.top
-        anchors.bottom: parent.bottom
-        anchors.right: parent.right
-        //: The width *is* the toggle, and `visible` follows it — a collapsed panel
-        //: that stayed visible would still take its clicks.
-        width: page.sidebarOpen ? page.panelWidth : 0
-        visible: width > 0
-        color: Theme.currentTheme.colors.cardColor
-
-        Behavior on width {
-            NumberAnimation {
-                duration: Utils.animationSpeed
-                easing.type: Easing.OutQuint
-
-                //: The table's columns are computed from its own width, and the
-                //: provider runs whenever that changes — which, during this animation,
-                //: is every frame. The frame that happens to run last is not
-                //: necessarily the one at the final width, so the columns could end up
-                //: sized for an intermediate one: `contentWidth` a hair over `width`,
-                //: and a horizontal scroll bar over content that all fits (measured
-                //: intermittently, same widths, open/close/open). One relayout when the
-                //: animation stops fixes it at the only moment that matters.
-                onRunningChanged: if (!running) varTable.forceLayout()
-            }
-        }
-
-        ColumnLayout {
-            anchors.fill: parent
-            anchors.margins: 12
-            spacing: 10
-
-            Item { Layout.fillHeight: true }
-
-            //: `MathStrip`, not a bare `LatexImage`: it is the one place a rendered
-            //: formula is laid out (padding, the room the overlay bar needs, the
-            //: image at its natural size), and a long definition can be scrolled
-            //: sideways in the panel instead of being clipped by it. Hand-rolling the
-            //: image here is how the panel's artwork drifted in size from every other
-            //: surface — same LaTeX, different frame.
-            MathStrip {
-                id: definitionImage
-
-                Layout.fillWidth: true
-                visible: page.selectedRow >= 0 && page.definition.url !== ""
-                source: page.definition.url
-                naturalWidth: page.definition.width
-                naturalHeight: page.definition.height
-            }
-            Text {
-                Layout.fillWidth: true
-                visible: !definitionImage.visible
-                text: page.definitionText
-                wrapMode: Text.WordWrap
-                font: settingsVM.codeFont
-                color: page.selectedRow < 0
-                    ? Theme.currentTheme.colors.textSecondaryColor
-                    : Theme.currentTheme.colors.systemCriticalColor
-            }
-
-            CodeField {
-                id: nameField
-
-                Layout.fillWidth: true
-                enabled: page.selectedRow >= 0
-                placeholderText: qsTr("name")
-                onAccepted: page.applyDetails()
-            }
-            //: Shaped exactly like the Calculator's Assign value box — the shared
-            //: `CodeArea`, wrapping, its own height — rather than a forced 40px: a
-            //: fixed height fights the content as soon as the expression wraps, and the
-            //: panel is narrower than any calculator row.
-            CodeArea {
-                id: valueField
-
-                Layout.fillWidth: true
-                Layout.minimumWidth: 80
-                Layout.alignment: Qt.AlignVCenter
-                enabled: page.selectedRow >= 0
-                wrapMode: TextEdit.Wrap
-                placeholderText: qsTr("expression")
-                // Enter applies and never inserts a newline, as everywhere else.
-                Keys.onPressed: (event) => {
-                    if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-                        event.accepted = true
-                        page.applyDetails()
-                    }
-                }
-            }
-
-            //: The panel's whole vocabulary, as two plain buttons with their words on
-            //: them: the sidebar is narrow, there are only two, and a row of icons made
-            //: them read as a toolbar of unrelated actions. Delete is destructive and
-            //: says so in its label as well as its icon.
-            ColumnLayout {
-                Layout.fillWidth: true
-                spacing: 6
-
-                Button {
-                    Layout.fillWidth: true
-                    flat: true
-                    text: qsTr("Duplicate")
-                    icon.name: "ic_fluent_copy_20_regular"
-                    enabled: page.selectedRow >= 0
-                    onClicked: page.duplicateVariable()
-                }
-                Button {
-                    Layout.fillWidth: true
-                    flat: true
-                    text: qsTr("Delete")
-                    icon.name: "ic_fluent_delete_20_regular"
-                    enabled: page.selectedRow >= 0
-                    onClicked: page.deleteVariable()
-                }
-            }
-
-            Item { Layout.fillHeight: true }
-        }
+        host: page
     }
 
     // The frame: title, actions, floating bar, window-edge scroll bar. The body
@@ -705,12 +409,11 @@ Item {
             //: disappear, and never past a usable width.
             Layout.fillWidth: true
             Layout.maximumWidth: implicitWidth
+            //: The box drives the proxy itself, and adopts whatever query the proxy
+            //: still holds — see `SearchBar.filter`.
+            filter: variablesFilter
             modeLabels: [qsTr("Fuzzy"), qsTr("Name"), qsTr("Value"),
                          qsTr("Type")]
-            onSearchRequested: (text, mode) => {
-                variablesFilter.searchText = text
-                variablesFilter.searchMode = mode
-            }
         }
 
         //: The table's own actions. Everything here may fold into the overflow
@@ -755,30 +458,17 @@ Item {
                 ? Theme.currentTheme.colors.textColor
                 : Theme.currentTheme.colors.textDisabledColor
             flat: true
-            ToolTip {
-                delay: 500
-                visible: parent.hovered
+            Tip {
                 text: page.sidebarOpen ? qsTr("Hide details") : qsTr("Show details")
             }
             onClicked: page.sidebarOpen = !page.sidebarOpen
         }
     }
 
-    Dialog {
-        id: warningDialog
-
-        property string contentText: ""
-
-        title: qsTr("Warning")
-        standardButtons: Dialog.Ok
-        Text {
-            Layout.fillWidth: true
-            width: page.panelWidth
-            wrapMode: Text.WordWrap
-            typography: Typography.Body
-            color: Theme.currentTheme.colors.textColor
-            text: warningDialog.contentText
-        }
+    //: The table's refusals — a rename the model would not take, a SymPy built-in
+    //: name. The dialog and its wiring are the shared pair.
+    WarningDialog {
+        source: varsVM
     }
 
     Connections {
@@ -788,16 +478,6 @@ Item {
         //: follow it, which is what the table used to do when it owned the scroll.
         function onCurrentChanged() {
             page.reveal(varTable.selectionModel.currentIndex.row)
-        }
-    }
-
-    Connections {
-        target: varsVM
-
-        function onWarningOccurred(title, content) {
-            warningDialog.title = title
-            warningDialog.contentText = content
-            warningDialog.open()
         }
     }
 }

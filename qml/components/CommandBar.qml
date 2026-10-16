@@ -61,8 +61,6 @@ Item {
 
     //: The overflow button's own width, taken from the button that draws it.
     readonly property real overflowWidth: overflowButton.implicitWidth
-    //: How many actions this bar was given — `fitted` of them are on screen.
-    readonly property int actionCount: repeater.count
 
     //: How many of the leading actions fit into `available` pixels.
     function countFitting(available) {
@@ -127,7 +125,8 @@ Item {
                 //: loud action (if it has one) is a `Button` of its own outside
                 //: the bar. RinUI's `Button` puts `flat` ahead of `highlighted`
                 //: when it chooses its colour, so an accent action cannot live
-                //: here — see the calculator's `calculateButton`.
+                //: here — the calculator's Calculate button beside its bar is the
+                //: page's accent `Button`.
                 icon.name: modelData.icon.name
                 icon.color: enabled
                     ? Theme.currentTheme.colors.textColor
@@ -139,9 +138,7 @@ Item {
                 Layout.alignment: Qt.AlignVCenter
                 onClicked: modelData.trigger()
 
-                ToolTip {
-                    delay: 500
-                    visible: parent.hovered
+                Tip {
                     text: modelData.text
                 }
             }
@@ -156,9 +153,7 @@ Item {
             icon.color: Theme.currentTheme.colors.textColor
             Layout.alignment: Qt.AlignVCenter
 
-            ToolTip {
-                delay: 500
-                visible: parent.hovered
+            Tip {
                 text: qsTr("More")
             }
             onClicked: overflowMenu.popup(overflowButton,

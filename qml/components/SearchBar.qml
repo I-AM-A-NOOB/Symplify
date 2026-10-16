@@ -7,6 +7,9 @@ import RinUI
 // pause, while clearing the box (or pressing Esc) re-queries at once, so the
 // full list comes back immediately.
 //
+// The *query* is the filter's, not the box's (see `filter`): the proxy outlives
+// the page, so a freshly built box has to show what it is still filtering by.
+//
 // The mode is chosen from a menu behind a flat icon button rather than from a
 // combo box. The labels are long ("Fuzzy", "Expression", "Result"), the choice is
 // made about once a session, and a combo box spent a fifth of the toolbar on
@@ -14,25 +17,65 @@ import RinUI
 RowLayout {
     id: root
 
+    //: The match-mode labels, in the order `python/viewmodel/search.py`'s enums hold
+    //: them: the menu hands its index straight through, so this list and the enum are
+    //: one contract (see "The Variables and History pages bind to search-filtered
+    //: proxies" in the guide).
     property var modeLabels: []
     //: The chosen match mode, as an index into `modeLabels`.
     property int mode: 0
+    //: The proxy this box drives — `variablesFilter` or `historyFilter`. The query
+    //: belongs to the proxy, which survives a page switch (RinUI rebuilds a page on
+    //: every navigation), so the box owns the whole round trip: it adopts what the
+    //: filter still holds when it is built and writes every query back. A page hands
+    //: it this and its labels, and nothing else.
+    property var filter: null
 
-    signal searchRequested(string text, int mode)
+    //: True while `adoptFilter` writes the field. Without it that write reads as
+    //: typing, and starts a query for what the filter is already showing.
+    property bool adopting: false
+
+    //: Show the query the filter still holds. Run on completion, and deliberately
+    //: not a binding: a call in a binding creates no dependency of its own, and a
+    //: one-way write on every change would fight the caret of whoever is typing
+    //: (which is why the box is the one that writes the filter, and not both).
+    function adoptFilter() {
+        if (!root.filter)
+            return
+        root.adopting = true
+        root.mode = root.filter.searchMode
+        searchField.text = root.filter.searchText
+        root.adopting = false
+    }
+
+    Component.onCompleted: adoptFilter()
 
     function apply() {
         debounce.stop()
-        root.searchRequested(searchField.text, root.mode)
+        if (!root.filter)
+            return
+        root.filter.searchMode = root.mode
+        root.filter.searchText = searchField.text
     }
 
+    //: Empty the box, and the query with it — one path, through the empty-text
+    //: handler below, so "clear the query" has one spelling.
     function clear() {
         searchField.text = ""
-        apply()
     }
 
     TextField {
         id: searchField
 
+        //: RinUI's own `TextField` brings a context menu of its own, opened from a
+        //: vendored `MouseArea`, and Basic's inherited attached menu sits under it
+        //: as well. Both are switched off by the component below, which is the
+        //: app's menu (see `CodeContextMenu`), at the pointer.
+        CodeContextMenu { editor: searchField }
+
+        //: Named for a harness that has to read what the box shows (the pages'
+        //: other probe hooks exist for the same reason).
+        objectName: "searchField"
         //: The field is what gives way when the bar runs short — not the whole box:
         //: squeezing this component below what its two children need pushes the mode
         //: selector out over the toolbar's next button. `fillWidth` plus a floor here
@@ -47,6 +90,8 @@ RowLayout {
         placeholderText: qsTr("Search...")
 
         onTextChanged: {
+            if (root.adopting)
+                return                // the filter's own text, not a query
             if (text === "")
                 root.apply()          // clearing restores everything at once
             else
@@ -72,9 +117,7 @@ RowLayout {
 
         //: The button says which mode is in use without spending the room a combo
         //: box needs to say it.
-        ToolTip {
-            delay: 500
-            visible: parent.hovered
+        Tip {
             text: root.modeLabels.length > root.mode
                 ? root.modeLabels[root.mode] : ""
         }

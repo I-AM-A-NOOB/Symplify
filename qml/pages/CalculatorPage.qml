@@ -127,8 +127,6 @@ Item {
             //: fill — `highlighted`, never `flat`, since `flat` outranks
             //: `highlighted` in the colour choice.
             Button {
-                id: calculateButton
-
                 highlighted: true
                 text: qsTr("Calculate")
                 //: The accent name from the icon font RinUI ships.
@@ -137,9 +135,7 @@ Item {
                     ? Theme.currentTheme.colors.textAccentColor
                     : Theme.currentTheme.colors.textDisabledColor
 
-                ToolTip {
-                    delay: 500
-                    visible: parent.hovered
+                Tip {
                     text: parent.text
                 }
 
@@ -152,8 +148,6 @@ Item {
             //: tooltip. The bar folds whatever does not fit behind its own "more"
             //: button, so adding an action to it costs the row nothing.
             CommandBar {
-                id: calcCommandBar
-
                 //: The buttons continue the title rather than close the row, so
                 //: they hug the left edge this bar was given.
                 contentAlignment: Qt.AlignLeft
@@ -191,17 +185,13 @@ Item {
             //: action. Subtle-styled: the accent on Calculate is the page's one
             //: shout, and this is the other side of it.
             DropDownButton {
-                id: examplesButton
-
                 flat: true
                 text: qsTr("Examples")
                 icon.name: "ic_fluent_math_formula_20_regular"
                 icon.color: enabled
                     ? Theme.currentTheme.colors.textColor
                     : Theme.currentTheme.colors.textDisabledColor
-                ToolTip {
-                    delay: 500
-                    visible: parent.hovered
+                Tip {
                     text: parent.text
                 }
 
@@ -335,6 +325,19 @@ Item {
                                     event.accepted = true
                                 }
                             }
+                        }
+
+                        //: The app's context menu for the Code box (see
+                        //: `CodeContextMenu`): a sibling of the box rather than a
+                        //: child, because the box is RinUI's `ScrollableTextArea`
+                        //: and this has to sit *over* it — ahead of the menu its
+                        //: own inner `TextArea` opens from a vendored `MouseArea`.
+                        //: It covers what the box covers, and shows when the box
+                        //: does.
+                        CodeContextMenu {
+                            editor: codeArea.textArea
+                            anchors.fill: parent
+                            visible: calcVM.inputMode === 0
                         }
 
                         RowLayout {
@@ -503,8 +506,6 @@ Item {
                             //: no right-click menu. The calculator's outcome and a
                             //: history result line are the same kind of text.
                             CopyableLabel {
-                                id: outcomeBox
-
                                 Layout.fillWidth: true
                                 Layout.minimumWidth: 0
                                 Layout.preferredHeight: Math.round(settingsVM.codeSize * 4.2)
@@ -578,30 +579,9 @@ Item {
         onActivated: runCalculation()
     }
 
-    Dialog {
-        id: warningDialog
-
-        property string contentText: ""
-
-        title: qsTr("Warning")
-        standardButtons: Dialog.Ok
-        Text {
-            Layout.fillWidth: true
-            width: 320
-            wrapMode: Text.WordWrap
-            typography: Typography.Body
-            color: Theme.currentTheme.colors.textColor
-            text: warningDialog.contentText
-        }
-    }
-
-    Connections {
-        target: calcVM
-
-        function onWarningOccurred(title, content) {
-            warningDialog.title = title
-            warningDialog.contentText = content
-            warningDialog.open()
-        }
+    //: The calculator's own refusals — a SymPy built-in name, which is stored but
+    //: worth saying out loud. The dialog and its wiring are the shared pair.
+    WarningDialog {
+        source: calcVM
     }
 }

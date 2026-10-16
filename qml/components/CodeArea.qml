@@ -16,6 +16,12 @@ import RinUI
 QQC2.TextArea {
     id: area
 
+    //: The app's context menu, at the pointer — and the press that opens it. It
+    //: claims the right button, so the caret, the selection and the left-button
+    //: cursor are still the editor's, and it switches Qt's own attached menu off
+    //: (see `CodeContextMenu`).
+    CodeContextMenu { editor: area }
+
     readonly property var surface: settingsVM.codeSurface(Theme.isDark())
 
     font: settingsVM.codeFont

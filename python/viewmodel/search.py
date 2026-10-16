@@ -116,11 +116,6 @@ class SearchFilterModel(QSortFilterProxyModel):
         int, _get_search_mode, _set_search_mode, notify=searchChanged
     )
 
-    @Slot()
-    def clearSearch(self) -> None:
-        """Empty the query, which restores every row."""
-        self._set_search_text("")
-
 
 class VariablesFilterModel(SearchFilterModel):
     """Visible variables for the Variables page search box.
