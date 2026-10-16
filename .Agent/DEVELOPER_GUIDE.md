@@ -778,6 +778,14 @@ transparent corner, not `srgba(255,255,255,1)`.
   `workspace.code_theme` once. Pass a temp directory that *contains* `data/`
   (`root = mkdtemp(); (root / "data").mkdir()`), and print `runtime.settings.path` at the start of
   the run so the isolation is visible rather than assumed.
+- **Measure a *page*, not a bare settings section: a section on its own can block the GUI thread
+  forever.** Creating `SettingsInterfaceSection` (or `SettingsWorkspaceSection`) as the direct child
+  of a `Loader` that fills a `FluentWindow` blocked inside `Loader.source` — a 45 s `faulthandler`
+  dump put the main thread in `setProperty`, with nothing of ours on the stack, so it is QML/C++
+  evaluation and not the viewmodel. The same window loading whole *pages* through a `Loader`
+  (declarative `source`, or a `Repeater` of them) has always worked, and so has pushing them. Two
+  probes were lost to this before it was noticed; if a section has to be timed, put it in a page
+  (`PageScaffold` + `PageBody`) or time the page and bisect its file.
 - **`findChildren` from Python does not see `Repeater`-created delegates.** Measured on the History
   cards and the settings rows: QML's `repeater.itemAt(0)` returns the created `ItemDelegate`, while
   `window.findChildren(QObject)` from PySide6 does not reach it (nor the `Image` inside its
