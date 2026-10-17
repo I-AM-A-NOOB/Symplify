@@ -21,10 +21,12 @@ Data, not logic — and deliberately keyed by *style name* rather than by
   from the published extension archive (see ``scripts/extract_themes.py``).
 * ``catppuccin`` — Mocha on a dark UI and Latte on a light one, from
   `catppuccin/vscode`.
-* ``ayu`` — Ayu Dark / Light, from `ayu-theme/vscode-ayu`, the theme's own
-  organisation's VS Code port of the Sublime original.
+* ``ayu`` — Ayu **Mirage** on a dark UI and Ayu Light on a light one, from
+  `ayu-theme/vscode-ayu`, the theme's own organisation's VS Code port of the
+  Sublime original. Mirage is the family's dark half by choice: upstream's
+  ``ayu-dark.json`` is a third flavour and is not selectable.
 
-Four more entries — ``githubdimmed``, ``ayumirage``, ``catppuccinfrappe`` and
+Three more entries — ``githubdimmed``, ``catppuccinfrappe`` and
 ``catppuccinmacchiato`` — are **unused material**: flavours that exist on one side
 only, kept here for later and deliberately left out of :data:`FAMILIES`, so no
 setting can select them (each has a ``dark`` layer and no ``light`` one).
@@ -84,10 +86,10 @@ class ThemeLayer(TypedDict):
 #: keeps the labels short enough to read as a list.
 FAMILIES = (
     ("one", "Atom One"),
+    ("visualstudio", "Visual Studio"),
     ("default", "VS Code Default"),
     ("modern", "VS Code Modern"),
     ("2026", "VS Code 2026"),
-    ("visualstudio", "Visual Studio"),
     ("solarized", "Solarized"),
     ("highcontrast", "High Contrast"),
     ("github", "GitHub"),
@@ -480,17 +482,17 @@ THEMES: Dict[str, Dict[str, ThemeLayer]] = {
     "ayu": {
         "dark": {
             "styles": {
-                "number": "#ff8f40",
-                "constant": "#d2a6ff",
-                "callable": "#e6c08a",
-                "variable": "#bfbdb6",
-                "operator": "#f29668",
-                "unknown": "#d95757",
+                "number": "#ffa659",
+                "constant": "#dfbfff",
+                "callable": "#d9be98",
+                "variable": "#cccac2",
+                "operator": "#f29e74",
+                "unknown": "#ff6666",
             },
             "brackets": [],
-            "background": "#10141c",
-            "ink": "#bfbdb6",
-            "placeholder": "#353c4a",
+            "background": "#242936",
+            "ink": "#cccac2",
+            "placeholder": "#4a5261",
         },
         "light": {
             "styles": {
@@ -505,22 +507,6 @@ THEMES: Dict[str, Dict[str, ThemeLayer]] = {
             "background": "#fcfcfc",
             "ink": "#5c6166",
             "placeholder": "#bfc5cd",
-        },
-    },
-    "ayumirage": {
-        "dark": {
-            "styles": {
-                "number": "#ffa659",
-                "constant": "#dfbfff",
-                "callable": "#d9be98",
-                "variable": "#cccac2",
-                "operator": "#f29e74",
-                "unknown": "#ff6666",
-            },
-            "brackets": [],
-            "background": "#242936",
-            "ink": "#cccac2",
-            "placeholder": "#4a5261",
         },
     },
     "githubdimmed": {

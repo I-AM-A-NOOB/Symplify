@@ -108,19 +108,19 @@ ColumnLayout {
                                 visible: false
 
                                 model: [
-                                    { key: "one", blurb: qsTr("Ex’s stuff… still pretty, but still an ex.") },
-                                    { key: "default", blurb: qsTr("Classicly outdated, with that signature VS aftertaste.") },
+                                    { key: "one", blurb: qsTr("Ex\'s stuff… still pretty, but still an ex.") },
+                                    { key: "visualstudio", blurb: qsTr("Your taste is like that of people who use NSimSun in Visual Studio.") },
+                                    { key: "default", blurb: qsTr("Visual Code++") },
                                     { key: "modern", blurb: qsTr("Our new VSCode completely outclasses the old Atom and Visual Studio.") },
                                     { key: "2026", blurb: qsTr("The new kid: more contrast, more glow.") },
-                                    { key: "visualstudio", blurb: qsTr("Taxidermied VS 2017: still the blue everyone pictures, still on #1e1e1e.") },
                                     { key: "solarized", blurb: qsTr("Sun-baked and wind-worn, faded beyond recognition.") },
                                     { key: "highcontrast", blurb: qsTr("For when you would rather the code just shout.") },
-                                    { key: "github", blurb: qsTr("Every dev’s home.") },
-                                    { key: "githubdefault", blurb: qsTr("GitHub’s new repository homepage design: Give us back!") },
+                                    { key: "github", blurb: qsTr("Every dev\'s home.") },
+                                    { key: "githubdefault", blurb: qsTr("GitHub\'s new repository homepage design: Give us back!") },
                                     { key: "githubcolorblind", blurb: qsTr("Zuckerberg-certified vision.") },
                                     { key: "githubhighcontrast", blurb: qsTr("Pure black, blinding white—a lifesaver for low vision.") },
                                     { key: "catppuccin", blurb: qsTr("Meow~ ฅ^•ﻌ•^ฅ ") },
-                                    { key: "ayu", blurb: qsTr("Blue-black and one orange. Installed once, forgotten forever, in the good way.") }
+                                    { key: "ayu", blurb: qsTr("Its beauty is like a mirage...") }
                                 ]
 
                                 delegate: RadioSettingRow {

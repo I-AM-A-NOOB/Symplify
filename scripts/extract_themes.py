@@ -125,10 +125,13 @@ THEME_SOURCES: Dict[str, Tuple[Optional[Source], Optional[Source]]] = {
                            _github("extension/themes/light-high-contrast.json")),
     "catppuccin": (_npm(CATPPUCCIN_PACKAGE, CATPPUCCIN_VERSION, "themes/mocha.json"),
                    _npm(CATPPUCCIN_PACKAGE, CATPPUCCIN_VERSION, "themes/latte.json")),
-    "ayu": (("raw", "ayu-theme/vscode-ayu", AYU_REF, "ayu-dark.json"),
+    #: ayu's dark half is **Mirage**, not ``ayu-dark.json``: the family pairs
+    #: upstream's middle flavour with Ayu Light, so choosing Ayu gets the mirage
+    #: palette on a dark UI. ``ayu-dark.json`` is therefore not part of any
+    #: family — the table only ever holds what the app can select.
+    "ayu": (("raw", "ayu-theme/vscode-ayu", AYU_REF, "ayu-mirage.json"),
             ("raw", "ayu-theme/vscode-ayu", AYU_REF, "ayu-light.json")),
     #: Unused material, one side only.
-    "ayumirage": (("raw", "ayu-theme/vscode-ayu", AYU_REF, "ayu-mirage.json"), None),
     "githubdimmed": (_github("extension/themes/dark-dimmed.json"), None),
     "catppuccinfrappe": (_npm(CATPPUCCIN_PACKAGE, CATPPUCCIN_VERSION,
                               "themes/frappe.json"), None),

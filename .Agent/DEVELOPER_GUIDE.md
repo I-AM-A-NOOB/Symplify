@@ -1169,8 +1169,11 @@ One lexer, one span list, two renderers. Anything that colours code contributes 
   they commit: `("raw", repo, ref, path)` for a theme file committed in a repository — VS Code's six
   paired themes from `microsoft/vscode` at `VSCODE_REF` (the two `theme-defaults` pairs, the 2026
   pair, `dark_vs`/`light_vs` — the pair it names after Visual Studio — Solarized and High Contrast),
-  Atom One Dark/Light from the two `akamud` repositories, and ayu's Dark/Light from
-  `ayu-theme/vscode-ayu` at `AYU_REF`; `("npm", package, version, path)` for Catppuccin, whose theme
+  Atom One Dark/Light from the two `akamud` repositories, and ayu's **Mirage/Light** from
+  `ayu-theme/vscode-ayu` at `AYU_REF` — the family pairs upstream's middle flavour with Ayu Light on
+  purpose, so `ayu-dark.json` is not in any family at all: the table holds only what the app can
+  select, and the settings page's own blurb ("its beauty is like a mirage") names the choice.
+  Then `("npm", package, version, path)` for Catppuccin, whose theme
   files are build
   artifacts published in `@catppuccin/vscode` (jsDelivr serves a package file as plain text, so this
   needs no unpacking); and `("vsix", publisher, extension, version, member)` for GitHub's, whose
@@ -1188,7 +1191,7 @@ One lexer, one span list, two renderers. Anything that colours code contributes 
   strips from the copies it ships), and their `include` chains have to be followed by hand (only
   `raw` sources can include others). Both are handled in the script; a fetch that cannot reach the
   network fails loudly, and the committed data is unaffected.
-  The table also carries four entries that are **unused material** — `githubdimmed`, `ayumirage`,
+  The table also carries three entries that are **unused material** — `githubdimmed`,
   `catppuccinfrappe` and `catppuccinmacchiato` — flavours that exist on one side only (each has a
   `dark` layer and no `light` one), kept for later and deliberately left out of `FAMILIES`, which is
   both the list the page offers and the one the store validates against, so nothing can select
