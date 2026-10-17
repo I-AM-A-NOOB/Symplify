@@ -1163,9 +1163,24 @@ def test_recalculating_reuses_the_curves():
 def test_the_plot_style_follows_the_ui_side():
     vm = new_vm()
     vm.calculator.setPlotTheme(True)
-    assert vm.calculator.plot.theme == "seaborn-v0_8-dark"
+    assert vm.calculator.plot.theme == "dark_background"
+    assert vm.calculator.plot.background.name() == "#000000"
     vm.calculator.setPlotTheme(False)
-    assert vm.calculator.plot.theme == "seaborn-v0_8"
+    assert vm.calculator.plot.theme == "default"
+    assert vm.calculator.plot.background.name() == "#ffffff"
+
+
+def test_a_theme_switch_recolours_what_is_already_drawn():
+    """Each style has its own colour cycle; a curve that kept the old one would
+    disagree with the legend after the switch."""
+    vm = new_vm()
+    vm.calculator.calculate("x**2")
+    light = vm.calculator.plot.curves.at(0).color.name()
+    vm.calculator.setPlotTheme(True)
+    dark = vm.calculator.plot.curves.at(0).color.name()
+    assert dark != light
+    assert dark == vm.calculator.plot.color_cycle[0]
+    assert vm.calculator.plotLegend[0]["color"] == dark
 
 
 def test_the_app_starts_with_the_plotting_variables_in_the_table():

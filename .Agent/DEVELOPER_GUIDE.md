@@ -1935,10 +1935,13 @@ draw (`python/model/plotting.py`, zero Qt), the **object** every surface binds t
   exception out of a slot.
 - **The theme follows the UI, and the style owns the colours.** The window calls
   `calcVM.setPlotTheme(Theme.currentTheme.isDark)` at start-up and from its `Theme` connection (a
-  switch rebuilds RinUI's theme object, so a QML binding would not survive). The pair is seaborn's
-  base styles, `seaborn-v0_8` and `seaborn-v0_8-dark`, one constant
-  (`calculator_viewmodel.PLOT_THEMES`). A picker later is a setting that names any of
-  `plot.available_themes`, not a second code path.
+  switch rebuilds RinUI's theme object, so a QML binding would not survive). The pair is
+  Matplotlib's own `default` and `dark_background`, one constant
+  (`calculator_viewmodel.PLOT_THEMES`); `dark_background` is the only shipped style that is a
+  genuinely dark canvas (seaborn's "dark" is a light-grey one), and each brings its own colour
+  cycle — so a switch re-dresses the curves already drawn (`setPlotTheme` re-applies the stored
+  series; a curve keeps the colour it was given, and would otherwise contradict the legend). A
+  picker later is a setting that names any of `plot.available_themes`, not a second code path.
 - **`x` and `y` start as ordinary variables** — `plotting.plot_variables()` is passed by `main.py`
   into `MainViewModel(initial_variables=…)` (the viewmodel's own default stays empty, which is what
   the tests build). They are not hidden: the Variables page lists them as `Symbol` rows. Touching one

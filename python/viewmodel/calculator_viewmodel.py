@@ -20,11 +20,12 @@ from .history_viewmodel import HistoryModel
 from .input_mode import InputMode
 from .log_viewmodel import LogViewModel
 
-#: The plot's theme, per UI side: seaborn's two base styles, which qmlmathplot
-#: ships as Matplotlib style sheets. The plot follows the app's theme (the
-#: window re-applies this on every switch), and the theme name is the whole of
-#: that: the style owns its colours, so nothing here paints over them.
-PLOT_THEMES = {False: "seaborn-v0_8", True: "seaborn-v0_8-dark"}
+#: The plot's theme, per UI side: Matplotlib's own default and its
+#: `dark_background` counterpart (qmlmathplot ships both as style sheets). The
+#: plot follows the app's theme (the window re-applies this on every switch), and
+#: the theme name is the whole of that: the style owns its colours, so nothing
+#: here paints over them.
+PLOT_THEMES = {False: "default", True: "dark_background"}
 
 
 class CalculatorViewModel(QObject):
@@ -89,6 +90,7 @@ class CalculatorViewModel(QObject):
         # with it.
         self._plot = Plot(parent=self)
         self._curves: List[Curve] = []
+        self._series: tuple = ()
         self._plot_legend: List[dict] = []
         self._plot_error = ""
         # A fresh page has nothing to typeset: the formula area stays empty and the
@@ -256,8 +258,15 @@ class CalculatorViewModel(QObject):
         style sheet owns the plot's colours; this sets the name and nothing else.
         """
         theme = PLOT_THEMES[bool(dark)]
-        if theme != self._plot.theme:
-            self._plot.theme = theme
+        if theme == self._plot.theme:
+            return
+        self._plot.theme = theme
+        # Each style brings its own colour cycle (tab10 against
+        # dark_background's bright set) and a curve keeps the colour it was
+        # given — so re-dress what is already drawn, or the palette and the
+        # legend would disagree with the new theme.
+        if self._series:
+            self._set_plot(self._series)
 
     def _colour(self, index: int) -> str:
         """The cycle colour for slot ``index`` (str, so the legend can repeat it)."""
@@ -273,6 +282,7 @@ class CalculatorViewModel(QObject):
         because the two are different classes. Nothing here may raise: a plotting
         failure is a log line and the card's error text, not a broken Qt slot.
         """
+        self._series = series
         try:
             # The longest prefix that can be updated in place.
             keep = 0
