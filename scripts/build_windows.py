@@ -12,6 +12,7 @@ Run from the repository root::
 """
 
 import argparse
+import importlib.util
 import os
 import shutil
 import subprocess
@@ -23,6 +24,14 @@ DIST = ROOT / "build" / "main.dist"
 
 #: Name of the config file RinUI writes into its own directory (see below).
 _RINUI_FILENAME = "rin_ui.json"
+
+#: qmlmathplot bakes the GLSL it generates into ``.qsb`` **at runtime** (the
+#: shader carries the user's expression), and its `qsb` lookup looks exactly
+#: here: the PySide6 package directory. In this venv that is where the wheel
+#: put it; in the build it has to be put back, because Nuitka does not copy it.
+_PYSIDE6_DIR = Path(importlib.util.find_spec("PySide6").submodule_search_locations[0])
+_QSB = _PYSIDE6_DIR / ("qsb.exe" if os.name == "nt" else "qsb")
+
 
 CMD = [
     sys.executable, "-m", "nuitka",
@@ -49,6 +58,14 @@ CMD = [
     # flag is enough; regenerate it from the SVG with `scripts/build_icon.py`
     # (see `.Agent/DEVELOPER_GUIDE.md`).
     "--windows-icon-from-ico=icon/Symplify.ico",
+    # The plot view (qmlmathplot): its Python package, its QML module and the
+    # Matplotlib style sheets a Plot reads at construction, and the Qt Shader
+    # Baker it runs — see _QSB. Without the data files the build has no
+    # PlotView.qml (the page's import fails), and without qsb.exe every curve
+    # fails to bake. Both are silent until something is actually plotted.
+    "--include-package=qmlmathplot",
+    "--include-package-data=qmlmathplot",
+    f"--include-data-files={_QSB}=PySide6/{_QSB.name}",
     # RinUI (python package + its QML module tree)
     "--include-package=RinUI",
     "--include-package-data=RinUI",
@@ -246,6 +263,12 @@ def main() -> int:
             sys.exit(f"no dist to prune at {DIST}")
         print(f"Pruned {prune_qt(DIST) / 1e6:.1f} MB from {DIST}")
         return 0
+
+    if not _QSB.is_file():
+        sys.exit(
+            f"missing {_QSB}: qmlmathplot bakes its generated GLSL with it, and "
+            "a build without it draws no curves. It ships in the PySide6 wheel."
+        )
 
     # Before the script path: Nuitka's parser is happy either way, but keeping
     # the flags ahead of the positional argument is the shape its own --help and

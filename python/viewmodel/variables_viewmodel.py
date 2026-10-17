@@ -28,6 +28,7 @@ from ..model.calculator import (
     Failure,
     Result,
 )
+from ..model.plotting import is_plot_variable, plot_variable_warning
 from ..model.variable import VariableManager
 from .log_viewmodel import LogViewModel
 
@@ -57,7 +58,11 @@ class VariablesModel(QAbstractTableModel):
         self._manager = manager
         self._log = log
         self._calculator = calculator if calculator is not None else Calculator()
-        self._keys: list = []  # insertion-ordered variable names
+        #: Insertion-ordered variable names. Read off the manager rather than
+        #: assumed empty: the app starts with the plotting variables in scope
+        #: (``MainViewModel(initial_variables=…)``), and a table that began empty
+        #: would show no rows until the first write.
+        self._keys: list = manager.names()
 
     def roleNames(self):
         return {Qt.DisplayRole: b"display"}
@@ -93,7 +98,10 @@ class VariablesModel(QAbstractTableModel):
                 ok = self.rename(name, text)
                 if ok:
                     self._log_info(f"Variable renamed: {name} -> {text}")
-                    self._warn_builtin(text)
+                    # Both ends matter: renaming x away takes the plotting name
+                    # with it, renaming something *to* x replaces the variable.
+                    self._warn_reserved(name)
+                    self._warn_reserved(text)
                 return ok
             except ValueError as e:
                 #: The write is refused, so the view keeps the editor open and
@@ -117,7 +125,7 @@ class VariablesModel(QAbstractTableModel):
             return True
         self.save(name, result.value)
         self._log_info(f"Variable updated: {name} = {result.value}")
-        self._warn_builtin(name)
+        self._warn_reserved(name)
         return True
 
     def _parse(self, value_str: str) -> Result:
@@ -136,12 +144,21 @@ class VariablesModel(QAbstractTableModel):
         if self._log is not None:
             self._log.add_error(message, "Variables")
 
-    def _warn_builtin(self, name: str) -> None:
+    def _warn_reserved(self, name: str) -> None:
+        """Warn about the names that input's meaning depends on.
+
+        A SymPy built-in changes what an expression resolves to; a plotting
+        variable changes what the plot reads. Both are stored anyway — the
+        warning is the whole of the consequence, as it always was for built-ins.
+        """
         if VariableManager.is_sympy_builtin(name):
             self.warningOccurred.emit(
                 name, f"{name} is a SymPy built-in. You asked for it."
             )
             self._log_warn(f"{name} is a SymPy built-in")
+        elif is_plot_variable(name):
+            self.warningOccurred.emit(name, plot_variable_warning(name))
+            self._log_warn(f"{name} is a plotting variable")
 
     def rowCount(self, parent=QModelIndex()) -> int:
         """Return the number of variables."""
@@ -256,8 +273,9 @@ class VariablesViewModel(QObject):
     """Connects the VariableManager model to the QML variables page.
 
     Signals:
-        warningOccurred: Emitted when the user names a variable after a
-            SymPy built-in. Args: title (str), content (str).
+        warningOccurred: Emitted when the user touches a name input's meaning
+            depends on — a SymPy built-in or a plotting variable.
+            Args: title (str), content (str).
     """
 
     warningOccurred = Signal(str, str)
@@ -301,7 +319,7 @@ class VariablesViewModel(QObject):
             return False
         self._model.save(name, result.value)
         self._log.add_info(f"Variable added: {name} = {result.value}", "Variables")
-        self._warn_if_builtin(name)
+        self._warn_reserved(name)
         return True
 
     @Slot(str, result=bool)
@@ -309,6 +327,9 @@ class VariablesViewModel(QObject):
         """Delete a variable."""
         if self._model.remove(name):
             self._log.add_info(f"Variable deleted: {name}", "Variables")
+            # Deleting is a modification too: a plotting variable that is gone
+            # is exactly what the next plot cannot read.
+            self._warn_reserved(name)
             return True
         return False
 
@@ -321,7 +342,10 @@ class VariablesViewModel(QObject):
                 self._log.add_info(
                     f"Variable renamed: {old_name} -> {new_name}", "Variables"
                 )
-                self._warn_if_builtin(new_name)
+                # Both ends matter: renaming x away takes the plotting name with
+                # it, renaming something *to* x replaces the variable.
+                self._warn_reserved(old_name)
+                self._warn_reserved(new_name)
             return ok
         except Exception as e:
             self._log.add_error(f"Failed to rename variable: {e}", "Variables")
@@ -351,7 +375,7 @@ class VariablesViewModel(QObject):
             return True
         self._model.save(name, result.value)
         self._log.add_info(f"Variable updated: {name} = {result.value}", "Variables")
-        self._warn_if_builtin(name)
+        self._warn_reserved(name)
         return True
 
     @Slot(result=str)
@@ -359,9 +383,15 @@ class VariablesViewModel(QObject):
         """Generate a unique default variable name."""
         return self._variable_manager.generate_unique_name("var")
 
-    def _warn_if_builtin(self, name: str) -> None:
-        """Emit the built-in warning if ``name`` shadows a SymPy constant."""
+    def _warn_reserved(self, name: str) -> None:
+        """Emit the warning for a name input's meaning depends on.
+
+        The same two kinds the table warns about (see ``VariablesModel``):
+        SymPy built-ins, and the variables a plot reads.
+        """
         if VariableManager.is_sympy_builtin(name):
             self.warningOccurred.emit(
                 name, f"{name} is a SymPy built-in. You asked for it."
             )
+        elif is_plot_variable(name):
+            self.warningOccurred.emit(name, plot_variable_warning(name))

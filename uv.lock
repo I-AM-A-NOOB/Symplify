@@ -227,15 +227,15 @@ wheels = [
 
 [[package]]
 name = "qmlmathplot"
-version = "0.2.0"
+version = "0.4.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pyside6" },
     { name = "sympy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d0/ba/887c3416e209406d302bceaf65920f3c50bd6db72109f85d04e3f02f24bc/qmlmathplot-0.2.0.tar.gz", hash = "sha256:47957ee7db0dda02993b583848a7f9234f8c50c9a2d060defbf44d932c76e970", size = 79023, upload-time = "2026-10-10T00:50:19.919Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/66/d4/951b572bbf6418bb6822951d5e9e015e78d1dd99e41f2e54a1091551bc1d/qmlmathplot-0.4.1.tar.gz", hash = "sha256:67d27aba71269fc971c9ab609acd3fb0a3c73ee7855b59194b0a31949e7c143c", size = 134301, upload-time = "2026-10-17T11:57:27.069Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/cc/24/551bb79b8a1df0ec3df000b47244494ab6954a0e44754140df5951f7e370/qmlmathplot-0.2.0-py3-none-any.whl", hash = "sha256:4a42967818a9fd1e6cdfd73a568ec4f53f2aba2f1e157851323096478c07c736", size = 81569, upload-time = "2026-10-10T00:50:18.385Z" },
+    { url = "https://files.pythonhosted.org/packages/18/ea/26cfde3d680c63e1c5ec4fad613b45d0901ad5e83474049ae40c267ed39a/qmlmathplot-0.4.1-py3-none-any.whl", hash = "sha256:5cc15075b583771de4538476d9ab392a9f69814727f2dff08c9903ee315bd7d0", size = 133526, upload-time = "2026-10-17T11:57:25.447Z" },
 ]
 
 [[package]]
@@ -288,7 +288,7 @@ requires-dist = [
     { name = "fonttools", specifier = ">=4.0" },
     { name = "pyside6", specifier = ">=6.11.2" },
     { name = "pyyaml", specifier = ">=6.0.3" },
-    { name = "qmlmathplot", specifier = ">=0.2.0" },
+    { name = "qmlmathplot", specifier = ">=0.4.1" },
     { name = "rinui", specifier = ">=0.4.4.1" },
     { name = "sympy", specifier = ">=1.14.0" },
     { name = "ziamath", specifier = ">=0.13" },

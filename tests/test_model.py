@@ -42,6 +42,7 @@ from python.model.calculator import (
     Failure,
     Success,
 )
+from python.model.plotting import plot_series, plot_variables
 from python.model.variable import VariableManager, is_sympy_name, validate_name
 from python.latex_render import LatexStyle, MAX_LATEX_CHARS, render_data_url
 from python.settings import DEFAULTS, SettingsStore
@@ -250,6 +251,84 @@ def test_unsupported_operator():
 
 def test_assignment_failure_propagates_the_parse_error():
     assert assign("y", "=", "x +").kind is ErrorKind.SYNTAX
+
+
+# --------------------------------------------------------------------------
+# Plotting: what a result draws. The plot itself is qmlmathplot's; the decisions
+# below are the model's — which curves, in what role, and never by text.
+# --------------------------------------------------------------------------
+
+def test_plot_detection_is_by_free_symbols_not_by_text():
+    """x matters when the *value* has it: `x = 2` is the number 2."""
+    calculator = Calculator()
+    assert plot_series(calculator.evaluate("2 + 2").value) == ()
+    (series,) = plot_series(calculator.evaluate("x**2").value)
+    assert series.expression == X**2
+    assert series.implicit is False
+    # y makes it a level set, which is what the result (an expression, not an
+    # equation) means: `x + y` draws the line x + y = 0.
+    (implicit,) = plot_series(calculator.evaluate("x + y").value)
+    assert implicit.implicit is True
+    assert implicit.label == "x + y = 0"
+
+
+def test_a_result_with_an_unbound_parameter_is_not_drawn():
+    """qmlmathplot refuses free symbols other than x/y; deciding here keeps the
+    refusal out of a Qt slot. An Eq is normalized to a level set."""
+    calculator = Calculator()
+    assert plot_series(calculator.evaluate("a*x").value) == ()
+    assert plot_series(calculator.evaluate("Matrix([[1, 2]])").value) == ()
+    (equation,) = plot_series(calculator.evaluate("Eq(x**2, 1)").value)
+    assert equation.implicit is True
+    assert equation.expression == X**2 - 1
+
+
+def test_a_derivative_plots_the_function_it_came_from_and_itself():
+    result = Calculator().evaluate("diff(x**2, x)")
+    assert isinstance(result, Success) and result.origin is not None
+    assert result.origin.call == "diff"
+    source, derived = plot_series(result.value, result.origin)
+    assert (source.expression, source.label, source.role) == (X**2, "f", "source")
+    assert (derived.expression, derived.label, derived.role) == (2*X, "f′", "result")
+
+
+def test_an_integral_plots_the_integrand_and_the_antiderivative():
+    result = Calculator().evaluate("integrate(x**2, x)")
+    source, integrated = plot_series(result.value, result.origin)
+    assert source.expression == X**2
+    assert integrated.expression == X**3 / 3
+    assert integrated.label == "∫ f dx"
+
+
+def test_a_solution_plots_the_expression_it_solved():
+    result = Calculator().evaluate("solve(x**2 - 4, x)")
+    (series,) = plot_series(result.value, result.origin)
+    assert series.expression == X**2 - 4
+    assert series.role == "source"
+
+
+def test_a_call_inside_a_larger_expression_explains_nothing():
+    """`diff(f, x) + 1` is not a derivative request: the user changed the result,
+    so the plot is that result and nothing else."""
+    result = Calculator().evaluate("diff(x**2, x) + 1")
+    assert result.origin is None
+    (series,) = plot_series(result.value)
+    assert series.expression == 2*X + 1
+
+
+def test_an_assignment_plots_its_value_only():
+    result = Calculator().assign(Assignment("f", "=", "diff(x**2, x)"))
+    assert result.origin is None
+    (series,) = plot_series(result.value, result.origin)
+    assert series.expression == 2*X
+
+
+def test_a_derivative_of_something_already_linear_is_one_curve():
+    """`diff(x, x)` is the number 1: the source is the only curve, and the
+    result does not duplicate it."""
+    result = Calculator().evaluate("diff(x, x)")
+    (series,) = plot_series(result.value, result.origin)
+    assert series.expression == X
 
 
 # --------------------------------------------------------------------------
@@ -1040,6 +1119,84 @@ def test_history_filter_sees_new_entries():
     assert expressions(model) == ["foo(1)", "bar(2)"]
     source.clear()
     assert expressions(model) == []
+
+
+# --------------------------------------------------------------------------
+# Plotting: the viewmodel owns the Plot (a page is rebuilt on every navigation),
+# and the plotting variables are ordinary rows that warn when touched.
+# --------------------------------------------------------------------------
+
+def test_a_result_in_x_reaches_the_plot_and_a_plain_number_clears_it():
+    vm = new_vm()
+    vm.calculator.calculate("x**2")
+    assert vm.calculator.hasPlot is True
+    assert vm.calculator.plot.curves.rowCount() == 1
+    assert vm.calculator.plotLegend[0]["label"] == "x**2"
+    # A curve exists only if its shaders baked, which is qsb doing its job.
+    assert vm.calculator.plot.curves.at(0).error == ""
+    assert vm.calculator.plotError == ""
+    vm.calculator.calculate("2 + 2")
+    assert vm.calculator.hasPlot is False
+    assert vm.calculator.plot.curves.rowCount() == 0
+
+
+def test_the_derivative_plots_two_curves_and_the_legend_names_them():
+    vm = new_vm()
+    vm.calculator.calculate("diff(x**2, x)")
+    assert vm.calculator.plot.curves.rowCount() == 2
+    assert [entry["label"] for entry in vm.calculator.plotLegend] == ["f", "f′"]
+    # The legend is the curves' own colours, not a second palette.
+    curve = vm.calculator.plot.curves.at(0)
+    assert vm.calculator.plotLegend[0]["color"] == curve.color.name()
+
+
+def test_recalculating_reuses_the_curves():
+    """A new result of the same shape must not rebuild (and re-bake) the plot."""
+    vm = new_vm()
+    vm.calculator.calculate("x**2")
+    first = vm.calculator.plot.curves.at(0)
+    vm.calculator.calculate("x**3")
+    assert vm.calculator.plot.curves.at(0) is first
+    assert vm.calculator.plot.curves.at(0).expression == "x**3"
+
+
+def test_the_plot_style_follows_the_ui_side():
+    vm = new_vm()
+    vm.calculator.setPlotTheme(True)
+    assert vm.calculator.plot.theme == "seaborn-v0_8-dark"
+    vm.calculator.setPlotTheme(False)
+    assert vm.calculator.plot.theme == "seaborn-v0_8"
+
+
+def test_the_app_starts_with_the_plotting_variables_in_the_table():
+    store = SettingsStore(temp_dir() / "config.yaml")
+    store.load()
+    vm = MainViewModel(store, initial_variables=plot_variables())
+    model = vm.variables.model
+    assert [model.nameAt(row) for row in range(model.rowCount())] == ["x", "y"]
+    assert model.cellAt(0, 2) == "Symbol"
+
+
+def test_touching_a_plotting_variable_warns_like_a_builtin():
+    store = SettingsStore(temp_dir() / "config.yaml")
+    store.load()
+    vm = MainViewModel(store, initial_variables=plot_variables())
+    warnings = []
+    vm.variables.warningOccurred.connect(
+        lambda title, body: warnings.append((title, body)))
+    vm.calculator.warningOccurred.connect(
+        lambda title, body: warnings.append((title, body)))
+    model = vm.variables.model
+
+    assert model.setData(model.index(0, 1), "5") is True      # x = 5, inline
+    assert vm.variables.renameVariable("y", "z") is True      # y gone
+    assert vm.variables.deleteVariable("x") is True           # x gone
+    vm.calculator.calculateAssign("x", "=", "7")              # x written again
+
+    bodies = [body for _title, body in warnings]
+    assert "x is a plotting variable. You asked for it." in bodies
+    assert "y is a plotting variable. You asked for it." in bodies
+    assert all(title == body.split()[0] for title, body in warnings)
 
 
 def main() -> int:

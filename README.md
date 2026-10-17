@@ -7,13 +7,14 @@
 
 Symplify is a graphical symbolic calculator that wraps SymPy's powerful CAS (Computer Algebra System) in a clean, Fluent-styled desktop UI. The interface is written in **QML (Qt Quick Controls)** using the [RinUI](https://github.com/RinLit-233-shiroko/Rin-UI) component library, with business logic kept in a pure-Python **MVVM** core that has zero Qt dependencies.
 
-> **Status:** The calculator, variables, history and theme settings are functional; the plotting area is still a placeholder (see [Roadmap](#roadmap)).
+> **Status:** The calculator, variables, history, theme settings and 2-D plotting are functional (see [Roadmap](#roadmap) for what comes next).
 
 ## Features
 
 - **Symbolic & Numeric Computation** — Derivatives, integrals, limits, equation solving, matrix algebra, and more via SymPy. Results are shown both as SymPy text and rendered $\LaTeX$.
 - **Dual Input Modes** — Toggle between **Code** (evaluate any expression) and **Assign** (variable assignment with dedicated name/operator/value fields, including `+=`, `-=`, `*=`, `/=`). The mode and inputs survive page switches.
 - **Theme-Aware $\LaTeX$** — Results are rendered via `ziamath` at screen DPI and re-tinted automatically when the app theme changes.
+- **Plotting** — a result with `x` in it is drawn beside the answer (`x + y` becomes the implicit curve `x + y = 0`). `diff` and `integrate` show the function *and* what they made of it (`f` and `f′`), `solve` shows the equation it solved, and the plot follows the app's light/dark theme. `x` and `y` are ordinary variables from the start (editing one warns, like a SymPy built-in does).
 - **Variable Management** — Snapshot entries (name / expression / type). Invalid expressions are kept in the list as `NaN` rows instead of being dropped; double-click a cell to edit inline.
 - **Keyboard Panel** — On-screen math keyboard with smart cursor positioning for Greek letters, operators and functions (7 tabs, YAML-configurable). A key shows a mathematical glyph and types the function behind it (`∞` types `oo`, `√` types `sqrt(`), so the layout reads like maths while the input stays plain SymPy syntax.
 - **History Cards** — Newest-first cards with rendered $\LaTeX$, timestamps, a context menu (copy value/result, copy $\LaTeX$), and *Send to input* to restore any entry in the calculator. Failed calculations are kept as error cards too (the reason shown in red), so a broken expression can be sent back and corrected.
@@ -217,7 +218,7 @@ Prioritized directions:
 2. **Variables refresh** — a preview panel (numeric approximation + large $\LaTeX$); search/filter is done.
 3. **History search & export** — *search done*; save/export recorded calculations is open.
 4. **Settings polish** — *done for appearance and typography* (theme, accent, code/keyboard/LaTeX faces and sizes); further options (key bindings) fit the same store.
-5. **Plotting** — classic 2D plotting first (via SymPy), then a Desmos-grade GPU plotting pipeline; plus optional SymPy convenience UIs (physics, geometry, code generation).
+5. **Plotting** — *2-D plotting of results is in* (qmlmathplot: `x`, `x + y`, and `diff`/`integrate` showing both curves). Next: a theme picker, parameters (sliders for unbound symbols), plotting a variable from the Variables page, marking derivatives/integral areas, and the Desmos-grade GPU pipeline prototype in `scratch/`; plus optional SymPy convenience UIs (physics, geometry, code generation).
 
 ## License
 

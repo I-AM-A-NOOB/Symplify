@@ -15,7 +15,7 @@ from PySide6.QtCore import (
     Slot,
 )
 from PySide6.QtGui import QColor, QFontMetricsF, QGuiApplication, QKeyEvent
-from typing import Mapping, Optional, Tuple
+from typing import Any, Mapping, Optional, Tuple
 
 from .. import log_capture
 from ..brackets import parse_colors
@@ -52,6 +52,7 @@ class MainViewModel(QObject):
         settings: SettingsStore,
         theme_manager: Optional[QObject] = None,
         parent: Optional[QObject] = None,
+        initial_variables: Optional[Mapping[str, Any]] = None,
     ):
         """Initialize all models and viewmodels.
 
@@ -59,10 +60,19 @@ class MainViewModel(QObject):
             settings: The loaded settings store (single source of truth).
             theme_manager: RinUI's ``ThemeManager``, so the settings viewmodel can
                 apply appearance changes; None in headless tests.
+            parent: Qt parent.
+            initial_variables: Variables a fresh session starts with. The app
+                passes ``plotting.plot_variables()`` — ``x`` and ``y`` as
+                themselves, so the plotting names are visible in the table and a
+                result can use them without defining anything. Left empty here,
+                which is what the tests build: the default scope is the
+                composition root's decision, not the viewmodel's.
         """
         super().__init__(parent)
         self._calculator = Calculator()
         self._variable_manager = VariableManager()
+        for name, value in (initial_variables or {}).items():
+            self._variable_manager.save(name, value)
 
         self._history = HistoryModel(parent=self)
         self._log = LogViewModel(parent=self)

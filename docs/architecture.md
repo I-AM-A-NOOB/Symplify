@@ -103,6 +103,14 @@ What the diagram is saying:
 - **Text and LaTeX are terminal.** `str(value)` feeds the result line and the
   clipboard; the LaTeX source feeds the rendered image and the history entry
   (which re-renders lazily on its own).
+- **A plot is the third sink, and it needs provenance.** `plotting.plot_series`
+  reads the result's free symbols (`x` → `y = f(x)`, `x` and `y` → the level set
+  `F = 0`, anything else → nothing to draw) and, when `Success.origin` says the
+  request *was* a transform call, what that call was applied to: `diff` and
+  `integrate` draw the function beside the result, `solve` draws the expression it
+  solved. `origin` is recorded while the parser runs (a wrapper in its
+  `local_dict`), never by re-parsing the text — the model has no parser of its
+  own, by design.
 - **Failures are history too.** A failed request is recorded with its input
   (name/op/expression for assignments) and the failure text, so the card can
   show the reason and *Send to input* can put the expression back to be fixed.
@@ -118,6 +126,10 @@ flowchart LR
     V --> V1["str(value) → resultText<br/>结果区文字 + Copy result"]
     V --> V2["_save_variable → VariableManager.save<br/>VariableEntry.obj → list_all() → 下一轮 scope"]
     V --> V3["变量表第 2/3 列<br/>expr_str / classify_type"]
+    V --> V4["plot_series(value, origin)<br/>→ qmlmathplot.Plot → PlotView 曲线"]
+
+    R -->|"Success.origin"| O["Origin(call, argument)<br/>求值时由 _TransformRecorder 记录"]
+    O --> V4
 
     R -->|"Success.latex"| L["LaTeX 源串<br/>由 render_latex 生成"]
     L --> L1["_build_latex_url → latexSvgUrl / latexWidth / latexHeight<br/>→ LatexImage 结果区大图"]
@@ -132,7 +144,7 @@ flowchart LR
 
 | Shape | Fields | Read by |
 |---|---|---|
-| `Success` | `expression`, `value`, `latex` | `value` → the result line, the variable store, the next evaluation; `latex` → the result image and the history card; `expression` → provenance |
+| `Success` | `expression`, `value`, `latex`, `origin` | `value` → the result line, the variable store, the next evaluation and the plot; `latex` → the result image and the history card; `origin` → what the plot draws beside the result (the function a derivative came from); `expression` → provenance |
 | `Failure` | `expression`, `kind`, `message`, `hint` | `message` + `hint` → the result area, the log and the history card; `kind` → which follow-up writes are allowed |
 
 Both are frozen dataclasses, so a caller cannot half-fill a result. The old

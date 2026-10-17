@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Any, List, Mapping, Optional, Union
 
+import sympy
 from sympy.parsing.sympy_parser import (
     convert_xor,
     implicit_multiplication,
@@ -25,6 +26,7 @@ from sympy.parsing.sympy_parser import (
     standard_transformations,
 )
 from .latex import render_latex, render_latex_definition
+from .plotting import Origin
 from .variable import is_sympy_name, sympy_callables, validate_name
 
 
@@ -56,11 +58,16 @@ class Success:
         expression: The request as the user made it (provenance).
         value: The resulting sympy object.
         latex: LaTeX for display; ``''`` when sympy could not render the value.
+        origin: The transform call the request *was* (``diff``, ``solve``, …),
+            when the request was exactly that call — see
+            ``python/model/plotting.py``. ``None`` for everything else, and for
+            assignments: a write defines one value, so it has nothing to explain.
     """
 
     expression: str
     value: Any
     latex: str
+    origin: Optional[Origin] = None
 
 
 @dataclass(frozen=True)
@@ -120,6 +127,63 @@ ASSIGN_OPS = frozenset({"="}) | frozenset(AUGMENTED_OPS)
 
 #: ``name(`` — a call, as opposed to juxtaposition like ``2(x + 1)``.
 _CALL_RE = re.compile(r"(?<![\w.])([^\W\d]\w*)\s*\(")
+
+#: Calls whose result is a different function of x, so a plot can show what it
+#: was derived from (see ``python/model/plotting.py``).
+_TRANSFORM_CALLS = (
+    "diff", "Derivative", "integrate", "Integral",
+    "solve", "solveset", "roots", "linsolve", "nonlinsolve", "nsolve",
+)
+
+
+class _TransformRecorder:
+    """Notes the transforming calls one parse makes, without parsing anything.
+
+    The parser is the only thing that understands the input language (implicit
+    multiplication, ``^``, paren-less application), so instead of looking for
+    ``diff(`` in the text, sympy's own callables are shadowed in the evaluation
+    namespace and each call is noted while it runs. A call only counts when its
+    *result is the value the request produced* (identity, see :meth:`top_level`):
+    in ``diff(f, x) + 1`` the derivative is a subexpression the user then
+    changed, so it is not what a plot should explain.
+
+    Names already in the scope win over the wrappers, so a user variable called
+    ``diff`` keeps meaning what it meant before. The wrappers call exactly the
+    sympy function they shadow and return its result unchanged.
+    """
+
+    def __init__(self) -> None:
+        """Start an empty record for one evaluation."""
+        self._calls: List[tuple] = []
+
+    def namespace(self, scope: Mapping[str, Any]) -> dict:
+        """``scope`` plus a recording wrapper for every transform not in it."""
+        namespace = dict(scope)
+        for name in _TRANSFORM_CALLS:
+            function = getattr(sympy, name, None)
+            if callable(function):
+                namespace.setdefault(name, self._wrapper(name, function))
+        return namespace
+
+    def _wrapper(self, name: str, function: Any) -> Any:
+        """``function``, recording ``(Origin, result)`` each time it is called."""
+        def call(*args: Any, **kwargs: Any) -> Any:
+            result = function(*args, **kwargs)
+            self._calls.append((Origin(name, args[0] if args else None), result))
+            return result
+
+        return call
+
+    def top_level(self, value: Any) -> Optional[Origin]:
+        """The call the request *was*, or None when it was not one.
+
+        Identity, not equality: ``parse_expr`` returns the call's own object for
+        a bare call, and a new object as soon as anything is wrapped around it.
+        """
+        for origin, result in reversed(self._calls):
+            if result is value:
+                return origin
+        return None
 
 
 class Calculator:
@@ -238,9 +302,12 @@ class Calculator:
         text = expression.strip()
         if not text:
             return Failure(expression, ErrorKind.SYNTAX, "nothing to evaluate")
+        recorder = _TransformRecorder()
         try:
             value = parse_expr(
-                text, transformations=self.transformations, local_dict=dict(scope)
+                text,
+                transformations=self.transformations,
+                local_dict=recorder.namespace(scope),
             )
         except SyntaxError as exc:
             return Failure(expression, ErrorKind.SYNTAX, str(exc))
@@ -248,7 +315,9 @@ class Calculator:
             return Failure(
                 expression, ErrorKind.INTERNAL, f"{type(exc).__name__}: {exc}"
             )
-        return Success(expression, value, render_latex(value))
+        return Success(
+            expression, value, render_latex(value), recorder.top_level(value)
+        )
 
     def _suggest(self, name: str) -> str:
         """A 'did you mean' hint for an unresolvable call name."""

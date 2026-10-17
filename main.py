@@ -11,10 +11,12 @@ from pathlib import Path
 from PySide6.QtCore import qVersion
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
+from qmlmathplot import register_qml_types
 
 # The bootstrap owns the RinUI import (and takes RinUI's own config directory
 # over, see python/rinui_bootstrap.py). Never import RinUI above this line.
 from python import window_icon
+from python.model.plotting import plot_variables
 from python.rinui_bootstrap import prepare
 from python.keyboard_config import load_keyboard_tabs
 from python.viewmodel.main_viewmodel import MainViewModel
@@ -36,6 +38,11 @@ def main() -> int:
             stream.reconfigure(encoding="utf-8", errors="replace")
 
     runtime = prepare(ROOT)
+
+    # QMLMathPlot's types (PlotView and the model objects behind it) are
+    # registered per process, and the QML loader needs them before it parses a
+    # page — the window's engine is created by the runtime below. Idempotent.
+    register_qml_types()
 
     app = QApplication(sys.argv)
 
@@ -68,7 +75,8 @@ def main() -> int:
     # QML tree is instantiated.
     window = runtime.window_class()
 
-    vm = MainViewModel(runtime.settings, window.theme_manager)
+    vm = MainViewModel(runtime.settings, window.theme_manager,
+                       initial_variables=plot_variables())
     context = window.engine.rootContext()
     context.setContextProperty("vm", vm)
     context.setContextProperty("appVersion", __version__)

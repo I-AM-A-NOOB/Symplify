@@ -25,7 +25,9 @@ python/
                                 # input MEANS (syntax, name resolution, failure kinds).
     calculator.py               #   Calculator.evaluate(expr, scope) / .assign(Assignment, scope)
                                 #   -> Success | Failure; Assignment; ErrorKind; the parse
-                                #   transformations. Answers with a value *and* its TeX spelling.
+                                #   transformations. Answers with a value *and* its TeX spelling,
+                                #   plus `Success.origin` — the transform call the request *was*
+                                #   (see Plotting), recorded without parsing the text.
     latex.py                    #   render_latex(value) / render_latex_definition(name, value): how a
                                 #   value is spelled in TeX (sympy's printer). Pure representation,
                                 #   so it is a peer of lexer.py rather than part of the evaluator —
@@ -36,6 +38,11 @@ python/
     lexer.py                    #   tokenize(text, scope) -> [(start, length, kind)]: what each run
                                 #   of characters IS — never whether it is valid. Python's own
                                 #   identifier/decimal rules, so it agrees with the parser.
+    plotting.py                 #   What a result draws (zero Qt): plot_series(value, origin) ->
+                                #   Series(expression, label, implicit, role), the x/y rule, the
+                                #   transform policy (diff/integrate show the source *and* the
+                                #   result; solve shows the expression it solved) and the
+                                #   plotting-variable warning. See Plotting.
   brackets.py                   # Rainbow bracket pairing + nesting layers + parse_colors() for
                                 # the custom palette (zero Qt). Ported from the v1 QWidget app's
                                 # RainbowBracketsHighlighter.
@@ -65,7 +72,8 @@ python/
                                 # (besides main.py). State that must survive page switches lives here.
     input_mode.py               #   InputMode (CODE=0 / ASSIGN=1) — UI state, not model state
     main_viewmodel.py           #   Root VM; aggregates children; signals sendToCode/sendToAssign
-    calculator_viewmodel.py     #   Result state, LaTeX data-URL, input persistence, clear_result
+    calculator_viewmodel.py     #   Result state, LaTeX data-URL, input persistence, clear_result,
+                                #   and the qmlmathplot.Plot (curves, legend, theme, error)
     variables_viewmodel.py      #   VariablesModel (3-col: name/expr/type) + CRUD + Qt edit protocol
     history_viewmodel.py        #   HistoryModel (QAbstractListModel, newest first, lazy LaTeX)
     search.py                   #   SearchFilterModel + Variables/HistoryFilterModel: the pages'
@@ -1757,6 +1765,11 @@ Data-file pitfalls for frozen builds (update this list when you add data-reading
 - `ziamath` / `ziafont` fonts, `latex2mathml/unimathsymbols.txt`, RinUI's whole QML tree,
   `python/keyboard_config.yaml`, **`icon/`,** and `fontTools` (read by `python/fonts.py` to inspect
   installed fonts) must be included via the `--include-*` flags in `scripts/build_windows.py`.
+- **qmlmathplot needs two things Nuitka does not find by itself**, and neither failure is visible
+  until something is plotted: its QML module + `.mplstyle` sheets (`--include-package-data`) and
+  Qt's `qsb.exe`, which it runs *at runtime* to bake each expression's GLSL (shipped as
+  `PySide6/qsb.exe` via `--include-data-files`, because that is where `qmlmathplot.qsb` looks for
+  it). The build script refuses to run without the `qsb` it is about to ship — see Plotting.
 - **The icon reaches three surfaces through two files, and `icon/` has to ship for two of them.**
   `--windows-icon-from-ico=icon/Symplify.ico` embeds the `.ico` in the exe (Explorer, the shortcut,
   the pinned taskbar entry), while `--include-data-dir=icon=icon` ships the directory for the
@@ -1889,6 +1902,57 @@ Data-file pitfalls for frozen builds (update this list when you add data-reading
 - `main` — RinUI + PySide6/QML (current)
 - `v3-fluentwinui3-qml` — third route, FluentWinUI3-styled QML
 - `v1-qfluentwidget`, `v2-qfluentwidget` — early QWidget (qfluentwidgets) prototypes
+
+## Plotting (QMLMathPlot)
+
+The plot is **qmlmathplot**'s (a PySide6/QML component with per-pixel fragment-shader curves; it is
+also this author's package). The app contributes three things around it: the **decision** of what to
+draw (`python/model/plotting.py`, zero Qt), the **object** every surface binds to
+(`CalculatorViewModel.plot`), and the QML card on the Calculator page.
+
+- **Detection is by value, never by text.** `plot_series()` reads the sympy result's
+  `free_symbols`: only `x` (or a constant) is `y = f(x)`; a free `y` is the level set `F = 0`, so
+  `x + y` draws the line and an `Eq` is normalized to `lhs - rhs`; an empty set is a constant and is
+  *not* drawn; any other free symbol (`a*x` with unbound `a`) is refused here. That last one matters:
+  qmlmathplot raises `ValueError` for it, and a raise inside a Qt slot would break the whole result
+  refresh. The 1000-character ceiling mirrors `latex_render.MAX_LATEX_CHARS` — the expression becomes
+  generated text (GLSL, LaTeX) either way.
+- **An expression explains where it came from**, and the model records it without parsing text:
+  `Calculator` shadows `diff`, `integrate`, `solve`, … in the parser's `local_dict`
+  (`_TransformRecorder`) and notes `(Origin(call, first argument), result)` for each call.
+  **Identity decides top-level-ness**: only a call whose result *is* the returned value counts, so
+  `diff(f, x)` has an origin and `diff(f, x) + 1` does not (the user changed the result).
+  `plot_series` then applies the policy: `diff`/`Derivative` and `integrate`/`Integral` draw the
+  argument **and** the result (`f`, `f′`, `∫ f dx`); `solve`/`solveset`/`roots`/`linsolve`/
+  `nonlinsolve`/`nsolve` draw the argument **only** (roots are not a function); everything else draws
+  its result. An assignment never carries an origin — it defines one value.
+- **The `Plot` belongs to the viewmodel.** RinUI destroys and recreates pages (invariant 2), so
+  `CalculatorViewModel` owns it and a page only injects it (`PlotView { plot: calcVM.plot }`); curves
+  survive navigation, and `clear_result()`/a failure clears them. Curves are reused slot by slot (an
+  explicit↔implicit change rebuilds the tail — those are different classes), so a recalculation is an
+  expression write, not a rebuild; qmlmathplot's bake cache (source hash, in `%TEMP%`) answers the
+  second one. Shader failures become `plotError` + a log line and are shown in the card — never an
+  exception out of a slot.
+- **The theme follows the UI, and the style owns the colours.** The window calls
+  `calcVM.setPlotTheme(Theme.currentTheme.isDark)` at start-up and from its `Theme` connection (a
+  switch rebuilds RinUI's theme object, so a QML binding would not survive). The pair is seaborn's
+  base styles, `seaborn-v0_8` and `seaborn-v0_8-dark`, one constant
+  (`calculator_viewmodel.PLOT_THEMES`). A picker later is a setting that names any of
+  `plot.available_themes`, not a second code path.
+- **`x` and `y` start as ordinary variables** — `plotting.plot_variables()` is passed by `main.py`
+  into `MainViewModel(initial_variables=…)` (the viewmodel's own default stays empty, which is what
+  the tests build). They are not hidden: the Variables page lists them as `Symbol` rows. Touching one
+  — value edit, rename in either direction, delete, or an Assign-mode write — raises the house
+  warning `"x is a plotting variable. You asked for it."`, the same tone as the SymPy-built-in one
+  (`plot_variable_warning`). `VariablesModel` reads its `_keys` from the manager at construction;
+  without that the seeded rows would not appear until the first write.
+- **Registration happens once, before the engine**: `main.py` calls
+  `qmlmathplot.register_qml_types()` right after `prepare(ROOT)`, and the page
+  `import QmlMathPlot 1.0`. `PlotView`'s own `focus: true` is overridden to `false` — the page's
+  input owns the keyboard, and a focused plot would swallow the typing (mouse drag/wheel still work).
+- **Measured here:** `diff(x**2, x)` → two curves (`f`, `f′`) and a 400×300 offscreen render with
+  ~4.8k painted pixels; `x + y` → one implicit curve; `2 + 2` → cleared; the first bake of a curve
+  costs ~0.13 s, then the cache answers.
 
 ## The Variables page
 

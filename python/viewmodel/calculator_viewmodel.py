@@ -6,17 +6,25 @@ The widgets app's eager plot-data computation (``create_plot_data`` /
 ``compute_plot_data``) and legacy assignment path are not carried over.
 """
 
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 from PySide6.QtCore import Property, QObject, Signal, Slot
 from PySide6.QtGui import QColor
+from qmlmathplot import Curve, ImplicitCurve, Plot
 
 from ..latex_render import LatexStyle, render_data_url
 from ..model.calculator import Assignment, Calculator, ErrorKind, Failure, Result, Success
+from ..model.plotting import is_plot_variable, plot_series, plot_variable_warning
 from ..model.variable import VariableManager
 from .history_viewmodel import HistoryModel
 from .input_mode import InputMode
 from .log_viewmodel import LogViewModel
+
+#: The plot's theme, per UI side: seaborn's two base styles, which qmlmathplot
+#: ships as Matplotlib style sheets. The plot follows the app's theme (the
+#: window re-applies this on every switch), and the theme name is the whole of
+#: that: the style owns its colours, so nothing here paints over them.
+PLOT_THEMES = {False: "seaborn-v0_8", True: "seaborn-v0_8-dark"}
 
 
 class CalculatorViewModel(QObject):
@@ -24,7 +32,9 @@ class CalculatorViewModel(QObject):
 
     Signals:
         inputModeChanged: Emitted when the input mode changes.
-        warningOccurred: Emitted when the user assigns to a SymPy built-in.
+        plotChanged: Emitted when the plot's curves, legend or error changed.
+        warningOccurred: Emitted when the user assigns to a SymPy built-in or to
+            a plotting variable.
             Args:
                 title (str): Warning title.
                 content (str): Warning content.
@@ -34,6 +44,7 @@ class CalculatorViewModel(QObject):
     inputTextChanged = Signal()
     assignInputChanged = Signal()
     resultChanged = Signal()
+    plotChanged = Signal()
     warningOccurred = Signal(str, str)
 
     def __init__(
@@ -72,6 +83,14 @@ class CalculatorViewModel(QObject):
         #: Theme ink, font size and LaTeX font file, in one value; built by
         #: `MainViewModel`, which owns the settings and sees the theme.
         self._latex_style = LatexStyle()
+        # The plot is state that has to survive a page switch — RinUI rebuilds
+        # pages on every navigation — so it lives here, and the page injects it
+        # into its `PlotView`. The curves are its children and outlive the page
+        # with it.
+        self._plot = Plot(parent=self)
+        self._curves: List[Curve] = []
+        self._plot_legend: List[dict] = []
+        self._plot_error = ""
         # A fresh page has nothing to typeset: the formula area stays empty and the
         # outcome box above it carries the placeholder.
         self._refresh_strip()
@@ -204,6 +223,89 @@ class CalculatorViewModel(QObject):
     latexWidth = Property(int, _get_latex_width, notify=resultChanged)
     latexHeight = Property(int, _get_latex_height, notify=resultChanged)
 
+    def _get_plot(self) -> Plot:
+        """The plot the calculator page renders; owned here, so it survives pages."""
+        return self._plot
+
+    plot = Property(QObject, _get_plot, constant=True)
+
+    def _get_has_plot(self) -> bool:
+        """True while there is something to draw (the page hides the area otherwise)."""
+        return bool(self._curves)
+
+    hasPlot = Property(bool, _get_has_plot, notify=plotChanged)
+
+    def _get_plot_legend(self) -> List[dict]:
+        """The curves' labels and colours, in draw order (qmlmathplot has no legend)."""
+        return self._plot_legend
+
+    plotLegend = Property("QVariantList", _get_plot_legend, notify=plotChanged)
+
+    def _get_plot_error(self) -> str:
+        """The first curve's shader error, or '' — a failed bake must be visible."""
+        return self._plot_error
+
+    plotError = Property(str, _get_plot_error, notify=plotChanged)
+
+    @Slot(bool)
+    def setPlotTheme(self, dark: bool) -> None:
+        """Use the seaborn style that belongs to the UI's current side.
+
+        Called by the window on start-up and after every theme switch (RinUI
+        rebuilds the theme object on one, so a binding would not survive). The
+        style sheet owns the plot's colours; this sets the name and nothing else.
+        """
+        theme = PLOT_THEMES[bool(dark)]
+        if theme != self._plot.theme:
+            self._plot.theme = theme
+
+    def _colour(self, index: int) -> str:
+        """The cycle colour for slot ``index`` (str, so the legend can repeat it)."""
+        cycle = self._plot.color_cycle
+        return cycle[index % len(cycle)] if cycle else ""
+
+    def _set_plot(self, series: tuple) -> None:
+        """Reconcile the plot's curves with ``series``.
+
+        Curves are reused slot by slot, so recalculating the same shape only
+        changes the expressions — and qmlmathplot's bake cache makes that nearly
+        free. A slot whose artist changes kind (explicit ↔ implicit) is rebuilt,
+        because the two are different classes. Nothing here may raise: a plotting
+        failure is a log line and the card's error text, not a broken Qt slot.
+        """
+        try:
+            # The longest prefix that can be updated in place.
+            keep = 0
+            while keep < min(len(self._curves), len(series)):
+                if isinstance(self._curves[keep], ImplicitCurve) != series[keep].implicit:
+                    break
+                keep += 1
+            while len(self._curves) > keep:
+                self._plot.remove_curve(self._curves.pop())
+            for index, item in enumerate(series):
+                colour = self._colour(index)
+                if index < keep:
+                    curve = self._curves[index]
+                    curve.expression = item.expression
+                    curve.label = item.label
+                    curve.color = colour
+                    continue
+                add = self._plot.add_implicit if item.implicit else self._plot.add_curve
+                self._curves.append(add(item.expression, colour, None, item.label))
+            error = next((curve.error for curve in self._curves if curve.error), "")
+        except Exception as exc:  # noqa: BLE001 - a plot must not break the result
+            error = f"{type(exc).__name__}: {exc}"
+            for curve in list(self._curves):
+                self._plot.remove_curve(curve)
+            self._curves.clear()
+        if error and error != self._plot_error:
+            self._log.add_warning(f"Plot failed: {error}", "Calculator")
+        self._plot_error = error
+        self._plot_legend = [
+            {"label": curve.label, "color": curve.color.name()} for curve in self._curves
+        ]
+        self.plotChanged.emit()
+
     @Slot()
     def clear_result(self) -> None:
         """Clear the result display area (the outcome box then shows the placeholder)."""
@@ -211,6 +313,7 @@ class CalculatorViewModel(QObject):
         self._result_latex = ""
         self._is_error = False
         self._error_message = ""
+        self._set_plot(())
         self._refresh_strip()
         self.resultChanged.emit()
 
@@ -221,11 +324,13 @@ class CalculatorViewModel(QObject):
             self._result_latex = result.latex
             self._is_error = False
             self._error_message = ""
+            self._set_plot(plot_series(result.value, result.origin))
         else:
             self._result_text = ""
             self._result_latex = ""
             self._is_error = True
             self._error_message = self._format_failure(result)
+            self._set_plot(())
         self._refresh_strip()
         self.resultChanged.emit()
 
@@ -306,7 +411,7 @@ class CalculatorViewModel(QObject):
                 )
 
     def _save_variable(self, name: str, value: Any) -> None:
-        """Save an assigned variable, warning about SymPy built-ins."""
+        """Save an assigned variable, warning about the names input depends on."""
         try:
             if self._variables_model is not None:
                 self._variables_model.save(name, value)
@@ -317,3 +422,5 @@ class CalculatorViewModel(QObject):
             self.warningOccurred.emit(
                 name, f"{name} is a SymPy built-in. You asked for it."
             )
+        elif is_plot_variable(name):
+            self.warningOccurred.emit(name, plot_variable_warning(name))

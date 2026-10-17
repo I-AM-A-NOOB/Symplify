@@ -53,6 +53,15 @@ FluentWindow {
         applyAccent()
         applyLogColors()
         applyLatexColors()
+        applyPlotTheme()
+    }
+
+    // The plot's style follows the app's side (seaborn's base style sheets).
+    // The plot object lives in the calculator viewmodel and outlives every page,
+    // so the window is what re-dresses it — including after a theme switch,
+    // which rebuilds RinUI's theme object (see the Connections below).
+    function applyPlotTheme() {
+        calcVM.setPlotTheme(Theme.currentTheme.isDark)
     }
 
     // RinUI's accent handling, and why this is not just a call to Theme:
@@ -134,6 +143,7 @@ FluentWindow {
             applyAccent()
             applyLogColors()
             applyLatexColors()
+            applyPlotTheme()
         }
     }
 

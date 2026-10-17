@@ -19,6 +19,15 @@ from .calculator import (
     Success,
 )
 from .latex import render_latex, render_latex_definition
+from .plotting import (
+    MAX_PLOT_EXPR_CHARS,
+    Origin,
+    PLOT_SYMBOLS,
+    Series,
+    is_plot_variable,
+    plot_series,
+    plot_variables,
+)
 from .variable import (
     VariableEntry,
     VariableManager,
@@ -44,8 +53,15 @@ __all__ = [
     "Calculator",
     "ErrorKind",
     "Failure",
+    "MAX_PLOT_EXPR_CHARS",
+    "Origin",
+    "PLOT_SYMBOLS",
     "Result",
+    "Series",
     "Success",
+    "is_plot_variable",
+    "plot_series",
+    "plot_variables",
     "render_latex",
     "render_latex_definition",
     "VariableEntry",

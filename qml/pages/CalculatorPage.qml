@@ -3,6 +3,7 @@ import QtQuick.Controls 2.15
 import QtQuick.Layouts 2.15
 import RinUI
 import RinUI as Rin
+import QmlMathPlot 1.0
 import "../components"
 
 Item {
@@ -541,7 +542,47 @@ Item {
                                 source: calcVM.latexSvgUrl
                             }
 
-                            // Function/plot area with a fixed 4:3 aspect ratio.
+                            // The curves' names and colours. qmlmathplot draws no
+                            // legend, so the explanation of a two-curve plot (f and
+                            // its derivative) is this row — from the viewmodel,
+                            // which gives each curve the colour it reports here. It
+                            // sits *above* the plot because the 4:3 card can reach the
+                            // bottom of the result area: a legend below it would be
+                            // the first thing scrolled out of sight.
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 16
+                                visible: calcVM.plotLegend.length > 1
+
+                                Repeater {
+                                    model: calcVM.plotLegend
+
+                                    delegate: RowLayout {
+                                        required property var modelData
+
+                                        spacing: 6
+
+                                        Rectangle {
+                                            Layout.alignment: Qt.AlignVCenter
+                                            implicitWidth: 10
+                                            implicitHeight: 10
+                                            radius: 5
+                                            color: modelData.color
+                                        }
+                                        Text {
+                                            Layout.alignment: Qt.AlignVCenter
+                                            text: modelData.label
+                                            color: Theme.currentTheme.colors.textSecondaryColor
+                                            typography: Typography.Body
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Function/plot area: the same 4:3 card the placeholder
+                            // used to be, now the real plot. The Plot itself lives in
+                            // the viewmodel (RinUI rebuilds a page on every
+                            // navigation), so this is a view of it and owns no state.
                             Rectangle {
                                 Layout.fillWidth: true
                                 Layout.preferredHeight: width * 0.75
@@ -549,24 +590,63 @@ Item {
                                 radius: Theme.currentTheme.appearance.buttonRadius
                                 border.width: Theme.currentTheme.appearance.borderWidth
                                 border.color: Theme.currentTheme.colors.cardBorderColor
+                                clip: true
 
-                                Row {
+                                PlotView {
+                                    anchors.fill: parent
+                                    visible: calcVM.hasPlot
+                                    plot: calcVM.plot
+                                    //: The page's input owns the keyboard; the plot's
+                                    //: own arrow-key panning would take it away as soon
+                                    //: as the plot is clicked. Mouse drag/wheel are
+                                    //: unaffected, and so is the focus chain.
+                                    focus: false
+                                }
+
+                                //: Nothing to draw — say what would put something here,
+                                //: rather than leaving an empty card. A Column rather
+                                //: than a Row: the sentence is longer than the card at
+                                //: the narrow end of the split, and it has to wrap
+                                //: instead of being clipped by the card's clip.
+                                Column {
                                     anchors.centerIn: parent
-                                    spacing: 10
+                                    width: parent.width - 48
+                                    spacing: 8
+                                    visible: !calcVM.hasPlot
 
                                     Icon {
+                                        x: (parent.width - width) / 2
                                         name: "ic_fluent_math_formula_20_regular"
                                         size: 20
                                         color: Theme.currentTheme.colors.textSecondaryColor
                                     }
                                     Text {
+                                        width: parent.width
+                                        horizontalAlignment: Text.AlignHCenter
+                                        wrapMode: Text.WordWrap
                                         typography: Typography.Body
                                         color: Theme.currentTheme.colors.textSecondaryColor
-                                        text: qsTr("Plotting is on the roadmap.")
-                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: qsTr("A result in x is drawn here (x and y together: an implicit curve).")
                                     }
                                 }
+
+                                //: A shader bake can refuse an expression (an
+                                //: unsupported function, a level set too hard for
+                                //: the per-pixel model). The plot must say so where
+                                //: the plot is, not only in the log.
+                                Text {
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.bottom: parent.bottom
+                                    anchors.margins: 10
+                                    visible: calcVM.plotError !== ""
+                                    text: calcVM.plotError
+                                    elide: Text.ElideRight
+                                    color: Theme.currentTheme.colors.systemCriticalColor
+                                    typography: Typography.Caption
+                                }
                             }
+
                         }
                     }
                 }
