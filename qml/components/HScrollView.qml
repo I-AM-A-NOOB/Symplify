@@ -6,9 +6,9 @@ import RinUI
 //
 // `wheelScroll` switches it to the RinUI Gallery's home-page-row behaviour: the
 // mouse wheel pans the row — Qt's native Flickable ignores a vertical wheel for
-// a horizontal view, so the delta is mapped to `contentX` here — and no
-// scrollbar is drawn, because the clipped edge already says the row continues.
-// Off by default: the formula strip keeps its own behaviour (and its bar).
+// a horizontal view, so the delta is mapped to `contentX` here — and the row
+// shows no scrollbar, because the clipped edge already says it continues. Off by
+// default: the formula strip keeps its own behaviour (and its bar).
 Flickable {
     id: root
 
@@ -19,7 +19,14 @@ Flickable {
     contentHeight: height
 
     ScrollBar.horizontal: ScrollBar {
-        policy: root.wheelScroll ? ScrollBar.AlwaysOff : ScrollBar.AsNeeded
+        //: Hidden by being transparent and inert, not by `policy: AlwaysOff`:
+        //: the attached bar stayed visible with that policy set (measured on
+        //: RinUI's styled bar), and a `Loader` around it broke its parenting —
+        //: the attached machinery positions the bar as a child of the flickable,
+        //: which a loader-owned item is not. This keeps one bar, attached the
+        //: normal way, for both modes.
+        opacity: root.wheelScroll ? 0 : 1
+        enabled: !root.wheelScroll
     }
 
     // Only wheel moves are eased: a drag has to track the pointer frame by

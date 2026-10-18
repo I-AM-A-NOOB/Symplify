@@ -1076,9 +1076,12 @@ transparent corner, not `srgba(255,255,255,1)`.
   `HScrollView` itself has a `wheelScroll` mode taken from the RinUI Gallery's home page: the
   wheel pans the row (Qt's `Flickable` ignores a vertical wheel for a horizontal view, so the delta
   is mapped to `contentX`), eased by a 200 ms `NumberAnimation` — *not* a `Behavior on contentX`,
-  which would lag a drag behind the pointer — and `ScrollBar.AlwaysOff`, because the clipped edge
-  already says the row continues. The `KeyboardPanel`'s tab row uses it; the formula strip keeps the
-  native behaviour and its bar.
+  which would lag a drag behind the pointer — and no bar is shown, because the clipped edge already
+  says the row continues. The bar is hidden with `opacity: 0` + `enabled: false`, **not** with
+  `policy: ScrollBar.AlwaysOff`: measured, the attached bar's `visible` never followed the policy at
+  all (always off and always on both left it visible), and wrapping it in a `Loader` broke its
+  parenting — the attached machinery positions the bar as a child of the flickable. The
+  `KeyboardPanel`'s tab row uses the mode; the formula strip keeps the native behaviour and its bar.
 - History renders each entry's LaTeX **lazily, per row, on approach**, and the pieces of that are
   worth stating because two obvious implementations do not work. Reading the `latexUrl` role used to
   render (the model's `_svg_url` caches the SVG on the entry and emits `dataChanged` for the
