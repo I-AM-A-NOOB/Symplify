@@ -1187,6 +1187,15 @@ def test_recalculating_reuses_the_curves():
     assert vm.calculator.plot.curves.at(0).expression == "x**3"
 
 
+def test_the_plot_has_square_units():
+    """One world unit is the same length on both axes: a circle draws round and a
+    slope reads as its value. The camera shows more canvas on resize instead of
+    stretching the drawing, which is what `"auto"` would do."""
+    vm = new_vm()
+    assert vm.calculator.plot.aspect == 1.0
+    assert vm.calculator.plot.camera.aspect == 1.0
+
+
 def test_the_plot_style_follows_the_ui_side():
     vm = new_vm()
     vm.calculator.setPlotTheme(True)

@@ -1956,6 +1956,12 @@ draw (`python/model/plotting.py`, zero Qt), the **object** every surface binds t
   expression write, not a rebuild; qmlmathplot's bake cache (source hash, in `%TEMP%`) answers the
   second one. Shader failures become `plotError` + a log line and are shown in the card — never an
   exception out of a slot.
+- **The plot's units are square** (`plot.aspect = 1.0`, set once with the Plot). One
+  world unit is the same length on both axes, so a circle draws round and a slope
+  reads as its value; the camera then shows *more* canvas when the card grows
+  instead of stretching the drawing, which is what `"auto"` does. Measured:
+  `scale_x == scale_y` (0.013333 at the home view) and `x**2 + y**2 - 4` renders as
+  a circle.
 - **The theme follows the UI, and the style owns the colours.** The window calls
   `calcVM.setPlotTheme(Theme.currentTheme.isDark)` at start-up and from its `Theme` connection (a
   switch rebuilds RinUI's theme object, so a QML binding would not survive). The pair is

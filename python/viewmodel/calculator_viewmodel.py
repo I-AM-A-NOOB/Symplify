@@ -89,6 +89,10 @@ class CalculatorViewModel(QObject):
         # into its `PlotView`. The curves are its children and outlive the page
         # with it.
         self._plot = Plot(parent=self)
+        # Square units: one world unit is the same length on both axes, so a circle
+        # draws round and a slope reads as its value. The camera then shows more
+        # canvas when the area grows instead of stretching what is drawn.
+        self._plot.aspect = 1.0
         # The built-in legend names the labelled curves (`f`, `f′`) and is part of
         # the scene, so an export carries it too. qmlmathplot starts without one;
         # everything we draw is labelled, so it is always wanted.
