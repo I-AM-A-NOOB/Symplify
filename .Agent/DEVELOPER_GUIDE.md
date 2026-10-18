@@ -232,6 +232,16 @@ transparent corner, not `srgba(255,255,255,1)`.
    `assign(Assignment, ...)` for a write — both returning `Success | Failure`. Never assemble an
    expression string in a ViewModel (that is how `x += 1` used to become the self-referential
    `x = x + 1`), and never re-implement name rules outside `validate_name` / `is_sympy_name`.
+   **Every result is simplified before it is answered.** The parser returns what
+   sympy's constructors leave behind, which is not always the simplest form —
+   `sin(x)**2 + cos(x)**2` stays as typed, `1/x + 1/y` stays two fractions — so
+   `_parse` runs the value through `sympy.simplify` (`_simplified`). It runs
+   **after** the transform origin is decided, because `simplify` returns a new
+   expression and the origin is identity-based; `simplify` also evaluates some
+   unevaluated forms (`Derivative(x**2, x)` answers `2*x`), which is the price of
+   "simplest". Results that are not one sympy object — `solve`'s list of roots —
+   are left alone: `simplify` raises on a list, and the roots are already simple.
+   A `simplify` that throws answers the raw value; it is not a failed request.
    The expression language is **SymPy's, not Python's** — probed, not assumed. `lambda t: t + 1` and
    list/dict comprehensions *do* parse (they only need their names in the scope, so `range(3)` is an
    `UNKNOWN_NAME`), but a conditional expression (`a if c else b`) and `and` / `or` / `not` are a hard

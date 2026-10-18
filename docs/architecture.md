@@ -99,7 +99,10 @@ What the diagram is saying:
   result — because the input is what the user needs in order to fix it.
 - **`Success.value` is the only output that flows back in.** Assign mode stores
   the sympy object as a `VariableEntry`, and the next request reads it back
-  through `list_all()` — the closed loop in the middle of the diagram.
+  through `list_all()` — the closed loop in the middle of the diagram. The value
+  is passed through `sympy.simplify` before it leaves the model (`_simplified`),
+  so the store and the next evaluation see the simplified form; lists (`solve`'s
+  roots) are exempt, and the plot's `origin` is recorded before the pass.
 - **Text and LaTeX are terminal.** `str(value)` feeds the result line and the
   clipboard; the LaTeX source feeds the rendered image and the history entry
   (which re-renders lazily on its own).

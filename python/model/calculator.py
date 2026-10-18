@@ -8,6 +8,13 @@ what counts as a failure" — nothing above it may re-implement that.
 Two requests exist: an expression (``evaluate``) and a write to the variable
 store (``assign``). Both return ``Success`` or ``Failure``; there is no result
 object carrying a half-filled payload behind a boolean.
+
+**A result is simplified before it is answered.** The parser returns whatever
+sympy's constructors leave behind, which is not always the simplest form the
+user asked for — ``sin(x)**2 + cos(x)**2`` stayed as typed, ``1/x + 1/y`` stayed
+two fractions. Every value is therefore run through ``sympy.simplify`` (see
+``_simplified``), *after* the transform call has been identified, so a
+derivative still knows the function it came from.
 """
 
 import difflib
@@ -134,6 +141,25 @@ _TRANSFORM_CALLS = (
     "diff", "Derivative", "integrate", "Integral",
     "solve", "solveset", "roots", "linsolve", "nonlinsolve", "nsolve",
 )
+
+
+def _simplified(value: Any) -> Any:
+    """``value`` through sympy's ``simplify``, where that means something.
+
+    Results that are not one sympy object are left alone: ``solve`` answers with
+    a list of roots, and ``simplify`` raises on a list (its input is expected to
+    be a Basic). The roots it returns are in their simplest form already.
+
+    A failure is not a calculation failure: ``simplify`` throwing on some
+    exotic object would only mean "no simplification", so the raw value is
+    answered instead — the request itself succeeded.
+    """
+    if isinstance(value, (list, tuple, set, dict)):
+        return value
+    try:
+        return sympy.simplify(value)
+    except Exception:  # noqa: BLE001 - no simplification is not a failed request
+        return value
 
 
 class _TransformRecorder:
@@ -315,9 +341,11 @@ class Calculator:
             return Failure(
                 expression, ErrorKind.INTERNAL, f"{type(exc).__name__}: {exc}"
             )
-        return Success(
-            expression, value, render_latex(value), recorder.top_level(value)
-        )
+        # The origin is decided on the parser's own object: `simplify` returns a
+        # *new* expression, and identity is what makes a call top-level.
+        origin = recorder.top_level(value)
+        value = _simplified(value)
+        return Success(expression, value, render_latex(value), origin)
 
     def _suggest(self, name: str) -> str:
         """A 'did you mean' hint for an unresolvable call name."""

@@ -57,6 +57,7 @@ from python.viewmodel.search import (
 from python.viewmodel.variables_viewmodel import VariablesModel
 
 X = Symbol("x")
+Y = Symbol("y")
 
 
 def temp_dir() -> Path:
@@ -176,6 +177,30 @@ def test_a_result_with_more_digits_than_python_s_default_cap_can_be_shown():
     assert isinstance(result, Success)
     assert len(str(result.value)) == 30103
     assert result.latex != ""      # the latex path stringifies the digits too
+
+
+def test_a_result_is_simplified():
+    """The parser is not a simplifier: `sin**2 + cos**2` arrives as typed and
+    `1/x + 1/y` as two fractions. Both answers are correct and neither is what
+    the user asked for, so every value goes through `sympy.simplify`."""
+    calculator = Calculator()
+    assert calculator.evaluate("sin(x)**2 + cos(x)**2").value == Integer(1)
+    assert calculator.evaluate("1/x + 1/y").value == (X + Y) / (X * Y)
+    assert calculator.evaluate("2*x + 3*x").value == 5 * X
+
+
+def test_simplification_leaves_lists_alone_and_keeps_provenance():
+    """`solve` answers with a list, which `simplify` cannot take (it raises on
+    one), and the transform origin is decided on the parser's own object —
+    `simplify` returns a new expression, so identity must be settled first."""
+    calculator = Calculator()
+    solved = calculator.evaluate("solve(x**2 - 4, x)")
+    assert solved.value == [-2, 2]
+    assert solved.origin is not None and solved.origin.call == "solve"
+
+    derivative = calculator.evaluate("diff(x**2, x)")
+    assert derivative.value == 2 * X
+    assert derivative.origin is not None and derivative.origin.call == "diff"
 
 
 def test_syntax_error():
