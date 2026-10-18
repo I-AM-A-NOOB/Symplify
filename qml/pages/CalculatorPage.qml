@@ -547,12 +547,46 @@ Item {
                             // used to be, now the real plot, plus the focus ring
                             // every other control raises. The card is a child rather
                             // than the frame itself because the ring draws a few
-                            // pixels outside its control and the card has to clip.
+                            // pixels outside the card and must not be clipped by it.
                             // The Plot itself lives in the viewmodel (RinUI rebuilds
                             // a page on every navigation), so this is a view of it
                             // and owns no state.
-                            Item {
+                            Control {
                                 id: plotFrame
+                                objectName: "plotFrame"
+
+                                //: The same focus arrangement the Segmented items
+                                //: use: a Control is the Tab stop, so the shared
+                                //: ring can read `visualFocus`/`focusReason` and
+                                //: appears for Tab/Backtab only. A click lands on
+                                //: the plot itself (PlotInput focuses it), which
+                                //: leaves this control unfocused and the ring
+                                //: hidden — exactly what a click does to a button.
+                                //: Keys are forwarded so both routes drive it.
+                                focus: true
+                                activeFocusOnTab: true
+                                //: Qt Quick Controls took the tab chain over from
+                                //: `activeFocusOnTab` (6.5): a Control's own
+                                //: `focusPolicy` decides, and NoFocus is its default.
+                                focusPolicy: Qt.StrongFocus
+                                Keys.forwardTo: [plotView]
+
+                                onActiveFocusChanged: {
+                                    if (activeFocus)
+                                        return
+                                    //: The plot never loses focus itself (the keys
+                                    //: are forwarded), so a held arrow key would
+                                    //: keep panning. qmlmathplot drops held keys
+                                    //: when the camera stops accepting them; these
+                                    //: two toggles are that, through public API.
+                                    const camera = plotView.camera
+                                    const pan = camera.panEnabled
+                                    const zoom = camera.zoomEnabled
+                                    camera.panEnabled = false
+                                    camera.panEnabled = pan
+                                    camera.zoomEnabled = false
+                                    camera.zoomEnabled = zoom
+                                }
 
                                 Layout.fillWidth: true
                                 // The focus ring draws two pixels outside its
@@ -582,15 +616,22 @@ Item {
                                             maskSource: plotMask
                                         }
 
-                                        //: qmlmathplot's view handles its own focus:
-                                        //: a click or Tab makes it the keyboard
-                                        //: target (arrow keys pan, +/- zoom).
+                                        //: The plot handles the mouse and the
+                                        //: forwarded keys; the control above owns
+                                        //: the Tab stop.
                                         PlotView {
                                             id: plotView
                                             objectName: "plotView"
                                             anchors.fill: parent
                                             visible: calcVM.hasPlot
                                             plot: calcVM.plot
+                                            //: Not the Tab stop: the control
+                                            //: above is, so the ring has one
+                                            //: owner. A click still focuses the
+                                            //: plot (PlotInput forces it), which
+                                            //: is the mouse path the ring ignores.
+                                            focus: false
+                                            activeFocusOnTab: false
                                         }
                                     }
 
@@ -649,20 +690,12 @@ Item {
                                     visible: false
                                 }
 
-                                //: `keyboardFocus` rather than `control`: the plot
-                                //: is a plain Item, not a Control, so it has no
-                                //: `visualFocus`/`focusReason` to read. The ring here
-                                //: means "the plot holds the keyboard", which is
-                                //: exactly when its arrow keys pan and zoom.
+                                //: The ring every other control raises, with the
+                                //: same rule: `visualFocus` and a Tab/Backtab
+                                //: focus reason (see `FocusIndicator`).
                                 ProjectFocusIndicator {
                                     objectName: "plotFocusIndicator"
-                                    control: plotFocusProxy
-                                    keyboardFocus: plotView.activeFocus
-                                }
-
-                                Control {
-                                    id: plotFocusProxy
-                                    visible: false
+                                    control: plotFrame
                                 }
                             }
 

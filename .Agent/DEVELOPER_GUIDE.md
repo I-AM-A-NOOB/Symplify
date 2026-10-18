@@ -1956,14 +1956,20 @@ draw (`python/model/plotting.py`, zero Qt), the **object** every surface binds t
   build (`PySide6/qml/Qt5Compat/GraphicalEffects`). `MultiEffect` would be the Qt 6 answer, but its
   masked source has to be hidden, and a hidden item cannot hold keyboard focus — which the plot now
   does.
-- **The plot owns the keyboard, and the card shows the ring.** qmlmathplot 0.4.2 puts `PlotView` in
-  the Tab chain (`activeFocusOnTab`) and focuses it on click, so arrow keys pan and `+`/`-` zoom —
-  the page does not override `focus`. The card raises the app's `ProjectFocusIndicator`; because the
-  plot is a plain `Item` (no `Control.visualFocus`/`focusReason`), the ring is driven by its
-  `keyboardFocus` property from `plotView.activeFocus`, which is exactly "the plot holds the
-  keyboard". The frame around the card carries `Layout.leftMargin`/`rightMargin: 3` — the ring draws
-  two pixels outside its control and the result column is clipped by its `Flickable`, so without the
-  gutter the ring's sides are cut off.
+- **The plot card is a `Control`, so its ring is the same one every other control raises.** Ctrl+Tab
+  (the app's focus shortcut — a bare Tab belongs to the code input, which types it) lands on
+  `plotFrame`, whose `visualFocus` + `focusReason` drive `ProjectFocusIndicator`; no
+  `keyboardFocus` override. There is **no ring after a mouse click**: the click focuses the plot
+  itself (`PlotInput` calls `forceActiveFocus`), which leaves the control unfocused — exactly what
+  clicking a button does. `focusPolicy: Qt.StrongFocus` is needed as well as `activeFocusOnTab`:
+  Controls took the tab chain over from the item property in 6.5 and `NoFocus` is their default.
+  The keys are **forwarded** (`Keys.forwardTo: [plotView]`) because the control owns the focus while
+  the plot owns the handlers; on focus-out the camera's `panEnabled`/`zoomEnabled` are toggled off
+  and back, which is qmlmathplot's public way of dropping held keys — without it, leaving with an
+  arrow held would keep panning for ever (measured: the camera stops at its last position). The
+  frame carries `Layout.leftMargin`/`rightMargin: 3`: the ring draws two pixels outside its control
+  and the result column is clipped by its `Flickable`, so without the gutter the ring's sides are
+  cut off.
 - **`x` and `y` start as ordinary variables** — `plotting.plot_variables()` is passed by `main.py`
   into `MainViewModel(initial_variables=…)` (the viewmodel's own default stays empty, which is what
   the tests build). They are not hidden: the Variables page lists them as `Symbol` rows. Touching one
@@ -1975,9 +1981,11 @@ draw (`python/model/plotting.py`, zero Qt), the **object** every surface binds t
   `qmlmathplot.register_qml_types()` right after `prepare(ROOT)`, and the page imports
   `QmlMathPlot 1.0`, `Qt5Compat.GraphicalEffects` and `../components` (for the ring).
 - **Measured here:** `diff(x**2, x)` → two curves (`f`, `f′`) with the built-in legend and a 400×300
-  offscreen render with ~4.8k painted pixels; `x + y` → one implicit curve; `2 + 2` → cleared; the
-  focus ring appears with `plotView.activeFocus` and `activeFocusOnTab` is true; the first bake of a
-  curve costs ~0.13 s, then the cache answers.
+  offscreen render with ~4.8k painted pixels; `x + y` → one implicit curve; `2 + 2` → cleared.
+  Focus, driven with `QTest` against the real window: Ctrl+Tab reaches `plotFrame`
+  (`visualFocus` true, `focusReason` Tab, ring visible), a real `mouseClick` on the plot focuses the
+  plot and leaves the ring hidden, and a held arrow key does not keep panning after the focus
+  leaves. The first bake of a curve costs ~0.13 s, then the cache answers.
 
 ## The Variables page
 
