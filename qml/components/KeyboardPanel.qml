@@ -21,12 +21,14 @@ Rectangle {
         anchors.margins: 10
         spacing: 8
 
-        // Tab row with horizontal wheel scrolling (shared HScrollView)
+        // Tab row: the gallery's home-row scrolling — wheel pans the row, no
+        // scrollbar. (Drag still works: the wheel animation is separate.)
         Cmp.HScrollView {
+            objectName: "keyboardTabsScroll"
             Layout.fillWidth: true
             Layout.preferredHeight: 40
             contentWidth: tabBar.width
-            clip: true
+            wheelScroll: true
 
             Rin.SelectorBar {
                 id: tabBar

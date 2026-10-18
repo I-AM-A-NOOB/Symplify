@@ -126,9 +126,10 @@ qml/
                                 #   RadioSettingRow / RadioSettingGroup / SettingFieldRow (the
                                 #     settings-row shapes RinUI's own SettingItem cannot express;
                                 #     SettingRowBase is the SettingItem both rows are built on),
-                                #   KeyboardPanel, SearchBar, CommandBar (a row of `Action`s that
-                                #     folds what does not fit into an overflow menu; see the
-                                #     toolbar bullet under Rendering),
+                                #   KeyboardPanel (tab row scrolls by mouse wheel, gallery-style —
+                                #     see HScrollView below), SearchBar, CommandBar (a row of
+                                #     `Action`s that folds what does not fit into an overflow
+                                #     menu; see the toolbar bullet under Rendering),
                                 #   HistoryCard (one history card: the delegate the History page's
                                 #     `Repeater` builds, one per entry — the page hands it `host`
                                 #     and `scroller`; it is where the card's `= `-alignment, hover,
@@ -1055,8 +1056,11 @@ transparent corner, not `srgba(255,255,255,1)`.
 - **`MathStrip` is the one place a rendered formula is laid out** — the Calculator's result area,
   the History card's strip, and (when the Variables page grows one) any third caller. It is an
   `HScrollView` whose content is a single `LatexImage` at natural size, and it owns both pieces of
-  arithmetic that used to be hand-written per page: the height (`natural + 2*padding + barRoom`)
-  and the image's `y` (`padding` from the top). Those two numbers in two coordinate systems is
+  arithmetic that used to be hand-written per page: the height (`natural + paddingTop + padding +
+  barRoom`) and the image's `y` (`paddingTop`). `paddingTop` defaults to `padding`; the Calculator
+  sets it to 0, because its outcome line *is* the gap and a second one read as the formula's own
+  top margin. That page also stopped reserving 4.2 lines for the outcome box, which was where most
+  of the apparent margin came from — the box's height now follows its text. Those two numbers in two coordinate systems is
   exactly what broke: both pages carried `y: (parent.height - height - 16) / 2`, the image's parent
   was the strip on one page and an inner content `Item` on the other, and on the Calculator that
   resolved to -8 — the formula's top was clipped. It takes `naturalWidth/naturalHeight/source` and
@@ -1069,6 +1073,12 @@ transparent corner, not `srgba(255,255,255,1)`.
   `barRoom` (16) is the height of RinUI's overlay bar along the strip's bottom edge — a 6px
   thumb inside a 12px control, plus the 16px arrow `ToolButton`s that overhang it — and is
   deliberately hardcoded against a third party's internals, in this one place.
+  `HScrollView` itself has a `wheelScroll` mode taken from the RinUI Gallery's home page: the
+  wheel pans the row (Qt's `Flickable` ignores a vertical wheel for a horizontal view, so the delta
+  is mapped to `contentX`), eased by a 200 ms `NumberAnimation` — *not* a `Behavior on contentX`,
+  which would lag a drag behind the pointer — and `ScrollBar.AlwaysOff`, because the clipped edge
+  already says the row continues. The `KeyboardPanel`'s tab row uses it; the formula strip keeps the
+  native behaviour and its bar.
 - History renders each entry's LaTeX **lazily, per row, on approach**, and the pieces of that are
   worth stating because two obvious implementations do not work. Reading the `latexUrl` role used to
   render (the model's `_svg_url` caches the SVG on the entry and emits `dataChanged` for the

@@ -28,6 +28,11 @@ HScrollView {
     //: Air above and below the artwork.
     property int padding: 8
 
+    //: Air above the artwork alone. Defaults to `padding`; the Calculator sets it
+    //: to 0 because its result line above already provides the gap, and the
+    //: formula should read as part of that answer rather than as a new block.
+    property int paddingTop: padding
+
     //: Height of the overlay scroll bar along the bottom edge: RinUI paints a
     //: 6px thumb (`scrollBarWidth`) inside a 12px control, and the arrow
     //: `ToolButton`s (16px) overhang that. Deliberately hardcoded — it tracks a
@@ -37,7 +42,7 @@ HScrollView {
 
     //: Exactly what it shows, or nothing at all.
     implicitHeight: strip.naturalHeight > 0
-        ? strip.naturalHeight + 2 * strip.padding + strip.barRoom
+        ? strip.naturalHeight + strip.paddingTop + strip.padding + strip.barRoom
         : 0
 
     //: Never narrower than the viewport, so the artwork stays left-aligned and
@@ -46,7 +51,7 @@ HScrollView {
     contentWidth: Math.max(strip.width, strip.naturalWidth)
 
     LatexImage {
-        y: strip.padding
+        y: strip.paddingTop
 
         naturalWidth: strip.naturalWidth
         naturalHeight: strip.naturalHeight

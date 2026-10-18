@@ -510,7 +510,11 @@ Item {
                             CopyableLabel {
                                 Layout.fillWidth: true
                                 Layout.minimumWidth: 0
-                                Layout.preferredHeight: Math.round(settingsVM.codeSize * 4.2)
+                                //: Height follows the text: the fixed 4.2-line box
+                                //: left a band of empty space between the outcome
+                                //: and its formula, which read as the LaTeX block's
+                                //: own top margin. The column is inside the scroll
+                                //: area, so a long result grows it and scrolls.
                                 wrap: true
                                 textFormat: isProse ? TextEdit.PlainText
                                     : TextEdit.RichText
@@ -537,6 +541,8 @@ Item {
                             // have reported is on the result line above instead.
                             MathStrip {
                                 Layout.fillWidth: true
+                                //: The outcome line above is the gap; no second one.
+                                paddingTop: 0
 
                                 naturalWidth: calcVM.latexWidth
                                 naturalHeight: calcVM.latexHeight
