@@ -1131,7 +1131,7 @@ def test_a_result_in_x_reaches_the_plot_and_a_plain_number_clears_it():
     vm.calculator.calculate("x**2")
     assert vm.calculator.hasPlot is True
     assert vm.calculator.plot.curves.rowCount() == 1
-    assert vm.calculator.plotLegend[0]["label"] == "x**2"
+    assert vm.calculator.plot.curves.at(0).label == "x**2"
     # A curve exists only if its shaders baked, which is qsb doing its job.
     assert vm.calculator.plot.curves.at(0).error == ""
     assert vm.calculator.plotError == ""
@@ -1140,14 +1140,16 @@ def test_a_result_in_x_reaches_the_plot_and_a_plain_number_clears_it():
     assert vm.calculator.plot.curves.rowCount() == 0
 
 
-def test_the_derivative_plots_two_curves_and_the_legend_names_them():
+def test_the_derivative_plots_two_labelled_curves():
+    """The legend is qmlmathplot's, drawn from `Curve.label`, so the labels are
+    what the viewmodel has to get right."""
     vm = new_vm()
     vm.calculator.calculate("diff(x**2, x)")
-    assert vm.calculator.plot.curves.rowCount() == 2
-    assert [entry["label"] for entry in vm.calculator.plotLegend] == ["f", "f′"]
-    # The legend is the curves' own colours, not a second palette.
-    curve = vm.calculator.plot.curves.at(0)
-    assert vm.calculator.plotLegend[0]["color"] == curve.color.name()
+    curves = vm.calculator.plot.curves
+    assert curves.rowCount() == 2
+    assert [curves.at(row).label for row in range(curves.rowCount())] == ["f", "f′"]
+    assert vm.calculator.plot.legend is True
+    assert vm.calculator.plot.legend_position == "upper right"
 
 
 def test_recalculating_reuses_the_curves():
@@ -1180,7 +1182,6 @@ def test_a_theme_switch_recolours_what_is_already_drawn():
     dark = vm.calculator.plot.curves.at(0).color.name()
     assert dark != light
     assert dark == vm.calculator.plot.color_cycle[0]
-    assert vm.calculator.plotLegend[0]["color"] == dark
 
 
 def test_the_app_starts_with_the_plotting_variables_in_the_table():

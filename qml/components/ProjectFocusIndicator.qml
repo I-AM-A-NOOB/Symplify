@@ -8,7 +8,9 @@ import RinUI
 //: ring's geometry and probe name live here once.
 //:
 //: `control` must be a `Control` (`Item.visualFocus`/`focusReason` do not exist on a
-//: plain `Item`), which is why it stays the caller's to pass.
+//: plain `Item`), which is why it stays the caller's to pass. Content that is not
+//: a Control at all — the calculator's plot, a plain `Item` — drives the ring's
+//: `keyboardFocus` itself instead (see CalculatorPage).
 FocusIndicator {
     id: root
 

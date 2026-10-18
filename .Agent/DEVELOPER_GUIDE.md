@@ -73,7 +73,7 @@ python/
     input_mode.py               #   InputMode (CODE=0 / ASSIGN=1) — UI state, not model state
     main_viewmodel.py           #   Root VM; aggregates children; signals sendToCode/sendToAssign
     calculator_viewmodel.py     #   Result state, LaTeX data-URL, input persistence, clear_result,
-                                #   and the qmlmathplot.Plot (curves, legend, theme, error)
+                                #   and the qmlmathplot.Plot (curves, legend switch, theme, error)
     variables_viewmodel.py      #   VariablesModel (3-col: name/expr/type) + CRUD + Qt edit protocol
     history_viewmodel.py        #   HistoryModel (QAbstractListModel, newest first, lazy LaTeX)
     search.py                   #   SearchFilterModel + Variables/HistoryFilterModel: the pages'
@@ -1942,6 +1942,28 @@ draw (`python/model/plotting.py`, zero Qt), the **object** every surface binds t
   cycle — so a switch re-dresses the curves already drawn (`setPlotTheme` re-applies the stored
   series; a curve keeps the colour it was given, and would otherwise contradict the legend). A
   picker later is a setting that names any of `plot.available_themes`, not a second code path.
+- **The legend is qmlmathplot's own** (`plot.legend = True`, set once in the viewmodel). It is
+  model-driven from `Curve.label` — which is why `plot_series` names the curves (`f`, `f′`,
+  `∫ f dx`) — and lives in the scene, so it follows the plot's theme (background, text, axis
+  colours) and an export includes it. The page used to draw a `Repeater` legend row above the card;
+  there is no `plotLegend` property any more, and nothing in QML knows the curves' colours.
+- **The plot is clipped by a rounded mask, not by `clip`.** Qt's `Item.clip` is rectangular, so
+  `clip: true` on the card let the canvas' square corners paint over its rounded ones. The card's
+  contents are rendered into a layer (`layer.enabled`) and masked with
+  `Qt5Compat.GraphicalEffects.OpacityMask`, whose `maskSource` is a transparent `Rectangle` of the
+  card's own `appearance.buttonRadius` — the same radius every other control uses. The mask is a
+  sibling of the masked item (an effect may not include itself); the module is already in the frozen
+  build (`PySide6/qml/Qt5Compat/GraphicalEffects`). `MultiEffect` would be the Qt 6 answer, but its
+  masked source has to be hidden, and a hidden item cannot hold keyboard focus — which the plot now
+  does.
+- **The plot owns the keyboard, and the card shows the ring.** qmlmathplot 0.4.2 puts `PlotView` in
+  the Tab chain (`activeFocusOnTab`) and focuses it on click, so arrow keys pan and `+`/`-` zoom —
+  the page does not override `focus`. The card raises the app's `ProjectFocusIndicator`; because the
+  plot is a plain `Item` (no `Control.visualFocus`/`focusReason`), the ring is driven by its
+  `keyboardFocus` property from `plotView.activeFocus`, which is exactly "the plot holds the
+  keyboard". The frame around the card carries `Layout.leftMargin`/`rightMargin: 3` — the ring draws
+  two pixels outside its control and the result column is clipped by its `Flickable`, so without the
+  gutter the ring's sides are cut off.
 - **`x` and `y` start as ordinary variables** — `plotting.plot_variables()` is passed by `main.py`
   into `MainViewModel(initial_variables=…)` (the viewmodel's own default stays empty, which is what
   the tests build). They are not hidden: the Variables page lists them as `Symbol` rows. Touching one
@@ -1950,12 +1972,12 @@ draw (`python/model/plotting.py`, zero Qt), the **object** every surface binds t
   (`plot_variable_warning`). `VariablesModel` reads its `_keys` from the manager at construction;
   without that the seeded rows would not appear until the first write.
 - **Registration happens once, before the engine**: `main.py` calls
-  `qmlmathplot.register_qml_types()` right after `prepare(ROOT)`, and the page
-  `import QmlMathPlot 1.0`. `PlotView`'s own `focus: true` is overridden to `false` — the page's
-  input owns the keyboard, and a focused plot would swallow the typing (mouse drag/wheel still work).
-- **Measured here:** `diff(x**2, x)` → two curves (`f`, `f′`) and a 400×300 offscreen render with
-  ~4.8k painted pixels; `x + y` → one implicit curve; `2 + 2` → cleared; the first bake of a curve
-  costs ~0.13 s, then the cache answers.
+  `qmlmathplot.register_qml_types()` right after `prepare(ROOT)`, and the page imports
+  `QmlMathPlot 1.0`, `Qt5Compat.GraphicalEffects` and `../components` (for the ring).
+- **Measured here:** `diff(x**2, x)` → two curves (`f`, `f′`) with the built-in legend and a 400×300
+  offscreen render with ~4.8k painted pixels; `x + y` → one implicit curve; `2 + 2` → cleared; the
+  focus ring appears with `plotView.activeFocus` and `activeFocusOnTab` is true; the first bake of a
+  curve costs ~0.13 s, then the cache answers.
 
 ## The Variables page
 

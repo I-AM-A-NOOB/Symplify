@@ -14,7 +14,7 @@ Symplify is a graphical symbolic calculator that wraps SymPy's powerful CAS (Com
 - **Symbolic & Numeric Computation** — Derivatives, integrals, limits, equation solving, matrix algebra, and more via SymPy. Results are shown both as SymPy text and rendered $\LaTeX$.
 - **Dual Input Modes** — Toggle between **Code** (evaluate any expression) and **Assign** (variable assignment with dedicated name/operator/value fields, including `+=`, `-=`, `*=`, `/=`). The mode and inputs survive page switches.
 - **Theme-Aware $\LaTeX$** — Results are rendered via `ziamath` at screen DPI and re-tinted automatically when the app theme changes.
-- **Plotting** — a result with `x` in it is drawn beside the answer (`x + y` becomes the implicit curve `x + y = 0`). `diff` and `integrate` show the function *and* what they made of it (`f` and `f′`), `solve` shows the equation it solved, and the plot follows the app's light/dark theme. `x` and `y` are ordinary variables from the start (editing one warns, like a SymPy built-in does).
+- **Plotting** — a result with `x` in it is drawn beside the answer (`x + y` becomes the implicit curve `x + y = 0`). `diff` and `integrate` show the function *and* what they made of it (`f` and `f′`), `solve` shows the equation it solved, and the plot follows the app's light/dark theme (with a legend built from the curves). Drag to pan and wheel to zoom; click or Tab into the plot to pan with the arrow keys (`+`/`-` zoom), and the card raises the same focus ring as every other control. `x` and `y` are ordinary variables from the start (editing one warns, like a SymPy built-in does).
 - **Variable Management** — Snapshot entries (name / expression / type). Invalid expressions are kept in the list as `NaN` rows instead of being dropped; double-click a cell to edit inline.
 - **Keyboard Panel** — On-screen math keyboard with smart cursor positioning for Greek letters, operators and functions (7 tabs, YAML-configurable). A key shows a mathematical glyph and types the function behind it (`∞` types `oo`, `√` types `sqrt(`), so the layout reads like maths while the input stays plain SymPy syntax.
 - **History Cards** — Newest-first cards with rendered $\LaTeX$, timestamps, a context menu (copy value/result, copy $\LaTeX$), and *Send to input* to restore any entry in the calculator. Failed calculations are kept as error cards too (the reason shown in red), so a broken expression can be sent back and corrected.
@@ -207,6 +207,7 @@ The file is meant to be hand-editable (comments and unknown keys survive, invali
 | [RinUI](https://github.com/RinLit-233-shiroko/Rin-UI) | Fluent Design-like QML component library | MIT |
 | [SymPy](https://sympy.org) | Symbolic mathematics engine | BSD |
 | [ziamath](https://github.com/vvandijck/ziamath) | LaTeX to SVG math rendering | MIT |
+| [qmlmathplot](https://github.com/I-AM-A-NOOB/QMLMathPlot) | The plot view: per-pixel shader curves, camera, legend | MIT |
 | [PyYAML](https://pyyaml.org) | Keyboard layout config | MIT |
 | [fontTools](https://github.com/fonttools/fonttools) | Reads installed font tables to find math-capable fonts (`python/fonts.py`) | MIT |
 

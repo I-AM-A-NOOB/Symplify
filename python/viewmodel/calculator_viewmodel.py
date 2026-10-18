@@ -33,7 +33,7 @@ class CalculatorViewModel(QObject):
 
     Signals:
         inputModeChanged: Emitted when the input mode changes.
-        plotChanged: Emitted when the plot's curves, legend or error changed.
+        plotChanged: Emitted when the plot's curves or its error changed.
         warningOccurred: Emitted when the user assigns to a SymPy built-in or to
             a plotting variable.
             Args:
@@ -89,9 +89,12 @@ class CalculatorViewModel(QObject):
         # into its `PlotView`. The curves are its children and outlive the page
         # with it.
         self._plot = Plot(parent=self)
+        # The built-in legend names the labelled curves (`f`, `f′`) and is part of
+        # the scene, so an export carries it too. qmlmathplot starts without one;
+        # everything we draw is labelled, so it is always wanted.
+        self._plot.legend = True
         self._curves: List[Curve] = []
         self._series: tuple = ()
-        self._plot_legend: List[dict] = []
         self._plot_error = ""
         # A fresh page has nothing to typeset: the formula area stays empty and the
         # outcome box above it carries the placeholder.
@@ -237,12 +240,6 @@ class CalculatorViewModel(QObject):
 
     hasPlot = Property(bool, _get_has_plot, notify=plotChanged)
 
-    def _get_plot_legend(self) -> List[dict]:
-        """The curves' labels and colours, in draw order (qmlmathplot has no legend)."""
-        return self._plot_legend
-
-    plotLegend = Property("QVariantList", _get_plot_legend, notify=plotChanged)
-
     def _get_plot_error(self) -> str:
         """The first curve's shader error, or '' — a failed bake must be visible."""
         return self._plot_error
@@ -269,7 +266,7 @@ class CalculatorViewModel(QObject):
             self._set_plot(self._series)
 
     def _colour(self, index: int) -> str:
-        """The cycle colour for slot ``index`` (str, so the legend can repeat it)."""
+        """The cycle colour for slot ``index``, as the string a curve takes."""
         cycle = self._plot.color_cycle
         return cycle[index % len(cycle)] if cycle else ""
 
@@ -311,9 +308,6 @@ class CalculatorViewModel(QObject):
         if error and error != self._plot_error:
             self._log.add_warning(f"Plot failed: {error}", "Calculator")
         self._plot_error = error
-        self._plot_legend = [
-            {"label": curve.label, "color": curve.color.name()} for curve in self._curves
-        ]
         self.plotChanged.emit()
 
     @Slot()

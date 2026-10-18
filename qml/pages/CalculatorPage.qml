@@ -4,6 +4,7 @@ import QtQuick.Layouts 2.15
 import RinUI
 import RinUI as Rin
 import QmlMathPlot 1.0
+import Qt5Compat.GraphicalEffects
 import "../components"
 
 Item {
@@ -542,108 +543,126 @@ Item {
                                 source: calcVM.latexSvgUrl
                             }
 
-                            // The curves' names and colours. qmlmathplot draws no
-                            // legend, so the explanation of a two-curve plot (f and
-                            // its derivative) is this row — from the viewmodel,
-                            // which gives each curve the colour it reports here. It
-                            // sits *above* the plot because the 4:3 card can reach the
-                            // bottom of the result area: a legend below it would be
-                            // the first thing scrolled out of sight.
-                            RowLayout {
+                            // The plot frame: the same 4:3 card the placeholder
+                            // used to be, now the real plot, plus the focus ring
+                            // every other control raises. The card is a child rather
+                            // than the frame itself because the ring draws a few
+                            // pixels outside its control and the card has to clip.
+                            // The Plot itself lives in the viewmodel (RinUI rebuilds
+                            // a page on every navigation), so this is a view of it
+                            // and owns no state.
+                            Item {
+                                id: plotFrame
+
                                 Layout.fillWidth: true
-                                spacing: 16
-                                visible: calcVM.plotLegend.length > 1
+                                // The focus ring draws two pixels outside its
+                                // control, and this column is clipped by the
+                                // Flickable around it: three pixels of gutter keep
+                                // the ring whole instead of cutting its sides off.
+                                Layout.leftMargin: 3
+                                Layout.rightMargin: 3
+                                Layout.preferredHeight: width * 0.75
 
-                                Repeater {
-                                    model: calcVM.plotLegend
+                                Rectangle {
+                                    anchors.fill: parent
+                                    color: Theme.currentTheme.colors.cardColor
+                                    radius: Theme.currentTheme.appearance.buttonRadius
+                                    border.width: Theme.currentTheme.appearance.borderWidth
+                                    border.color: Theme.currentTheme.colors.cardBorderColor
 
-                                    delegate: RowLayout {
-                                        required property var modelData
+                                    //: Qt's `clip` is rectangular, so `clip: true`
+                                    //: would let the plot's square canvas paint over
+                                    //: this card's rounded corners. The contents are
+                                    //: rendered into a layer and masked with a rounded
+                                    //: rectangle of the card's own radius instead.
+                                    Item {
+                                        anchors.fill: parent
+                                        layer.enabled: true
+                                        layer.effect: OpacityMask {
+                                            maskSource: plotMask
+                                        }
 
-                                        spacing: 6
+                                        //: qmlmathplot's view handles its own focus:
+                                        //: a click or Tab makes it the keyboard
+                                        //: target (arrow keys pan, +/- zoom).
+                                        PlotView {
+                                            id: plotView
+                                            objectName: "plotView"
+                                            anchors.fill: parent
+                                            visible: calcVM.hasPlot
+                                            plot: calcVM.plot
+                                        }
+                                    }
 
-                                        Rectangle {
-                                            Layout.alignment: Qt.AlignVCenter
-                                            implicitWidth: 10
-                                            implicitHeight: 10
-                                            radius: 5
-                                            color: modelData.color
+                                    //: Nothing to draw — say what would put
+                                    //: something here, rather than leaving an empty
+                                    //: card. A Column rather than a Row: the
+                                    //: sentence is longer than the card at the narrow
+                                    //: end of the split, and it has to wrap.
+                                    Column {
+                                        anchors.centerIn: parent
+                                        width: parent.width - 48
+                                        spacing: 8
+                                        visible: !calcVM.hasPlot
+
+                                        Icon {
+                                            x: (parent.width - width) / 2
+                                            name: "ic_fluent_math_formula_20_regular"
+                                            size: 20
+                                            color: Theme.currentTheme.colors.textSecondaryColor
                                         }
                                         Text {
-                                            Layout.alignment: Qt.AlignVCenter
-                                            text: modelData.label
-                                            color: Theme.currentTheme.colors.textSecondaryColor
+                                            width: parent.width
+                                            horizontalAlignment: Text.AlignHCenter
+                                            wrapMode: Text.WordWrap
                                             typography: Typography.Body
+                                            color: Theme.currentTheme.colors.textSecondaryColor
+                                            text: qsTr("A result in x is drawn here (x and y together: an implicit curve).")
                                         }
                                     }
-                                }
-                            }
 
-                            // Function/plot area: the same 4:3 card the placeholder
-                            // used to be, now the real plot. The Plot itself lives in
-                            // the viewmodel (RinUI rebuilds a page on every
-                            // navigation), so this is a view of it and owns no state.
-                            Rectangle {
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: width * 0.75
-                                color: Theme.currentTheme.colors.cardColor
-                                radius: Theme.currentTheme.appearance.buttonRadius
-                                border.width: Theme.currentTheme.appearance.borderWidth
-                                border.color: Theme.currentTheme.colors.cardBorderColor
-                                clip: true
-
-                                PlotView {
-                                    anchors.fill: parent
-                                    visible: calcVM.hasPlot
-                                    plot: calcVM.plot
-                                    //: The page's input owns the keyboard; the plot's
-                                    //: own arrow-key panning would take it away as soon
-                                    //: as the plot is clicked. Mouse drag/wheel are
-                                    //: unaffected, and so is the focus chain.
-                                    focus: false
-                                }
-
-                                //: Nothing to draw — say what would put something here,
-                                //: rather than leaving an empty card. A Column rather
-                                //: than a Row: the sentence is longer than the card at
-                                //: the narrow end of the split, and it has to wrap
-                                //: instead of being clipped by the card's clip.
-                                Column {
-                                    anchors.centerIn: parent
-                                    width: parent.width - 48
-                                    spacing: 8
-                                    visible: !calcVM.hasPlot
-
-                                    Icon {
-                                        x: (parent.width - width) / 2
-                                        name: "ic_fluent_math_formula_20_regular"
-                                        size: 20
-                                        color: Theme.currentTheme.colors.textSecondaryColor
-                                    }
+                                    //: A shader bake can refuse an expression (an
+                                    //: unsupported function, a level set too hard
+                                    //: for the per-pixel model). The plot must say so
+                                    //: where the plot is, not only in the log.
                                     Text {
-                                        width: parent.width
-                                        horizontalAlignment: Text.AlignHCenter
-                                        wrapMode: Text.WordWrap
-                                        typography: Typography.Body
-                                        color: Theme.currentTheme.colors.textSecondaryColor
-                                        text: qsTr("A result in x is drawn here (x and y together: an implicit curve).")
+                                        anchors.left: parent.left
+                                        anchors.right: parent.right
+                                        anchors.bottom: parent.bottom
+                                        anchors.margins: 10
+                                        visible: calcVM.plotError !== ""
+                                        text: calcVM.plotError
+                                        elide: Text.ElideRight
+                                        color: Theme.currentTheme.colors.systemCriticalColor
+                                        typography: Typography.Caption
                                     }
                                 }
 
-                                //: A shader bake can refuse an expression (an
-                                //: unsupported function, a level set too hard for
-                                //: the per-pixel model). The plot must say so where
-                                //: the plot is, not only in the log.
-                                Text {
-                                    anchors.left: parent.left
-                                    anchors.right: parent.right
-                                    anchors.bottom: parent.bottom
-                                    anchors.margins: 10
-                                    visible: calcVM.plotError !== ""
-                                    text: calcVM.plotError
-                                    elide: Text.ElideRight
-                                    color: Theme.currentTheme.colors.systemCriticalColor
-                                    typography: Typography.Caption
+                                //: The mask is outside the masked item (an effect
+                                //: may not include itself) and never shown: the
+                                //: effect renders it offscreen and reads its alpha.
+                                Rectangle {
+                                    id: plotMask
+                                    objectName: "plotMask"
+                                    anchors.fill: parent
+                                    radius: Theme.currentTheme.appearance.buttonRadius
+                                    visible: false
+                                }
+
+                                //: `keyboardFocus` rather than `control`: the plot
+                                //: is a plain Item, not a Control, so it has no
+                                //: `visualFocus`/`focusReason` to read. The ring here
+                                //: means "the plot holds the keyboard", which is
+                                //: exactly when its arrow keys pan and zoom.
+                                ProjectFocusIndicator {
+                                    objectName: "plotFocusIndicator"
+                                    control: plotFocusProxy
+                                    keyboardFocus: plotView.activeFocus
+                                }
+
+                                Control {
+                                    id: plotFocusProxy
+                                    visible: false
                                 }
                             }
 
