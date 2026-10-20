@@ -15,6 +15,22 @@ Item {
     // them at the wrapper's inner area.
     readonly property Item codeInput: codeArea.textArea
 
+    //: The calculation backend's state, shown beside the result's copy actions.
+    //: "busy" rather than "calculating…" keeps the row short enough for the
+    //: split view's minimum width.
+    readonly property string backendStatusText:
+        calcVM.backendStatus === "calculating" ? qsTr("Backend: busy")
+        : calcVM.backendStatus === "timedout" ? qsTr("Backend: timed out")
+        : calcVM.backendStatus === "failed" ? qsTr("Backend: failed")
+        : qsTr("Backend: ready")
+
+    readonly property color backendStatusColor:
+        calcVM.backendStatus === "timedout" || calcVM.backendStatus === "failed"
+            ? Theme.currentTheme.colors.systemCriticalColor
+            : calcVM.backendStatus === "calculating"
+                ? Theme.currentTheme.colors.primaryColor
+                : Theme.currentTheme.colors.textSecondaryColor
+
     // The code theme's surface — `background` and `ink` for the ACTIVE theme,
     // since a family has a dark and a light member. An empty value means the
     // family has no opinion (High Contrast Light states neither) and the UI
@@ -275,10 +291,22 @@ Item {
                         }
                     }
 
-                    // Input area: Code / Assign (plain Item with visibility
-                    // toggling — a nested StackLayout here propagates its
-                    // children's minimum sizes and defeats preferredHeight)
+                    // Input area: Code / Assign. Both live side by side in a
+                    // clipped stage and slide in opposite directions when the
+                    // mode changes; the off-screen one is disabled, so the
+                    // hidden input never takes focus or keystrokes.
                     Item {
+                        id: inputStage
+
+                        objectName: "inputStage"
+                        clip: true
+                        //: The first binding of `x` must not animate: a page
+                        //: rebuilt while the VM is in Assign mode would
+                        //: otherwise slide both rows in from the left.
+                        property bool slideReady: false
+
+                        Component.onCompleted: slideReady = true
+
                         Layout.fillWidth: true
                         // The Code box wants the full 110px. Assign is a row of
                         // controls that only needs one line — but it has to grow
@@ -293,8 +321,24 @@ Item {
                         ScrollableTextArea {
                             id: codeArea
 
-                            anchors.fill: parent
-                            visible: calcVM.inputMode === 0
+                            objectName: "codeInput"
+                            // The stage's two panes are siblings of its width;
+                            // the inactive one sits fully outside the clip.
+                            width: parent.width
+                            height: parent.height
+                            x: calcVM.inputMode === 0 ? 0 : -width
+                            enabled: calcVM.inputMode === 0
+                            //: Code leaves to the left, Assign arrives from the
+                            //: right; going back reverses both. Eased, not a
+                            //: paginated SwipeView: the two panes cross the
+                            //: stage together.
+                            Behavior on x {
+                                enabled: inputStage.slideReady
+                                NumberAnimation {
+                                    duration: 180
+                                    easing.type: Easing.OutCubic
+                                }
+                            }
                             text: calcVM.inputText
                             placeholderText: qsTr("Enter expression...")
                             wrapMode: TextEdit.Wrap
@@ -338,15 +382,25 @@ Item {
                         //: does.
                         CodeContextMenu {
                             editor: codeArea.textArea
-                            anchors.fill: parent
+                            anchors.fill: codeArea
                             visible: calcVM.inputMode === 0
                         }
 
                         RowLayout {
                             id: assignRow
 
-                            anchors.fill: parent
-                            visible: calcVM.inputMode === 1
+                            objectName: "assignInput"
+                            width: parent.width
+                            height: parent.height
+                            x: calcVM.inputMode === 1 ? 0 : width
+                            enabled: calcVM.inputMode === 1
+                            Behavior on x {
+                                enabled: inputStage.slideReady
+                                NumberAnimation {
+                                    duration: 180
+                                    easing.type: Easing.OutCubic
+                                }
+                            }
                             spacing: 8
 
                             // The shared code field (surface, ink, code font), the
@@ -454,6 +508,28 @@ Item {
                         Layout.fillWidth: true
                         spacing: 8
 
+                        //: The backend's state: a progress ring while a request
+                        //: is in flight, then the last boundary event (ready /
+                        //: timed out / failed). It sits with the result's own
+                        //: actions because that is the surface it governs.
+                        RowLayout {
+                            Layout.alignment: Qt.AlignVCenter
+                            spacing: 6
+
+                            ProgressRing {
+                                visible: calcVM.backendBusy
+                                size: 14
+                                strokeWidth: 2
+                                indeterminate: true
+                            }
+
+                            Text {
+                                text: page.backendStatusText
+                                typography: Typography.Caption
+                                color: page.backendStatusColor
+                            }
+                        }
+
                         Item { Layout.fillWidth: true }
 
                         Button {
@@ -529,7 +605,7 @@ Item {
                                     ? calcVM.errorMessage
                                     : (hasResult
                                         ? (vm ? vm.highlighted(calcVM.resultText, Theme.isDark()) : "")
-                                        : qsTr("result ∈ LaTeX"))
+                                        : qsTr("Press Ctrl+Return to calculate"))
                             }
 
                             // LaTeX result area: the natural-height rendering,
@@ -549,17 +625,30 @@ Item {
                                 source: calcVM.latexSvgUrl
                             }
 
-                            // The plot frame: the same 4:3 card the placeholder
-                            // used to be, now the real plot, plus the focus ring
-                            // every other control raises. The card is a child rather
-                            // than the frame itself because the ring draws a few
-                            // pixels outside the card and must not be clipped by it.
-                            // The Plot itself lives in the viewmodel (RinUI rebuilds
-                            // a page on every navigation), so this is a view of it
-                            // and owns no state.
+                            //: The alternative forms of the answer (N, expanded,
+                            //: factored, …), in the History card's own row
+                            //: anatomy. Empty and invisible when there is no
+                            //: different form worth showing.
+                            VariantsCard {
+                                Layout.fillWidth: true
+                                variants: calcVM.variants
+                            }
+
+                            // The plot frame: the 4:3 card the real plot rides in,
+                            // plus the focus ring every other control raises. The
+                            // card is a child rather than the frame itself because
+                            // the ring draws a few pixels outside the card and must
+                            // not be clipped by it. Hidden outright when there is
+                            // nothing to draw: a layout skips an invisible child, so
+                            // an empty result leaves no plot-shaped hole. The Plot
+                            // itself lives in the viewmodel (RinUI rebuilds a page on
+                            // every navigation), so this is a view of it and owns no
+                            // state.
                             Control {
                                 id: plotFrame
                                 objectName: "plotFrame"
+
+                                visible: calcVM.hasPlot
 
                                 //: The same focus arrangement the Segmented items
                                 //: use: a Control is the Tab stop, so the shared
@@ -629,7 +718,6 @@ Item {
                                             id: plotView
                                             objectName: "plotView"
                                             anchors.fill: parent
-                                            visible: calcVM.hasPlot
                                             plot: calcVM.plot
                                             //: Not the Tab stop: the control
                                             //: above is, so the ring has one
@@ -638,33 +726,6 @@ Item {
                                             //: is the mouse path the ring ignores.
                                             focus: false
                                             activeFocusOnTab: false
-                                        }
-                                    }
-
-                                    //: Nothing to draw — say what would put
-                                    //: something here, rather than leaving an empty
-                                    //: card. A Column rather than a Row: the
-                                    //: sentence is longer than the card at the narrow
-                                    //: end of the split, and it has to wrap.
-                                    Column {
-                                        anchors.centerIn: parent
-                                        width: parent.width - 48
-                                        spacing: 8
-                                        visible: !calcVM.hasPlot
-
-                                        Icon {
-                                            x: (parent.width - width) / 2
-                                            name: "ic_fluent_math_formula_20_regular"
-                                            size: 20
-                                            color: Theme.currentTheme.colors.textSecondaryColor
-                                        }
-                                        Text {
-                                            width: parent.width
-                                            horizontalAlignment: Text.AlignHCenter
-                                            wrapMode: Text.WordWrap
-                                            typography: Typography.Body
-                                            color: Theme.currentTheme.colors.textSecondaryColor
-                                            text: qsTr("A result in x is drawn here (x and y together: an implicit curve).")
                                         }
                                     }
 

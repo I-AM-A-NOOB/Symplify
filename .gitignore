@@ -26,3 +26,5 @@ nuitka_output.txt
 # Old files
 *.old
 *.old.py
+# Local reference screenshots (not part of the source or docs)
+/screenshoots/

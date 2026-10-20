@@ -3,15 +3,15 @@ name = "symplify"
 version = "0.6.0"
 description = "A modern symbolic calculator built with SymPy and PySide6 (QML)."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.15"
 dependencies = [
-    "pyside6>=6.11.2",
+    "pyside6>=6.7.0",
     "rinui>=0.4.4.1",
     "pyyaml>=6.0.3",
     "sympy>=1.14.0",
     "ziamath>=0.13",
     "fonttools>=4.0",
-    "qmlmathplot>=0.4.2",
+    "qmlmathplot>=0.4.3",
 ]
 
 [dependency-groups]

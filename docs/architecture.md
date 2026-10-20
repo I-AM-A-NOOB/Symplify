@@ -35,6 +35,7 @@ flowchart TB
         B2["calculateAssign<br/>构造 Assignment(name, op, 原文)"]
         B3["VariablesViewModel._assign<br/>Assignment(name, '=', 原文)"]
         B4["VariablesModel.setData → _parse"]
+        B5["CalculationBackend<br/>InlineBackend (tests) / ProcessBackend (app)<br/>timeout · cancel · stale request ids"]
     end
 
     subgraph MOD["③ Model（纯 Python · 零 Qt）"]
@@ -62,8 +63,9 @@ flowchart TB
     A3 --> B3
     A4 --> B4
 
-    B1 --> C1
-    B2 --> C1
+    B1 --> B5
+    B2 --> B5
+    B5 -->|"evaluate / assign + scope"| C1
     B3 --> C1
     B4 -->|"只读求值"| C1
     C1 --> C2
@@ -89,6 +91,20 @@ What the diagram is saying:
 - **Four UI routes, two model requests.** Code mode, Assign mode, the Variables
   toolbar and the table's inline edit all end in `evaluate` (read) or `assign`
   (write); no route assembles an expression string of its own any more.
+- **The Calculator page's two routes cross a backend boundary.** `calculate` /
+  `calculateAssign` submit `(kind, payload, scope)` to a `CalculationBackend`
+  and return; the `Success | Failure` arrives later as a Qt signal. The default
+  backend is synchronous (tests/headless); the app uses a spawned
+  `ProcessBackend` with a hard timeout, so a runaway sympy call is terminated
+  instead of freezing the event loop. The VM allocates request ids, ignores
+  replies for cancelled requests, and cancels the previous request when a new
+  one is submitted or the result is cleared. The backend also computes the
+  alternative forms (`simplify` / `doit` / `N` / `expand` / `factor`), so their
+  symbolic work is inside the same deadline; the UI only renders their LaTeX.
+  Timeouts become `Failure(ErrorKind.TIMEOUT)` and are recorded like any other
+  failure; the result header shows the backend status. The Variables page's own routes
+  (B3/B4) still call the in-process `Calculator` synchronously — the next slice
+  of the separation.
 - **`scope` is the second input channel.** `VariableManager.list_all()` (valid
   entries only) is handed to `parse_expr` as `local_dict`, so saved variables
   resolve as symbols; names that resolve to nothing stay symbolic.

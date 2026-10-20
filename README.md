@@ -11,7 +11,8 @@ Symplify is a graphical symbolic calculator that wraps SymPy's powerful CAS (Com
 
 ## Features
 
-- **Symbolic & Numeric Computation** — Derivatives, integrals, limits, equation solving, matrix algebra, and more via SymPy. Results are shown both as SymPy text and rendered $\LaTeX$.
+- **Symbolic & Numeric Computation** — Derivatives, integrals, limits, equation solving, matrix algebra, and more via SymPy. Results are shown both as SymPy text and rendered $\LaTeX$, with a card of alternative forms (evaluated, numeric value, expanded, factored) below the formula.
+- **Responsive Calculations** — Evaluation runs in a spawned backend process, so the window stays responsive while SymPy works. A request that exceeds the 10-second deadline is terminated and reported as a timeout; the result header shows the backend state (ready / busy / timed out / failed).
 - **Dual Input Modes** — Toggle between **Code** (evaluate any expression) and **Assign** (variable assignment with dedicated name/operator/value fields, including `+=`, `-=`, `*=`, `/=`). The mode and inputs survive page switches.
 - **Theme-Aware $\LaTeX$** — Results are rendered via `ziamath` at screen DPI and re-tinted automatically when the app theme changes.
 - **Plotting** — a result with `x` in it is drawn beside the answer (`x + y` becomes the implicit curve `x + y = 0`). `diff` and `integrate` show the function *and* what they made of it (`f` and `f′`), `solve` shows the equation it solved, and the plot follows the app's light/dark theme (with a legend built from the curves). Drag to pan and wheel to zoom; click or Tab into the plot to pan with the arrow keys (`+`/`-` zoom), and the card raises the same focus ring as every other control. `x` and `y` are ordinary variables from the start (editing one warns, like a SymPy built-in does).
@@ -76,7 +77,7 @@ these):
 | Download | What it is |
 |---|---|
 | `Symplify-v<version>-windows-x64-portable.zip` | Extract it and run `Symplify\symplify.exe`. The folder carries an empty `data\`, which is what puts the app in portable mode: settings go to `data\config.yaml` and nothing outside the extracted folder is touched. |
-| `Symplify-v<version>-windows-x64-setup.exe` | The installer (Inno Setup 7): per-user by default with an all-users option, Start Menu and optional desktop shortcuts, an option to launch the app at the end, and a proper uninstaller. An installed copy has no `data\` folder, so its settings live in `%APPDATA%\Symplify\config.yaml`. |
+| `Symplify-v<version>-windows-x64-setup.exe` | The installer (Inno Setup 7): per-user by default with an all-users option, Start Menu and optional desktop shortcuts, an option to launch the app at the end, and a proper uninstaller that removes the install directory and Qt's local cache. Running a newer setup over an existing install replaces it cleanly. An installed copy has no `data\` folder, so its settings live in `%APPDATA%\Symplify\config.yaml`; the uninstaller asks whether to remove them. |
 
 Building the installer needs [Inno Setup 7](https://jrsoftware.org/isdl.php)
 (`winget install JRSoftware.InnoSetup.7`) — the packaging script finds it, and

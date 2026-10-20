@@ -5,6 +5,7 @@ Builds the viewmodels, registers them as flat QML context properties,
 and lets RinUI load the Fluent-styled QML window.
 """
 
+import multiprocessing
 import sys
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from python import window_icon
 from python.model.plotting import plot_variables
 from python.rinui_bootstrap import prepare
 from python.keyboard_config import load_keyboard_tabs
+from python.viewmodel.calculation_backend import ProcessBackend
 from python.viewmodel.main_viewmodel import MainViewModel
 from python.version import __version__
 
@@ -30,8 +32,19 @@ else:
     ROOT = Path(__file__).resolve().parent
 
 
+#: Seconds a single calculation may run before the worker is terminated. The
+#: value is a UI deadline, not a model limit: the inline backend has none, and a
+#: timeout is reported as a failure rather than a partial answer.
+CALCULATION_TIMEOUT_SECONDS = 10.0
+
+
 def main() -> int:
     """Create the app, wire the viewmodels, and start the event loop."""
+    # Nuitka standalone builds spawn the calculation worker by re-running this
+    # executable with multiprocessing's flag. freeze_support() is what routes
+    # that back into the worker; it is a no-op in a normal interpreter.
+    multiprocessing.freeze_support()
+
     # RinUI prints emoji to stdout; force UTF-8 so GBK consoles don't crash.
     for stream in (sys.stdout, sys.stderr):
         if stream is not None and hasattr(stream, "reconfigure"):
@@ -75,8 +88,12 @@ def main() -> int:
     # QML tree is instantiated.
     window = runtime.window_class()
 
-    vm = MainViewModel(runtime.settings, window.theme_manager,
-                       initial_variables=plot_variables())
+    vm = MainViewModel(
+        runtime.settings,
+        window.theme_manager,
+        initial_variables=plot_variables(),
+        calculation_backend=ProcessBackend(CALCULATION_TIMEOUT_SECONDS),
+    )
     context = window.engine.rootContext()
     context.setContextProperty("vm", vm)
     context.setContextProperty("appVersion", __version__)

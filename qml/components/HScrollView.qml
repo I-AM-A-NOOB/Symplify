@@ -14,6 +14,17 @@ Flickable {
 
     property bool wheelScroll: false
 
+    //: Which way the row still has room to move. The tab row's overlay pills
+    //: read these; a row with nothing to scroll reports neither.
+    readonly property bool canScrollLeft: contentX > 0.5
+    readonly property bool canScrollRight:
+        contentX < Math.max(0, contentWidth - width) - 0.5
+
+    //: What one wheel notch moves, in content pixels. Qt reports 120 per
+    //: notch and the row has always doubled the delta (the gallery's feel),
+    //: so the step is 240. The tab row's pills move by this same distance.
+    readonly property real notchStep: 240
+
     clip: true
     flickableDirection: Flickable.HorizontalFlick
     contentHeight: height
@@ -29,15 +40,49 @@ Flickable {
         enabled: !root.wheelScroll
     }
 
-    // Only wheel moves are eased: a drag has to track the pointer frame by
-    // frame, so this cannot be a `Behavior on contentX` (that would lag the
-    // drag behind the mouse).
+    // Only the indirect pans (wheel, pills, `revealTab`) are eased: a drag has
+    // to track the pointer frame by frame, so this cannot be a `Behavior on
+    // contentX` (that would lag the drag behind the mouse).
     NumberAnimation {
-        id: wheelAnimation
+        id: scrollAnimation
         target: root
         property: "contentX"
         duration: 200
         easing.type: Easing.OutQuad
+    }
+
+    // Eased pan to an absolute position, clamped to the content. Every
+    // indirect pan (wheel, pills, revealTab) moves through here.
+    function scrollTo(target) {
+        const limit = Math.max(0, contentWidth - width)
+        target = Math.max(0, Math.min(target, limit))
+        if (Math.abs(target - contentX) < 1)
+            return
+        scrollAnimation.stop()
+        scrollAnimation.to = target
+        scrollAnimation.start()
+    }
+
+    // Eased pan by a relative amount, clamped to the content (the wheel's
+    // route; the tab row's pills step through `scrollTo`).
+    function scrollBy(delta) {
+        scrollTo(contentX + delta)
+    }
+
+    // Eased pan that brings one piece of the content fully into view, with a
+    // little air on the side it travelled towards. This is the tab strip's
+    // "follow the selection" move; it is the same animation the wheel and the
+    // overlay pills use, so every indirect pan feels like one mechanism.
+    function revealTab(item) {
+        if (!item)
+            return
+        const margin = 8
+        const start = item.x - margin
+        const end = item.x + item.width + margin
+        if (start < contentX)
+            scrollTo(start)
+        else if (end > contentX + width)
+            scrollTo(end - width)
     }
 
     WheelHandler {
@@ -47,10 +92,7 @@ Flickable {
         onWheel: (wheel) => {
             const delta = wheel.angleDelta.x !== 0
                 ? wheel.angleDelta.x : wheel.angleDelta.y
-            const limit = Math.max(0, root.contentWidth - root.width)
-            wheelAnimation.stop()
-            wheelAnimation.to = Math.max(0, Math.min(root.contentX - delta * 2, limit))
-            wheelAnimation.start()
+            root.scrollBy(-delta * 2)
         }
     }
 }

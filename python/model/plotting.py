@@ -54,6 +54,19 @@ ORIGIN_ONLY = frozenset({
     "solve", "solveset", "roots", "linsolve", "nonlinsolve", "nsolve",
 })
 
+#: Unevaluated symbolic objects no numeric plotter can draw. `Integral`, in
+#: particular, has no GLSL spelling; handing it to the printer is the
+#: `PrintMethodNotImplementedError` the card used to show. The plot is a
+#: *numeric* surface, so it skips these rather than evaluating them — the result
+#: card's `doit` variant is where the evaluated form appears.
+_UNDRAWABLE_FORMS = (
+    sp.Integral,
+    sp.Derivative,
+    sp.Sum,
+    sp.Product,
+    sp.Limit,
+)
+
 #: What a derived curve is called. The source is always ``f``; these name the
 #: derivative/integral so the legend can tell them apart.
 RESULT_LABELS = {
@@ -157,6 +170,11 @@ def _series(value: Any, label: str, role: str) -> Optional[Series]:
         implicit = True
         label = label or f"{value.lhs} = {value.rhs}"
     if not isinstance(expression, sp.Expr):
+        return None
+    try:
+        if expression.atoms(*_UNDRAWABLE_FORMS):
+            return None
+    except Exception:  # noqa: BLE001 - an exotic object is not plottable either
         return None
     symbols = expression.free_symbols
     # An empty set is a constant: there is nothing to plot against x, which is

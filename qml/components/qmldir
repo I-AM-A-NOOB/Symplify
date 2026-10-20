@@ -37,6 +37,10 @@ LatexImage 1.0 LatexImage.qml
 # MathStrip is the formula area itself: HScrollView + LatexImage + the room the
 # overlay bar needs. LatexImage is its inner renderer, not a page-level type.
 MathStrip 1.0 MathStrip.qml
+# VariantsCard is the Calculator's "other forms" card: one row per alternative
+# (simplify / N / expand / factor), each an expression plus its rendered LaTeX,
+# with the History card's right-click copy menu and one Copy all.
+VariantsCard 1.0 VariantsCard.qml
 # MessageDialog is the one message box (title, wrapped body, buttons); WarningDialog is
 # that plus the wiring to a viewmodel's `warningOccurred`.
 MessageDialog 1.0 MessageDialog.qml

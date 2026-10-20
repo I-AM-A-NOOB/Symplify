@@ -51,6 +51,26 @@ class CodeHighlighter(QSyntaxHighlighter):
         document.contentsChanged.connect(self._on_contents_changed)
         self._recompute()
 
+    def set_palette(
+        self,
+        styles: Optional[Mapping[Style, str]],
+        bracket_colors: Optional[Sequence[str]],
+    ) -> None:
+        """Recolour an attached highlighter in place.
+
+        The document outlives a theme switch unless RinUI recreates the page, so
+        a highlighter attached with the old palette would keep painting it —
+        this is what the live theme-change handler calls. The format cache is
+        cleared because it is keyed by colour, and the old palette's entries
+        would otherwise accumulate across switches.
+        """
+        if styles == self._styles and bracket_colors == self._bracket_colors:
+            return
+        self._styles = styles
+        self._bracket_colors = bracket_colors
+        self._cache.clear()
+        self._recompute()
+
     def _on_contents_changed(self) -> None:
         # setFormat can make the document emit this again, so ignore it while the
         # recompute (and the rehighlight it ends with) is running.

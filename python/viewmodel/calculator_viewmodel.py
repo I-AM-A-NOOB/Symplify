@@ -11,11 +11,14 @@ from typing import Any, List, Optional
 from PySide6.QtCore import Property, QObject, Signal, Slot
 from PySide6.QtGui import QColor
 from qmlmathplot import Curve, ImplicitCurve, Plot
+from qmlmathplot.model import func_glsl
 
 from ..latex_render import LatexStyle, render_data_url
-from ..model.calculator import Assignment, Calculator, ErrorKind, Failure, Result, Success
+from ..model.calculator import Assignment, ErrorKind, Failure, Result, Success
 from ..model.plotting import is_plot_variable, plot_series, plot_variable_warning
 from ..model.variable import VariableManager
+from ..model.variants import Variant
+from .calculation_backend import InlineBackend
 from .history_viewmodel import HistoryModel
 from .input_mode import InputMode
 from .log_viewmodel import LogViewModel
@@ -47,24 +50,28 @@ class CalculatorViewModel(QObject):
     resultChanged = Signal()
     plotChanged = Signal()
     warningOccurred = Signal(str, str)
+    #: ``backendBusy`` / ``backendStatus`` changed.
+    backendStateChanged = Signal()
 
     def __init__(
         self,
-        calculator: Calculator,
         variable_manager: VariableManager,
         history: HistoryModel,
         log: LogViewModel,
         variables_model: Optional["VariablesModel"] = None,
         parent: Optional[QObject] = None,
+        backend: Optional[QObject] = None,
     ):
         """Initialize the calculator viewmodel.
 
         Args:
             variables_model: The shared variables model, refreshed when an
                 assignment saves a new variable (optional).
+            backend: Calculation transport. None keeps the synchronous in-process
+                backend (tests/headless); the application passes a process
+                backend with a timeout.
         """
         super().__init__(parent)
-        self._calculator = calculator
         self._variable_manager = variable_manager
         self._history = history
         self._log = log
@@ -81,6 +88,22 @@ class CalculatorViewModel(QObject):
         self._latex_svg_url = ""
         self._latex_width = 0
         self._latex_height = 0
+        #: Alternative forms of the current answer, already rendered for QML.
+        self._variants: tuple[Variant, ...] = ()
+        self._variant_items: List[dict] = []
+        #: Calculation crosses a backend boundary. The default is synchronous
+        #: (tests, headless callers); the application passes a process backend
+        #: with a timeout. The viewmodel allocates request ids, so both take the
+        #: same path and stale replies are ignored.
+        self._backend = backend if backend is not None else InlineBackend(self)
+        self._backend.finished.connect(self._on_backend_finished)
+        self._backend.timedOut.connect(self._on_backend_timed_out)
+        self._backend.failed.connect(self._on_backend_failed)
+        self._request_seq = 0
+        self._active_request: Optional[int] = None
+        self._pending: Optional[dict] = None
+        self._backend_busy = False
+        self._backend_status = "ready"
         #: Theme ink, font size and LaTeX font file, in one value; built by
         #: `MainViewModel`, which owns the settings and sees the theme.
         self._latex_style = LatexStyle()
@@ -197,6 +220,42 @@ class CalculatorViewModel(QObject):
         else:
             self._clear_latex()
 
+    def _apply_variants(self, rows: Any) -> None:
+        """Render the alternative forms computed by the backend.
+
+        The symbolic work (`doit`, `expand`, `factor`, `N`) already happened
+        inside the backend's deadline; the UI only turns each row's LaTeX into a
+        data URL.
+        """
+        self._variants = tuple(rows or ())
+        self._render_variants()
+
+    def _clear_variants(self) -> None:
+        """Forget the alternative forms (a failure or a cleared result)."""
+        self._variants = ()
+        self._variant_items = []
+
+    def _render_variants(self) -> None:
+        """Render each variant's LaTeX for the QML card."""
+        items: List[dict] = []
+        for variant in self._variants:
+            data_url, width, height = (
+                render_data_url(variant.latex, self._latex_style)
+                if variant.latex else ("", 0, 0)
+            )
+            items.append({
+                "kind": variant.kind,
+                "expression": variant.expression,
+                "latex": variant.latex,
+                "latexUrl": data_url,
+                "naturalWidth": width,
+                "naturalHeight": height,
+            })
+        self._variant_items = items
+
+    def _get_variants(self) -> List[dict]:
+        return self._variant_items
+
     def set_latex_style(self, style: LatexStyle) -> None:
         """Re-render the current result in a new style.
 
@@ -209,6 +268,7 @@ class CalculatorViewModel(QObject):
             return
         self._latex_style = style
         self._refresh_strip()
+        self._render_variants()
         self.resultChanged.emit()
 
     inputMode = Property(
@@ -231,6 +291,39 @@ class CalculatorViewModel(QObject):
     latexSvgUrl = Property(str, _get_latex_svg_url, notify=resultChanged)
     latexWidth = Property(int, _get_latex_width, notify=resultChanged)
     latexHeight = Property(int, _get_latex_height, notify=resultChanged)
+    #: The result card's rows: {kind, expression, latex, latexUrl,
+    #: naturalWidth, naturalHeight}. Empty on an error or a result with no
+    #: alternative worth showing.
+    variants = Property("QVariantList", _get_variants, notify=resultChanged)
+
+    def _get_backend_busy(self) -> bool:
+        return self._backend_busy
+
+    def _get_backend_status(self) -> str:
+        """``ready`` | ``calculating`` | ``timedout`` | ``failed``."""
+        return self._backend_status
+
+    def _get_backend_timeout(self) -> float:
+        return float(getattr(self._backend, "timeout_seconds", 0.0))
+
+    backendBusy = Property(
+        bool, _get_backend_busy, notify=backendStateChanged
+    )
+    backendStatus = Property(
+        str, _get_backend_status, notify=backendStateChanged
+    )
+    #: Seconds a single request may run; 0 means the inline backend (no limit).
+    backendTimeout = Property(
+        float, _get_backend_timeout, constant=True
+    )
+
+    def _set_backend_state(self, busy: bool, status: str) -> None:
+        """Publish one backend state transition."""
+        if busy == self._backend_busy and status == self._backend_status:
+            return
+        self._backend_busy = busy
+        self._backend_status = status
+        self.backendStateChanged.emit()
 
     def _get_plot(self) -> Plot:
         """The plot the calculator page renders; owned here, so it survives pages."""
@@ -274,6 +367,27 @@ class CalculatorViewModel(QObject):
         cycle = self._plot.color_cycle
         return cycle[index % len(cycle)] if cycle else ""
 
+    def _supported_series(self, series: tuple) -> tuple:
+        """``series`` without the curves qmlmathplot's GLSL printer cannot spell.
+
+        The plot is a *numeric* surface: a result that evaluates to a special
+        function (`fresnels`, `gamma`, …) has no shader spelling. Dropping that
+        one curve keeps the integrand/source curve useful and leaves the card
+        without a printer stack trace; the evaluated form is still in the result
+        card's `doit` row. `func_glsl` is the printer itself, so this asks the
+        real capability rather than keeping a second whitelist.
+        """
+        supported = []
+        for item in series:
+            try:
+                func_glsl(item.expression, "x")
+            except Exception as exc:  # noqa: BLE001 - an unprintable curve is skipped
+                reason = str(exc).splitlines()[0]
+                self._log.add_info(f"Plot skipped: {reason}", "Calculator")
+                continue
+            supported.append(item)
+        return tuple(supported)
+
     def _set_plot(self, series: tuple) -> None:
         """Reconcile the plot's curves with ``series``.
 
@@ -283,6 +397,7 @@ class CalculatorViewModel(QObject):
         because the two are different classes. Nothing here may raise: a plotting
         failure is a log line and the card's error text, not a broken Qt slot.
         """
+        series = self._supported_series(series)
         self._series = series
         try:
             # The longest prefix that can be updated in place.
@@ -317,10 +432,15 @@ class CalculatorViewModel(QObject):
     @Slot()
     def clear_result(self) -> None:
         """Clear the result display area (the outcome box then shows the placeholder)."""
+        self._backend.cancel()
+        self._active_request = None
+        self._pending = None
+        self._set_backend_state(False, "ready")
         self._result_text = ""
         self._result_latex = ""
         self._is_error = False
         self._error_message = ""
+        self._clear_variants()
         self._set_plot(())
         self._refresh_strip()
         self.resultChanged.emit()
@@ -338,6 +458,7 @@ class CalculatorViewModel(QObject):
             self._result_latex = ""
             self._is_error = True
             self._error_message = self._format_failure(result)
+            self._clear_variants()
             self._set_plot(())
         self._refresh_strip()
         self.resultChanged.emit()
@@ -349,74 +470,185 @@ class CalculatorViewModel(QObject):
             return f"{failure.message} — {failure.hint}"
         return failure.message
 
-    @Slot(str)
-    def calculate(self, expression: str) -> None:
-        """Evaluate an expression in code mode."""
-        self._log.add_info(expression, "Calculator")
-        result = self._calculator.evaluate(
-            expression, self._variable_manager.list_all()
-        )
-        self._apply_result(result)
-        if isinstance(result, Success):
-            self._history.add_item(
-                expression, self._result_text, "Code", latex=result.latex
-            )
-            self._log.add_info(f"= {result.value}", "Calculator")
-        else:
-            # Failures are part of the history too: keeping the input and the
-            # failure text is what lets a typo be sent back and fixed.
-            self._history.add_item(
-                expression, "", "Code", error=self._format_failure(result)
-            )
-            self._log.add_error(f"Error: {result.message}", "Calculator")
+    def _start_request(
+        self,
+        kind: str,
+        payload: Any,
+        pending: dict,
+    ) -> None:
+        """Hand one request to the backend, replacing any previous one.
 
-    @Slot(str, str, str)
-    def calculateAssign(self, name: str, operator: str, value_str: str) -> None:
-        """Answer an assignment in assign mode.
-
-        The model validates the target before evaluating anything, so a rejected
-        write never reaches the history, the "= value" log line or the variable
-        store. An unparsable value is still kept as an invalid (NaN) entry, so
-        the user's input survives.
+        The id is allocated here, before submitting: a synchronous backend emits
+        `finished` inside `submit`, and both backends then follow the same
+        stale-reply path.
         """
-        self._log.add_info(f"{name} {operator} {value_str}", "Calculator")
-        result = self._calculator.assign(
-            Assignment(name, operator, value_str),
-            self._variable_manager.list_all(),
-        )
-        self._apply_result(result)
+        if self._active_request is not None:
+            self._backend.cancel()
+        self._request_seq += 1
+        self._active_request = self._request_seq
+        self._pending = pending
+        self._set_backend_state(True, "calculating")
+        try:
+            self._backend.submit(
+                self._active_request,
+                kind,
+                payload,
+                self._variable_manager.list_all(),
+            )
+        except Exception as exc:  # noqa: BLE001 - a broken boundary is reported
+            self._on_backend_failed(
+                self._active_request, f"{type(exc).__name__}: {exc}"
+            )
 
+    def _take_pending(self, request_id: int) -> Optional[dict]:
+        """Claim a reply, or return None when it belongs to a cancelled request."""
+        if request_id != self._active_request:
+            return None
+        pending = self._pending
+        self._pending = None
+        self._active_request = None
+        return pending
+
+    def _on_backend_finished(
+        self, request_id: int, result: Result, variant_rows: object
+    ) -> None:
+        """A model answer arrived: display it, then record its effects."""
+        pending = self._take_pending(request_id)
+        if pending is None:
+            return
+        self._set_backend_state(False, "ready")
+        # Set the rows before `_apply_result` emits `resultChanged`, so the card
+        # and the result update in one notification.
+        self._apply_variants(variant_rows if isinstance(result, Success) else ())
+        self._apply_result(result)
         if isinstance(result, Success):
+            self._record_success(pending, result)
+        else:
+            self._record_failure(pending, result, allow_invalid=True)
+
+    def _on_backend_timed_out(self, request_id: int) -> None:
+        """The backend killed a request at its deadline."""
+        pending = self._take_pending(request_id)
+        if pending is None:
+            return
+        self._set_backend_state(False, "timedout")
+        timeout = self._get_backend_timeout()
+        failure = Failure(
+            pending["expression"],
+            ErrorKind.TIMEOUT,
+            f"Calculation timed out after {timeout:g} s.",
+        )
+        self._apply_result(failure)
+        self._record_failure(pending, failure, allow_invalid=False)
+
+    def _on_backend_failed(self, request_id: int, message: str) -> None:
+        """The worker died or the boundary could not start/send."""
+        pending = self._take_pending(request_id)
+        if pending is None:
+            return
+        self._set_backend_state(False, "failed")
+        failure = Failure(
+            pending["expression"],
+            ErrorKind.INTERNAL,
+            f"Calculation backend failed: {message}",
+        )
+        self._apply_result(failure)
+        self._record_failure(pending, failure, allow_invalid=False)
+
+    def _record_success(self, pending: dict, result: Success) -> None:
+        """History, log and variable-store effects of a successful request."""
+        if pending["kind"] == "evaluate":
             self._history.add_item(
-                value_str,
+                pending["expression"], self._result_text, "Code",
+                latex=result.latex,
+            )
+        else:
+            self._history.add_item(
+                pending["expression"],
                 self._result_text,
                 "Assign",
                 latex=result.latex,
-                name=name,
-                op=operator,
+                name=pending["name"],
+                op=pending["operator"],
             )
-            self._save_variable(name, result.value)
-            self._log.add_info(f"= {result.value}", "Calculator")
-            return
+            self._save_variable(pending["name"], result.value)
+        self._log.add_info(f"= {result.value}", "Calculator")
 
-        self._history.add_item(
-            value_str,
-            "",
-            "Assign",
-            name=name,
-            op=operator,
-            error=self._format_failure(result),
-        )
-        self._log.add_error(f"Error: {result.message}", "Calculator")
-        if result.kind is ErrorKind.INVALID_NAME:
+    def _record_failure(
+        self,
+        pending: dict,
+        failure: Failure,
+        allow_invalid: bool,
+    ) -> None:
+        """History and log effects of a failed request.
+
+        ``allow_invalid`` is false for a timeout or backend crash: those say
+        nothing about the value the user typed, so an Assign mode write must not
+        be recorded as an invalid variable.
+        """
+        if pending["kind"] == "evaluate":
+            # Failures are part of the history too: keeping the input and the
+            # failure text is what lets a typo be sent back and fixed.
+            self._history.add_item(
+                pending["expression"], "", "Code",
+                error=self._format_failure(failure),
+            )
+        else:
+            self._history.add_item(
+                pending["expression"],
+                "",
+                "Assign",
+                name=pending["name"],
+                op=pending["operator"],
+                error=self._format_failure(failure),
+            )
+        self._log.add_error(f"Error: {failure.message}", "Calculator")
+
+        if (pending["kind"] != "assign"
+                or not allow_invalid
+                or failure.kind is ErrorKind.INVALID_NAME
+                or pending["operator"] != "="
+                or self._variables_model is None):
             return
-        if operator == "=" and self._variables_model is not None:
-            try:
-                self._variables_model.save_invalid(name, value_str)
-            except Exception as e:
-                self._log.add_warning(
-                    f"Failed to store invalid entry: {e}", "Calculator"
-                )
+        try:
+            self._variables_model.save_invalid(
+                pending["name"], pending["expression"]
+            )
+        except Exception as exc:  # noqa: BLE001 - a store failure is a warning
+            self._log.add_warning(
+                f"Failed to store invalid entry: {exc}", "Calculator"
+            )
+
+    @Slot(str)
+    def calculate(self, expression: str) -> None:
+        """Submit an expression in code mode to the calculation backend."""
+        self._log.add_info(expression, "Calculator")
+        self._start_request(
+            "evaluate",
+            expression,
+            {"kind": "evaluate", "expression": expression},
+        )
+
+    @Slot(str, str, str)
+    def calculateAssign(self, name: str, operator: str, value_str: str) -> None:
+        """Submit an assignment in assign mode to the calculation backend.
+
+        The model still validates the target before evaluating anything, so a
+        rejected write never reaches the history, the "= value" log line or the
+        variable store. An unparsable value is still kept as an invalid (NaN)
+        entry, so the user's input survives.
+        """
+        self._log.add_info(f"{name} {operator} {value_str}", "Calculator")
+        self._start_request(
+            "assign",
+            Assignment(name, operator, value_str),
+            {
+                "kind": "assign",
+                "expression": value_str,
+                "name": name,
+                "operator": operator,
+            },
+        )
 
     def _save_variable(self, name: str, value: Any) -> None:
         """Save an assigned variable, warning about the names input depends on."""

@@ -22,9 +22,9 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from sympy import Integer, Matrix, Rational, Symbol
+from sympy import Integral, Integer, Matrix, Rational, Symbol, cos, sin
 
-from PySide6.QtCore import QObject
+from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QTextDocument
 
 import warnings
@@ -44,6 +44,7 @@ from python.model.calculator import (
 )
 from python.model.plotting import plot_series, plot_variables
 from python.model.variable import VariableManager, is_sympy_name, validate_name
+from python.model.variants import variants
 from python.latex_render import LatexStyle, MAX_LATEX_CHARS, render_data_url
 from python.settings import DEFAULTS, SettingsStore
 from python.viewmodel.history_viewmodel import HistoryModel
@@ -325,6 +326,22 @@ def test_an_integral_plots_the_integrand_and_the_antiderivative():
     assert integrated.label == "∫ f dx"
 
 
+def test_an_unevaluated_integral_is_not_handed_to_the_plotter():
+    """An `Integral` has no GLSL spelling. Its integrand is the curve the plot
+    can show; the evaluated form belongs to the result card's `doit` row."""
+    result = Calculator().evaluate("Integral(sin(x**2), x)")
+    assert isinstance(result.value, Integral)
+    (series,) = plot_series(result.value, result.origin)
+    assert series.expression == sin(X**2)
+    assert series.role == "source"
+
+    # The same rule applies when `doit()` would have a closed form: the plot
+    # still skips the unevaluated result object rather than evaluating it.
+    closed = Calculator().evaluate("Integral(x**2, x)")
+    (series,) = plot_series(closed.value, closed.origin)
+    assert series.expression == X**2
+
+
 def test_a_solution_plots_the_expression_it_solved():
     result = Calculator().evaluate("solve(x**2 - 4, x)")
     (series,) = plot_series(result.value, result.origin)
@@ -408,15 +425,200 @@ def test_invalid_entries_are_excluded_from_evaluation():
 
 
 # --------------------------------------------------------------------------
+# Alternative forms: the result card offers only forms that say something new
+# --------------------------------------------------------------------------
+
+def test_variants_keep_only_forms_that_differ_from_the_answer():
+    # The model simplifies before answering, so a re-simplify is normally a
+    # duplicate and must not become a row; here it is given the *unsimplified*
+    # identity to show the candidate is real when it does change something.
+    assert [v.kind for v in variants(sin(X) ** 2 + cos(X) ** 2)] == ["simplify"]
+    assert [v.kind for v in variants(Integer(5))] == []
+    assert [v.kind for v in variants(Symbol("x") + 1)] == []
+
+
+def test_variants_offer_the_numeric_expanded_and_factored_forms():
+    numeric = variants(Rational(1, 3))
+    assert [v.kind for v in numeric] == ["numeric"]
+    assert numeric[0].expression == "0.333333333333333"
+    assert numeric[0].latex                                      # typeset too
+
+    expanded = variants((X + 1) ** 2)
+    assert [v.kind for v in expanded] == ["expand"]
+    assert expanded[0].expression == "x**2 + 2*x + 1"
+
+    factored = variants(X ** 2 - 1)
+    assert [v.kind for v in factored] == ["factor"]
+    assert factored[0].expression == "(x - 1)*(x + 1)"
+
+
+def test_variants_evaluate_unevaluated_forms():
+    # The parser keeps `Integral` as typed; `doit()` is the extra form the card
+    # offers, and there is no other candidate for x**3/3.
+    closed = variants(Integral(X**2, X))
+    assert [v.kind for v in closed] == ["doit"]
+    assert closed[0].expression == "x**3/3"
+    assert closed[0].latex
+
+    # Even when sympy can only answer with special functions, the evaluated
+    # form is still a row (the renderer is sympy's, not the plot's).
+    special = variants(Integral(sin(X**2), X))
+    assert [v.kind for v in special] == ["doit"]
+    assert "fresnels" in special[0].expression
+    assert special[0].latex
+
+
+def test_variants_stop_at_their_degree_and_type_guards():
+    # Expanding/ factoring this would be the hang the card exists not to cause.
+    assert variants((X + 1) ** 13) == ()
+    # solve() answers with a list, which has no expansion or factoring.
+    assert variants([X, Y]) == ()
+    assert variants(Matrix([[1, 2]])) == ()
+
+
+def test_calculator_exposes_rendered_variants_and_clears_them():
+    vm = new_vm()
+    vm.calculator.calculate("sqrt(2)")
+    rows = vm.calculator.variants
+    assert [row["kind"] for row in rows] == ["numeric"]
+    assert rows[0]["expression"] == "1.41421356237310"
+    assert rows[0]["latex"]
+    assert rows[0]["latexUrl"].startswith("data:image/svg+xml")
+    assert rows[0]["naturalWidth"] > 0
+
+    # A theme/font change redraws the card's artwork, not only the main strip.
+    first_url = rows[0]["latexUrl"]
+    vm.calculator.set_latex_style(LatexStyle(size=48))
+    assert vm.calculator.variants[0]["latexUrl"] != first_url
+
+    # Errors and a cleared result have no forms.
+    vm.calculator.calculate("bar(2)")
+    assert vm.calculator.variants == []
+    vm.calculator.calculate("x**2 - 1")
+    assert [row["kind"] for row in vm.calculator.variants] == ["factor"]
+    vm.calculator.clear_result()
+    assert vm.calculator.variants == []
+
+
+# --------------------------------------------------------------------------
 # ViewModel invariants: a rejected write leaves no variable behind, but it does
 # leave an error card (the input has to come back so a typo can be fixed)
 # --------------------------------------------------------------------------
 
-def new_vm():
+class DeferredBackend(QObject):
+    """A backend that records requests and lets the test answer them.
+
+    The same signals as `InlineBackend`/`ProcessBackend`, so the viewmodel's
+    busy/timeout/cancel path can be exercised without a process or event loop.
+    """
+
+    finished = Signal(int, object, object)
+    timedOut = Signal(int)
+    failed = Signal(int, str)
+    timeout_seconds = 10.0
+
+    def __init__(self):
+        super().__init__()
+        self.requests = []
+        self.cancels = 0
+
+    def submit(self, request_id, kind, payload, scope):
+        self.requests.append((request_id, kind, payload, scope))
+
+    def cancel(self):
+        self.cancels += 1
+
+    def shutdown(self):
+        pass
+
+
+def new_vm(backend=None):
     """A root viewmodel over a throwaway settings store (temp dir, no Qt app)."""
     store = SettingsStore(temp_dir() / "config.yaml")
     store.load()
-    return MainViewModel(store)
+    return MainViewModel(store, calculation_backend=backend)
+
+
+def test_calculation_waits_for_the_backend_and_reports_busy():
+    backend = DeferredBackend()
+    vm = new_vm(backend)
+    assert vm.calculator.backendStatus == "ready"
+
+    vm.calculator.calculate("x + 1")
+    request_id, kind, payload, _scope = backend.requests[-1]
+    assert (kind, payload) == ("evaluate", "x + 1")
+    assert vm.calculator.backendBusy is True
+    assert vm.calculator.backendStatus == "calculating"
+
+    result = Calculator().evaluate("x + 1", {})
+    backend.finished.emit(request_id, result, variants(result.value))
+    assert vm.calculator.backendBusy is False
+    assert vm.calculator.backendStatus == "ready"
+    assert vm.calculator.resultText == "x + 1"
+    assert vm.history.count == 1
+
+
+def test_a_backend_timeout_becomes_a_failure_and_is_recorded():
+    backend = DeferredBackend()
+    vm = new_vm(backend)
+    vm.calculator.calculate("solve(x**2 - 4, x)")
+    request_id = backend.requests[-1][0]
+
+    backend.timedOut.emit(request_id)
+    assert vm.calculator.backendBusy is False
+    assert vm.calculator.backendStatus == "timedout"
+    assert vm.calculator.isError is True
+    assert "timed out after 10 s" in vm.calculator.errorMessage
+    assert vm.calculator.resultText == ""
+    assert "timed out" in history_role(vm, 0, HistoryModel.ErrorRole)
+    assert vm.history.count == 1
+
+
+def test_a_timed_out_assignment_does_not_mark_the_variable_invalid():
+    backend = DeferredBackend()
+    vm = new_vm(backend)
+    vm.calculator.calculateAssign("k", "=", "x +")
+    backend.timedOut.emit(backend.requests[-1][0])
+
+    assert vm.calculator.backendStatus == "timedout"
+    assert vm.variables.model.count == 0
+    assert "timed out" in history_role(vm, 0, HistoryModel.ErrorRole)
+
+
+def test_a_new_request_cancels_the_old_one_and_ignores_its_reply():
+    backend = DeferredBackend()
+    vm = new_vm(backend)
+    vm.calculator.calculate("1 + 1")
+    first = backend.requests[-1][0]
+    vm.calculator.calculate("2 + 2")
+    second = backend.requests[-1][0]
+    assert backend.cancels >= 1
+
+    first_result = Calculator().evaluate("1 + 1", {})
+    backend.finished.emit(first, first_result, variants(first_result.value))
+    assert vm.calculator.backendBusy is True
+    assert vm.calculator.resultText == ""
+
+    second_result = Calculator().evaluate("2 + 2", {})
+    backend.finished.emit(second, second_result, variants(second_result.value))
+    assert vm.calculator.resultText == "4"
+    assert vm.calculator.backendStatus == "ready"
+
+
+def test_clear_result_cancels_the_inflight_request():
+    backend = DeferredBackend()
+    vm = new_vm(backend)
+    vm.calculator.calculate("1 + 1")
+    request_id = backend.requests[-1][0]
+
+    vm.calculator.clear_result()
+    assert backend.cancels >= 1
+    assert vm.calculator.backendBusy is False
+    assert vm.calculator.backendStatus == "ready"
+
+    result = Calculator().evaluate("1 + 1", {})
+    backend.finished.emit(request_id, result, variants(result.value))
+    assert vm.calculator.resultText == ""
 
 
 def test_rejected_assignment_adds_an_error_card_and_no_variable():
@@ -833,6 +1035,24 @@ def test_attaching_the_colouring_paints_the_named_family():
     assert "#d33682" in colors, colors          # the digit
 
 
+def test_a_live_theme_change_recolours_attached_highlighters():
+    """Switching the theme from Settings navigates away and rebuilds the page;
+    an OS scheme change does not. The attached highlighter must be recoloured
+    in place, or the input keeps the old palette while the rest flips."""
+    store = SettingsStore(temp_dir() / "config.yaml")
+    store.load()
+    vm = MainViewModel(store)
+
+    target = StubTextDocument("(1)")
+    vm.attachCodeHighlighting(target, False)
+    light = target.colors()
+    assert len(vm._code_highlighters) == 1
+
+    vm.refreshCodeHighlighting(True)
+    dark = target.colors()
+    assert light and dark and light != dark, (light, dark)
+
+
 def test_a_family_with_no_bracket_colours_follows_vscode():
     """A family that names no bracket colours still colourises brackets.
 
@@ -1163,6 +1383,35 @@ def test_a_result_in_x_reaches_the_plot_and_a_plain_number_clears_it():
     vm.calculator.calculate("2 + 2")
     assert vm.calculator.hasPlot is False
     assert vm.calculator.plot.curves.rowCount() == 0
+
+
+def test_an_unevaluated_integral_plots_only_the_integrand():
+    """The regression behind the GLSL error: an `Integral` result used to reach
+    the shader printer. Now the plot carries the integrand, and the result
+    card's `doit` row carries the evaluated form."""
+    vm = new_vm()
+    vm.calculator.calculate("Integral(sin(x**2), x)")
+    assert vm.calculator.hasPlot is True
+    curves = vm.calculator.plot.curves
+    assert curves.rowCount() == 1
+    assert curves.at(0).label == "f"
+    assert curves.at(0).error == ""
+    assert vm.calculator.plotError == ""
+    assert [row["kind"] for row in vm.calculator.variants] == ["doit"]
+
+
+def test_a_special_function_result_is_dropped_instead_of_erroring():
+    """`integrate(sin(x**2), x)` answers with Fresnel/gamma functions, which the
+    GLSL printer cannot spell. The integrand stays plottable; the result curve is
+    skipped, so the card shows no `PrintMethodNotImplementedError`."""
+    vm = new_vm()
+    vm.calculator.calculate("integrate(sin(x**2), x)")
+    assert vm.calculator.hasPlot is True
+    curves = vm.calculator.plot.curves
+    assert curves.rowCount() == 1
+    assert curves.at(0).label == "f"
+    assert curves.at(0).error == ""
+    assert vm.calculator.plotError == ""
 
 
 def test_the_derivative_plots_two_labelled_curves():

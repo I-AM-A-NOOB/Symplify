@@ -48,6 +48,8 @@ class ErrorKind(Enum):
         UNSUPPORTED: a well-formed request this model does not implement.
         INTERNAL: sympy raised something that is not a syntax problem — a bug
             in the request's domain or in this layer, never the user's typo.
+        TIMEOUT: the request exceeded the backend's deadline and was cancelled;
+            raised by the frontend/backend boundary, never by the model itself.
     """
 
     SYNTAX = auto()
@@ -55,6 +57,7 @@ class ErrorKind(Enum):
     INVALID_NAME = auto()
     UNSUPPORTED = auto()
     INTERNAL = auto()
+    TIMEOUT = auto()
 
 
 @dataclass(frozen=True)

@@ -16,10 +16,11 @@ built by CI on Windows.
 ## Source layout
 
 ```
-main.py                         # Entry / composition root. Builds MainViewModel,
-                                # registers flat QML context properties, then
-                                # RinUIWindow loads qml/MainWindow.qml.
-                                # ROOT = exe dir when frozen (Nuitka), else __file__ dir.
+main.py                         # Entry / composition root. Builds MainViewModel with the
+                                # ProcessBackend (10 s calculation deadline), registers flat
+                                # QML context properties, then RinUIWindow loads
+                                # qml/MainWindow.qml. Calls multiprocessing.freeze_support()
+                                # first. ROOT = exe dir when frozen (Nuitka), else __file__ dir.
 python/
   model/                        # PURE PYTHON, must never import Qt. The Model owns what an
                                 # input MEANS (syntax, name resolution, failure kinds).
@@ -43,6 +44,11 @@ python/
                                 #   transform policy (diff/integrate show the source *and* the
                                 #   result; solve shows the expression it solved) and the
                                 #   plotting-variable warning. See Plotting.
+    variants.py                 #   variants(value) -> the alternative forms the result card
+                                #   offers: simplify (only when it differs), doit() for the
+                                #   unevaluated Integral/Derivative/Sum/Product/Limit, N(),
+                                #   expanded and factored. Deduped and guarded; zero Qt.
+                                #   See Rendering.
   brackets.py                   # Rainbow bracket pairing + nesting layers + parse_colors() for
                                 # the custom palette (zero Qt). Ported from the v1 QWidget app's
                                 # RainbowBracketsHighlighter.
@@ -68,12 +74,19 @@ python/
                                 # them to the log viewmodel, so Qt's warnings and uncaught
                                 # exceptions reach the Log page instead of a console a windowed
                                 # build does not have.
+  backend_worker.py             # The calculation backend's spawned child (zero Qt): a pickled
+                                # request loop over a pipe, one Calculator, disposable by design.
+                                # See Calculation backend.
   viewmodel/                    # Qt bridge (QObject + models). The ONLY layer that imports Qt
                                 # (besides main.py). State that must survive page switches lives here.
     input_mode.py               #   InputMode (CODE=0 / ASSIGN=1) — UI state, not model state
+    calculation_backend.py      #   InlineBackend (synchronous: tests/headless) and
+                                #   ProcessBackend (spawned worker, hard timeout, cancel/stale
+                                #   request ids). See Calculation backend.
     main_viewmodel.py           #   Root VM; aggregates children; signals sendToCode/sendToAssign
     calculator_viewmodel.py     #   Result state, LaTeX data-URL, input persistence, clear_result,
-                                #   and the qmlmathplot.Plot (curves, legend switch, theme, error)
+                                #   the rendered `variants` rows (see Rendering), and the
+                                #   qmlmathplot.Plot (curves, legend switch, theme, error)
     variables_viewmodel.py      #   VariablesModel (3-col: name/expr/type) + CRUD + Qt edit protocol
     history_viewmodel.py        #   HistoryModel (QAbstractListModel, newest first, lazy LaTeX)
     search.py                   #   SearchFilterModel + Variables/HistoryFilterModel: the pages'
@@ -123,11 +136,16 @@ qml/
                                 #   MathStrip (the formula area: HScrollView + LatexImage + the
                                 #     room its overlay bar needs — the one place that geometry
                                 #     lives; HScrollView and LatexImage are its pieces),
+                                #   VariantsCard (the Calculator's "other forms" card below that
+                                #     strip: one expression + one MathStrip per variant, the
+                                #     History card's right-click menu, Copy all; each variant
+                                #     row is its own ordinary Tab stop — see Rendering),
                                 #   RadioSettingRow / RadioSettingGroup / SettingFieldRow (the
                                 #     settings-row shapes RinUI's own SettingItem cannot express;
                                 #     SettingRowBase is the SettingItem both rows are built on),
-                                #   KeyboardPanel (tab row scrolls by mouse wheel, gallery-style —
-                                #     see HScrollView below), SearchBar, CommandBar (a row of
+                                #   KeyboardPanel (tab row scrolls by mouse wheel, gallery-style;
+                                #     two NoFocus acrylic caret pills step it by one wheel notch and
+                                #     hide at its ends — see HScrollView below), SearchBar, CommandBar (a row of
                                 #     `Action`s that folds what does not fit into an overflow
                                 #     menu; see the toolbar bullet under Rendering),
                                 #   HistoryCard (one history card: the delegate the History page's
@@ -189,7 +207,10 @@ installer/
                                 # scripts/release.py, which passes the version, the platform, the
                                 # architecture and the Nuitka output directory in as /D defines —
                                 # never edit a version into it. It installs the tree and must NOT
-                                # create `data/` (see the packaging bullets under Versioning).
+                                # create `data/` (see the packaging bullets under Versioning). The
+                                # uninstaller removes the app dir and Qt's local cache, asks
+                                # (interactively) about the config, and uses Inno's default setup
+                                # icon until the icon redesign.
 scratch/                        # Preserved experiments — NOT part of the app and not
                                 # maintained with it: test_plot.py is the SymPy->GLSL GPU
                                 # plotter prototype, the future plotting track's seed
@@ -295,7 +316,11 @@ transparent corner, not `srgba(255,255,255,1)`.
    `calcVM`, `varsVM`, `variablesModel`, `variablesFilter`, `historyVM`, `historyFilter`, `logVM`,
    `settingsVM`, `keyboardTabs`.
 4. **Keyboard panel keys & its SelectorBar tabs use `focusPolicy: Qt.NoFocus`** so typing stays
-   in the focused input. Everywhere else leave focus policy at defaults (focus ring + Ctrl+Tab).
+   in the focused input. The tab row next to them is mouse/touch only: two acrylic caret
+   `PillButton`s float over its ends and step the strip by one wheel notch (`notchStep`, no
+   selection change), and those buttons are `NoFocus` too — no keyboard navigation, no focus
+   ring. Each pill hides once the row has reached that side, so a row that fits shows neither.
+   Everywhere else leave focus policy at defaults (focus ring + Ctrl+Tab).
 5. **LaTeX is theme-aware, through one shared `LatexStyle`** (`python/latex_render.py`): the theme
    supplies the ink, the settings store the size and the font file, `MainViewModel` assembles both
    into one frozen value and hands it to every surface that renders LaTeX —
@@ -326,6 +351,55 @@ transparent corner, not `srgba(255,255,255,1)`.
    Never re-enable RinUI's persistence, never write a settings file anywhere else, and **never
    `import RinUI` before `prepare()` has run** — that is what keeps `./RinUI/` from appearing in the
    project or install directory.
+9. **Calculation leaves the UI thread through the backend, and only through it.**
+   `CalculatorViewModel.calculate/calculateAssign` submit `(kind, payload, scope)` and return;
+   `Success | Failure` plus the variant rows (or a timeout/crash) arrive later as a signal. The default
+   `InlineBackend` is synchronous and is what tests/headless callers get; `main.py` passes
+   `ProcessBackend(10 s)`, which spawns `python/backend_worker.py` (zero Qt) and terminates it
+   at the deadline. The VM allocates request ids before submitting (so the synchronous and
+   asynchronous backends share one path), ignores stale/cancelled ids, cancels the previous
+   request when a new one is submitted, and cancels again on `clear_result`. A timeout becomes
+   `Failure(ErrorKind.TIMEOUT)`, is recorded in History and Log, and must **not** mark an
+   Assign-mode value invalid. The QML status sits in the result header
+   (`backendStatus`: ready / calculating / timedout / failed). `multiprocessing.freeze_support()`
+   is the first statement in `main()`; Nuitka's always-on multiprocessing plugin routes the
+   spawned executable back to the worker. The Variables page's inline edits still call the
+   in-process `Calculator` synchronously — that is the next slice, not this boundary.
+
+## Calculation backend
+
+`python/viewmodel/calculation_backend.py` is the only transport the Calculator page uses.
+
+- **Contract.** `submit(request_id, kind, payload, scope)`, `cancel()`, `shutdown()`, and the
+  signals `finished(int, object)`, `timedOut(int)`, `failed(int, str)`. `payload` is the
+  expression text (`evaluate`) or an `Assignment` (`assign`) — never a display string assembled
+  in the VM, and never a sympy object interpreted by QML.
+- **`InlineBackend`** keeps the old behaviour for tests and headless callers: evaluate in this
+  process and emit before `submit` returns. It has no timeout.
+- **`ProcessBackend`** starts `python/backend_worker.worker_main` with a `spawn` context and a
+  duplex `Pipe`. The parent sends `(request_id, kind, payload, scope)`; the child keeps one
+  `Calculator` and sends `(request_id, Success | Failure, variants)` back. Sympy values cross
+  by pickle, which is why `Success.origin`, the plotted expression and the variant values
+  survive intact. **The variants are computed in the worker**, not in the ViewModel: `doit()`,
+  `expand`, `factor` and `N` are symbolic work, and putting them before the reply keeps them
+  inside the same deadline. The frontend only renders each row's LaTeX. The worker is
+  disposable and must not import Qt.
+- **One request at a time.** A new submission cancels the old worker; `clear_result` does the
+  same. The poll timer (20 ms) reads one reply; a reply for a cancelled id is ignored by the VM.
+- **Timeout.** The deadline is `time.monotonic() + timeout_seconds` and includes worker startup.
+  On expiry the process is `terminate()`d, joined, and replaced on the next request; the VM
+  reports `Calculation timed out after N s.` and sets `backendStatus = "timedout"`. There is no
+  partial result: a timeout clears the result, plot and variants like any failure.
+- **Crash.** `EOFError`/`OSError` from the pipe, or a failed process start/send, emits `failed`;
+  the VM reports `Calculation backend failed: …`, sets status `"failed"` and keeps the original
+  input in history. The next request starts a fresh worker.
+- **Status UI.** The result header shows `Backend: ready`, a spinner + `Backend: busy`,
+  `Backend: timed out`, or `Backend: failed`; the timeout/failure states use the critical theme
+  colour. The outcome box carries the detailed failure text.
+- **Tests.** `tests/test_model.py` uses a `DeferredBackend` (the same signal contract) to lock
+  busy/timeout/cancel/clear and stale-id behaviour without spawning anything. The process
+  boundary is a smoke test: submit `2 + 2` → `Success(4)`, submit the float-solve hang →
+  `timedOut` in ~timeout, submit `3 + 3` → a fresh worker answers.
 
 ## Known RinUI / Qt traps (learned the hard way)
 
@@ -1092,6 +1166,73 @@ transparent corner, not `srgba(255,255,255,1)`.
   all (always off and always on both left it visible), and wrapping it in a `Loader` broke its
   parenting — the attached machinery positions the bar as a child of the flickable. The
   `KeyboardPanel`'s tab row uses the mode; the formula strip keeps the native behaviour and its bar.
+  The same component owns `revealTab(item)`: an eased pan that brings one content item fully into
+  view (with 8 px of air on the side it travelled towards, clamped to the row), using the *same*
+  `scrollAnimation` as the wheel so a notch and a button click feel identical. The tab row calls
+  it whenever `SelectorBar.currentIndex` changes (a tab click), and the same animation backs
+  `scrollBy(delta)` / `scrollTo(target)` — the wheel and the row's two overlay pills.
+  Those pills are SwipeView-style movement for mouse/touch: 28 px `PillButton`s with only
+  `ic_fluent_caret_{left,right}_20_regular`, anchored 4 px above the row's vertical centre and
+  over its ends, `NoFocus`, and `checkable: false` (the base pill is a toggle). Their
+  `background` is RinUI's `AcrylicBrush` (sourced from the strip, so it frosts the tabs it
+  covers) with the app's card border and a hover wash. A click is a **step**, not a jump to the
+  end: it moves `notchStep` (240 px — one wheel notch, the value the row has always used) and
+  only the final click clamps to the strip's end. The wheel and the pills therefore share both
+  the distance and the 200 ms animation.
+  `canScrollLeft`/`canScrollRight` (0.5 px of slack) decide which pill is shown — the one on a
+  side that has reached its end disappears, so a row with no overflow shows neither. The key
+  grid itself still switches instantly through `StackLayout`: the row scrolls, it does not page.
+- **Unevaluated symbolic forms are never handed to the plotter.** `_series` rejects any
+  expression containing an `Integral`, `Derivative`, `Sum`, `Product` or `Limit` atom: those
+  have no GLSL spelling (the old failure was `PrintMethodNotImplementedError` from
+  `qmlmathplot.model._PlotGLSLPrinter` on `Integral`). `Integral(sin(x**2), x)` therefore
+  plots **only the integrand** `f = sin(x**2)`; the evaluated Fresnel/gamma form stays in the
+  result card's `doit` row. The ViewModel adds a second, printer-level guard:
+  `_supported_series` calls qmlmathplot's own `func_glsl`, so **any** expression the GLSL
+  printer cannot spell is dropped from the plot (with one Log line) while the remaining
+  curves stay — measured: `integrate(sin(x**2), x)` keeps `f` and drops the Fresnel/gamma
+  result instead of showing `PrintMethodNotImplementedError`. This is the layer split: the
+  model decides what is *meaningful and plottable* and performs symbolic evaluation;
+  qmlmathplot prints the numeric expression and reports unsupported nodes with a typed error.
+  Plotting an actually unevaluated integral would mean numeric integration inside the
+  renderer — an upstream feature, not a printer case.
+- **The Calculator's "other forms" are one card under the formula strip.** The model
+  (`python/model/variants.py`) decides what is worth showing, with no Qt: `simplify(value)`
+  only when it spells something different (normally it does not — every result is already
+  simplified, so that row is the exception the "if any" allows); `value.doit()` when the
+  result contains an unevaluated `Integral`, `Derivative`, `Sum`, `Product` or `Limit`
+  (the parser keeps those as typed, so this is the "what does it become" row — even when the
+  answer needs special functions, e.g. `Integral(sin(x**2), x)` → Fresnel/gamma);
+  `N(value)` only for number-valued results that are neither `Integer` nor already `Float`;
+  and `expand`/`factor` only for polynomials in plain `Symbol` generators whose total degree
+  is at most 12 (`(x + 1)**1000` is deliberately not expanded). Candidates are deduped by
+  their plain string against the answer, non-`Expr` results (`solve`'s list, matrices) are
+  skipped, and any candidate that raises is simply not offered.
+  The **backend** computes these rows (see Calculation backend), so `doit()` and the other
+  symbolic candidates share the request's timeout; `CalculatorViewModel` only renders each
+  surviving row's LaTeX (and re-renders from `set_latex_style`), and exposes `variants` as a
+  `QVariantList` of
+  `{kind, expression, latex, latexUrl, naturalWidth, naturalHeight}`; failures and
+  `clear_result()` empty it. `VariantsCard` reuses the History card's pieces rather than its
+  delegate: a `CopyableLabel` per expression, a `MathStrip` per formula, the hover tint, and
+  the same close-then-reopen right-click menu (a QQC2 popup stays visible through its exit
+  transition). Rows are separated by spacing, not divider lines. **Each variant row** is the
+  ordinary Tab stop: every row is its own `Control` (`focusPolicy: Qt.StrongFocus`) with the
+  app's standard `ProjectFocusIndicator` ring — no History-style selection, current index or
+  accent bar, and no arrow-key list navigation. Enter, Space, the Menu key and Shift+F10 open
+  that row's menu at the History card's default place; once open, Qt's menu owns arrows,
+  Enter and Escape. The card itself is `NoFocus`; there is no card-level focus target. It has
+  no timestamp and no send-to-input button: it is one result's reference card, not a list.
+  The row menu copies that row's expression or LaTeX source; **Copy all** copies every row as
+  `Label: expression` lines.
+- **The Calculator's Code/Assign panes slide, they do not swap.** Both inputs are siblings of one
+  clipped `Item` (`inputStage`): each `x` is bound to its side (`0` / `-width` and `width` / `0`),
+  with a 180 ms `OutCubic` `Behavior on x`. The behaviour is disabled until
+  `Component.onCompleted`, because a page rebuilt while the VM is in Assign mode would otherwise
+  animate its first layout from the Code position. The two panes are *disabled*, not hidden, when
+  off-stage — `visible: false` would cancel the slide — which also keeps the inactive input out of
+  the focus chain. The stage's `Layout.preferredHeight` still follows the mode, and the stage clips
+  the pane that is crossing its edge.
 - History renders each entry's LaTeX **lazily, per row, on approach**, and the pieces of that are
   worth stating because two obvious implementations do not work. Reading the `latexUrl` role used to
   render (the model's `_svg_url` caches the SVG on the entry and emits `dataChanged` for the
@@ -1249,6 +1390,20 @@ One lexer, one span list, two renderers. Anything that colours code contributes 
   rebuild on navigation is what causes. Verified from the rendered pixels, no restart: the same
   expression gives `#b5cea8` digits under Dark+ (dark), `#098658` and `#ee0000` under Light+ once the
   UI is switched to Light, and `#d33682` under Solarized.
+  **A live theme change does not rebuild the page, so the highlighter is recoloured in place.**
+  `attachCodeHighlighting` registers each highlighter by its `QTextDocument` in
+  `MainViewModel._code_highlighters` (the document owns the highlighter; its `destroyed` signal
+  drops the entry). `CodeHighlighter.set_palette` swaps the styles/bracket colours, clears the
+  colour-keyed format cache and recomputes; `MainViewModel.refreshCodeHighlighting(dark)` calls it
+  for every registered document. `MainWindow` invokes that slot from
+  `Theme.currentThemeChanged` (the OS scheme path **and** the Settings path) and from
+  `settingsVM.changed` (a family/bracket change). This is the bug the Settings path used to hide:
+  changing the theme there means navigating to Settings, which destroys and rebuilds the Calculator
+  page on return, so a fresh highlighter was attached; an OS scheme change leaves the live document
+  (and its old fixed palette) in place. `test_a_live_theme_change_recolours_attached_highlighters`
+  covers the recolor seam; the QML wiring was measured with both light→dark and dark→light while the
+  Calculator page stayed alive — both attached highlighters' styles and bracket colours matched the
+  new palette.
 - **`MainViewModel._settings` is the settings *viewmodel*, not the store.** Read settings through its
   properties (`self._settings.codeTheme`, like `latexSize` beside it). A store call on it
   (`self._settings.get("workspace.code_theme")`) raises *inside the QML slot*, where it is a line in
@@ -1915,6 +2070,35 @@ Data-file pitfalls for frozen builds (update this list when you add data-reading
   `Compression=lzma2/ultra64` + `SolidCompression=yes` (78 s and 64 MB against the zip's 97 MB).
   The script refuses to compile without `MyAppVersion`, so an unversioned setup cannot be built by
   accident; its other defaults are what the IDE compiles with.
+- **Uninstall cleanup is explicit, and only the config is optional.** Inno removes the files it
+  installed but leaves a non-empty `{app}` behind; `[UninstallDelete]` therefore removes
+  `Type: filesandordirs; Name: "{app}"` (the directory is exclusively ours) and
+  `{localappdata}\symplify` (Qt's `QStandardPaths::CacheLocation`, based on the exe name — a
+  disposable cache, not the settings). The settings are `%APPDATA%\Symplify`; the uninstaller must
+  not delete them silently. `CurUninstallStepChanged(usPostUninstall)` asks via a `[CustomMessages]`
+  prompt and `DelTree`s the directory only on Yes. Silent uninstalls (which is how an upgrade runs
+  the previous uninstaller) skip the prompt and keep the config. Measured with a compiled setup:
+  install to a temporary directory, add a leftover file, create a cache marker, silent uninstall →
+  `{app}` and `%LOCALAPPDATA%\symplify` gone, config untouched; the real cache was backed up and
+  restored around the test.
+- **A second run is a clean update.** Inno detects the same `AppId` and reuses the previous
+  directory, but by itself it only copies files over — files that disappeared from the new build
+  would remain. `PrepareToInstall` reads `InstallLocation` from the AppId's uninstall key in the
+  current mode (`HKCU`/`HKLM`) and synchronously removes the old app directory **before** `[Files]`,
+  then clears the Qt cache. It deliberately does **not** launch the old uninstaller: that copies
+  itself to `%TEMP%` and returns while the copy is still deleting, which raced the new uninstaller
+  and left Add/Remove pointing at a deleted `unins000.exe` (measured). The configuration lives
+  outside `{app}`, so an update keeps it; the new setup writes a fresh uninstaller. Verified with
+  two compiled dummy versions: silent v1→v2 leaves only v2's marker, `unins000.exe` exists and
+  works, the cache is gone; a subsequent uninstall removes the directory.
+- **Installer text is localizable from the start.** `[Languages]` declares `english` and the
+  uninstall prompt lives in `[CustomMessages]` as `english.RemoveConfigPrompt`; adding a language
+  means adding its message blocks, not editing `[Code]`. The privilege labels are left to Inno:
+  the per-user default (`PrivilegesRequired=lowest`, also what a silent install uses) is correctly
+  labelled "(recommended)", and the built-in text is already translated by Default.isl.
+- **Setup's icon is Inno's default for now.** `SetupIconFile` and `UninstallDisplayIcon` are
+  deliberately absent until the app icon redesign; the Start-Menu shortcut still takes the exe's
+  embedded icon, because it is the application itself, not Setup artwork.
 - The `AppId` is a GUID with the architecture appended: that is what makes an upgrade replace the
   previous installation instead of sitting next to it, while still letting an arm64 build be installed
   on the same machine later without either one uninstalling the other. Never change it — a new `AppId`
@@ -1998,7 +2182,9 @@ draw (`python/model/plotting.py`, zero Qt), the **object** every surface binds t
   arrow held would keep panning for ever (measured: the camera stops at its last position). The
   frame carries `Layout.leftMargin`/`rightMargin: 3`: the ring draws two pixels outside its control
   and the result column is clipped by its `Flickable`, so without the gutter the ring's sides are
-  cut off.
+  cut off. The frame is `visible: calcVM.hasPlot`: a `ColumnLayout` skips an invisible child, so an
+  empty result leaves **no 4:3 hole** — the placeholder card is gone, and the outcome box's
+  `Press Ctrl+Return to calculate` hint is the only empty-state text.
 - **`x` and `y` start as ordinary variables** — `plotting.plot_variables()` is passed by `main.py`
   into `MainViewModel(initial_variables=…)` (the viewmodel's own default stays empty, which is what
   the tests build). They are not hidden: the Variables page lists them as `Symbol` rows. Touching one

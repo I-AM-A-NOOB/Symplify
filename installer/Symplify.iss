@@ -60,12 +60,15 @@ AllowNoIcons=yes
 ; download that ships the empty `data/`; this one installs the system location.
 OutputDir={#OutputDir}
 OutputBaseFilename=Symplify-v{#MyAppVersion}-{#Platform}-{#Arch}-setup
-SetupIconFile=..\icon\Symplify.ico
-UninstallDisplayIcon={app}\{#MyAppExeName}
 
+; No `SetupIconFile` / `UninstallDisplayIcon` for now: the redesign is still
+; pending, so Setup and Add/Remove use Inno's own default artwork instead of the
+; current app icon. The Start-Menu shortcut still takes the exe's icon, because
+; that is the application itself.
+;
 ; `dynamic` follows the user's Windows light/dark setting; `modern` is the flat
 ; wizard that matches it. No custom images or style files: the default artwork
-; already ships dark-mode variants, and the setup's own icon is ours.
+; already ships dark-mode variants.
 WizardStyle=modern dynamic
 ; A 64-bit Setup, so the dictionary size is not capped at 1 GB and the outer
 ; archive stays small; `ultra64` (64 MB) is 742 MB of memory while compressing,
@@ -99,9 +102,22 @@ VersionInfoDescription={#MyAppName} setup
 VersionInfoProductName={#MyAppName}
 VersionInfoProductVersion={#MyAppVersion}
 
+[Languages]
+; The default language is declared explicitly so the `english.` prefixes in
+; [CustomMessages] are the only place a future translation has to touch. The
+; privilege labels keep Inno's own text (including "(recommended)" on the
+; per-user default), so they localize with Default.isl.
+Name: "english"; MessagesFile: "compiler:Default.isl"
+
 [Tasks]
 ; Unchecked: an installer that covers the desktop with icons is a complaint.
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+
+[CustomMessages]
+; Setup-owned strings live here, language-prefixed, so adding a language later
+; is a new block rather than a code edit. `RemoveConfigPrompt` is used by the
+; uninstaller's [Code] below.
+english.RemoveConfigPrompt=Do you want to remove Symplify's configuration files? Choose No to keep them for a later reinstall.
 
 [Files]
 ; The whole Nuitka tree. `ignoreversion` on purpose: these are one build's files,
@@ -109,9 +125,88 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 ; the previous release's DLLs.
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+[UninstallDelete]
+; Inno removes only the files it installed and then leaves a non-empty directory
+; behind. The application directory is exclusively ours, so remove it whole —
+; this covers the per-machine Program Files case and any leftover there.
+Type: filesandordirs; Name: "{app}"
+; Qt's disk cache (QStandardPaths::CacheLocation is based on the executable name
+; and lands in %LOCALAPPDATA%\symplify). It is disposable and not the settings
+; file; the optional config deletion is a separate prompt in [Code].
+Type: filesandordirs; Name: "{localappdata}\symplify"
+
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#MyAppName}}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  RootKey: Integer;
+  Key: String;
+  OldDir: String;
+  CacheDir: String;
+begin
+  Result := '';
+
+  // Same AppId means Setup detects the previous installation, but Inno only
+  // copies files over it: files that disappeared from the new build would stay
+  // behind. Clear the previous app directory *synchronously* before [Files],
+  // then let Setup write the new tree. Do not launch the old uninstaller here:
+  // it copies itself to %TEMP% and returns while that copy is still deleting,
+  // which races with the new uninstaller and can leave Add/Remove pointing at
+  // a deleted unins000.exe (measured). The optional config lives outside {app}
+  // and is not touched by this update path.
+  //
+  // The key is Inno's: AppId + "_is1". Keep the GUID and the architecture in
+  // step with [Setup] AppId above; the AppId must never change anyway.
+  if IsAdminInstallMode then
+    RootKey := HKLM
+  else
+    RootKey := HKCU;
+  Key := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\'
+    + '{8EF6D059-DF33-474A-97FA-E30238B02DA1}-' + '{#Arch}' + '_is1';
+
+  if RegQueryStringValue(RootKey, Key, 'InstallLocation', OldDir) then
+  begin
+    OldDir := RemoveBackslashUnlessRoot(OldDir);
+    // If Setup itself was started from the old directory, do not delete the
+    // running executable's folder; [Files] will replace its contents instead.
+    if (OldDir <> '')
+       and DirExists(OldDir)
+       and (CompareText(OldDir,
+                        ExtractFileDir(ExpandConstant('{srcexe}'))) <> 0) then
+      DelTree(OldDir, True, True, True);
+  end;
+
+  // Qt's cache is disposable and may have been produced by the previous build.
+  CacheDir := ExpandConstant('{localappdata}\symplify');
+  if DirExists(CacheDir) then
+    DelTree(CacheDir, True, True, True);
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  ConfigDir: String;
+begin
+  if CurUninstallStep <> usPostUninstall then
+    Exit;
+
+  // An upgrade runs the previous uninstaller silently; a dialog there would
+  // block the upgrade, and the configuration must survive it anyway.
+  if UninstallSilent then
+    Exit;
+
+  // %APPDATA%\Symplify is the installed copy's config location (python/settings.py;
+  // the portable build's data\ folder lives next to its exe and is not this one).
+  ConfigDir := ExpandConstant('{userappdata}\Symplify');
+  if not DirExists(ConfigDir) then
+    Exit;
+
+  if MsgBox(ExpandConstant('{cm:RemoveConfigPrompt}'),
+            mbConfirmation, MB_YESNO) = IDYES then
+    DelTree(ConfigDir, True, True, True);
+end;

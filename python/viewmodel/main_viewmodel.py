@@ -53,6 +53,7 @@ class MainViewModel(QObject):
         theme_manager: Optional[QObject] = None,
         parent: Optional[QObject] = None,
         initial_variables: Optional[Mapping[str, Any]] = None,
+        calculation_backend: Optional[QObject] = None,
     ):
         """Initialize all models and viewmodels.
 
@@ -67,6 +68,9 @@ class MainViewModel(QObject):
                 result can use them without defining anything. Left empty here,
                 which is what the tests build: the default scope is the
                 composition root's decision, not the viewmodel's.
+            calculation_backend: How calculation requests leave the UI. None
+                keeps the synchronous in-process backend (tests/headless); the
+                application passes a ``ProcessBackend`` with a timeout.
         """
         super().__init__(parent)
         self._calculator = Calculator()
@@ -80,12 +84,12 @@ class MainViewModel(QObject):
             self._variable_manager, self._log, self._calculator, parent=self
         )
         self._calculator_vm = CalculatorViewModel(
-            self._calculator,
             self._variable_manager,
             self._history,
             self._log,
             variables_model=self._variables_vm.model,
             parent=self,
+            backend=calculation_backend,
         )
 
         # Search-filtered views: the pages bind their views to these, so the
@@ -100,6 +104,12 @@ class MainViewModel(QObject):
         #: wants needs the page background behind it (see `MainWindow`), which only
         #: the QML side has.
         self._latex_color = "#000000"
+        #: Attached code highlighters, by their QTextDocument. A theme switch
+        #: changes the palette in place instead of rebuilding the page, so the
+        #: C++ highlighter needs an explicit recolour (see
+        #: `refreshCodeHighlighting`). The document owns the highlighter; the
+        #: destroyed hook only drops the dictionary entry.
+        self._code_highlighters: dict = {}
 
         self._settings = SettingsViewModel(settings, theme_manager, parent=self)
         self._settings.latexSizeChanged.connect(self._apply_latex_style)
@@ -223,14 +233,40 @@ class MainViewModel(QObject):
         the setting). The colours then come from the family the settings name
         (``workspace.code_theme``) at that theme: Atom One is One Dark on a dark
         UI and One Light on a light one. The highlighter lives exactly as long as
-        the document, which RinUI recreates with the page — which is also what
-        re-applies a changed theme or family. Names are resolved against the live
+        the document. A page switch recreates the document and reattaches; a
+        *live* theme change does not, so `refreshCodeHighlighting` recolours this
+        one in place (and the registry is what finds it again). Names are resolved against the live
         variable scope, so a stored variable is classified apart from a free
         symbol — whether the palette paints that difference is the palette's
         business (Atom One gives both its own foreground).
         """
         styles, bracket_colors = self._palette(dark)
-        attach(text_document, self._variable_manager.list_all, styles, bracket_colors)
+        document = text_document.textDocument()
+        highlighter = attach(
+            text_document, self._variable_manager.list_all, styles, bracket_colors
+        )
+        self._code_highlighters[document] = highlighter
+        document.destroyed.connect(
+            lambda *_: self._code_highlighters.pop(document, None)
+        )
+
+    @Slot(bool)
+    def refreshCodeHighlighting(self, dark: bool) -> None:
+        """Recolour every attached code input for the active theme.
+
+        Called from `MainWindow` on `Theme.currentThemeChanged` (the OS scheme
+        change and the settings switch both end there) and on a settings change.
+        A page switch used to hide this: RinUI rebuilt the page and the
+        highlighter was attached again; a live theme change leaves the document
+        (and its old palette) in place.
+        """
+        styles, bracket_colors = self._palette(dark)
+        for document, highlighter in list(self._code_highlighters.items()):
+            try:
+                highlighter.set_palette(styles, bracket_colors)
+            except RuntimeError:
+                # The QObject was deleted before its `destroyed` hook ran.
+                self._code_highlighters.pop(document, None)
 
     @Slot(str, bool, result=str)
     def highlighted(self, text: str, dark: bool) -> str:

@@ -131,6 +131,14 @@ FluentWindow {
         function onAccentChanged() {
             applyAccent()
         }
+
+        //: A code-family or bracket-mode change also changes the palette. The
+        //: Settings page normally owns the screen while it happens, but this
+        //: keeps a future live settings surface (and programmatic changes)
+        //: correct; `set_palette` is a no-op when nothing actually changed.
+        function onChanged() {
+            vm.refreshCodeHighlighting(Theme.isDark())
+        }
     }
 
     // A theme switch rebuilds the theme object, so the accent has to be
@@ -144,6 +152,11 @@ FluentWindow {
             applyLogColors()
             applyLatexColors()
             applyPlotTheme()
+            //: The settings page hides this case: changing the theme there means
+            //: navigating away, which rebuilds the Calculator page and attaches
+            //: a fresh highlighter. An OS scheme change leaves the live document
+            //: (and its old palette) in place, so recolour it explicitly.
+            vm.refreshCodeHighlighting(Theme.isDark())
         }
     }
 
