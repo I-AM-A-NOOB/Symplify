@@ -31,6 +31,11 @@ _RINUI_FILENAME = "rin_ui.json"
 #: put it; in the build it has to be put back, because Nuitka does not copy it.
 _PYSIDE6_DIR = Path(importlib.util.find_spec("PySide6").submodule_search_locations[0])
 _QSB = _PYSIDE6_DIR / ("qsb.exe" if os.name == "nt" else "qsb")
+#: Qt 6.12's Windows style chain loads this DLL from the
+#: `QtQuick/NativeStyle` QML plugin, not from Python. Nuitka's dependency scan
+#: does not reliably see a DLL opened by a QML plugin, so it must be copied
+#: explicitly; `KEEP_QT_DLLS` only protects it from the later prune.
+_NATIVE_STYLE_DLL = _PYSIDE6_DIR / "Qt6QuickNativeStyle.dll"
 
 
 CMD = [
@@ -66,6 +71,9 @@ CMD = [
     "--include-package=qmlmathplot",
     "--include-package-data=qmlmathplot",
     f"--include-data-files={_QSB}=PySide6/{_QSB.name}",
+    # Qt's Windows style plugin chain, loaded by QML rather than imported by
+    # Python; see _NATIVE_STYLE_DLL.
+    f"--include-data-files={_NATIVE_STYLE_DLL}=.",
     # RinUI (python package + its QML module tree)
     "--include-package=RinUI",
     "--include-package-data=RinUI",
@@ -275,6 +283,11 @@ def main() -> int:
         sys.exit(
             f"missing {_QSB}: qmlmathplot bakes its generated GLSL with it, and "
             "a build without it draws no curves. It ships in the PySide6 wheel."
+        )
+    if not _NATIVE_STYLE_DLL.is_file():
+        sys.exit(
+            f"missing {_NATIVE_STYLE_DLL}: the Windows style chain loads it "
+            "from QML, and the packaged app cannot start without it."
         )
 
     # Before the script path: Nuitka's parser is happy either way, but keeping

@@ -1922,9 +1922,14 @@ rebuild), which is how a wrong list gets corrected without a second compile.
   needs `qt6quickcontrols2windows.dll`, and the NativeStyle plugin it imports needs
   `qt6quickenativestyle.dll`. 0.7.0 pruned both; the packaged exe failed QML load
   (`qtquickcontrols2windowsstyleplugin.dll: module not found`) and then aborted in Qt's
-  `QThread` cleanup. A console build with the DLLs copied back loads the window. On every Qt bump,
-  map the modules of a running build again, and **start the pruned dist once** before shipping:
-  the source run and the build succeed either way, so only the pruned startup catches this.
+  `QThread` cleanup. A console build with the DLLs copied back loads the window. The second
+  name is also **not reliably discovered by Nuitka** (it is opened by a QML plugin, not
+  imported by Python), so `scripts/build_windows.py` copies it explicitly with
+  `--include-data-files`; `KEEP_QT_DLLS` alone only prevents the prune from deleting it.
+  0.7.1 still lacked it for that reason; 0.7.2 is the first asset built with the explicit copy.
+  On every Qt bump, map the modules of a running build again, and **start the pruned dist
+  once** before shipping: the source run and the build succeed either way, so only the pruned
+  startup catches this.
 - `PRUNE_QML_DIRS` is the QML nothing reaches, checked with the `import` closure of the app's and
   RinUI's files. Two edges worth remembering: `QtQuick/NativeStyle` is **kept** although no app QML
   names it (QtQuick/Controls/Windows — 38 files — imports it), and `QtMultimedia` /
