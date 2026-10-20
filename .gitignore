@@ -14,9 +14,6 @@ nuitka_output.txt
 # Portable-mode marker: its presence makes the app read/write data/config.yaml
 # instead of the system config directory (see python/settings.py)
 /data
-# Generated docs export (architecture.md -> html, local preview tooling)
-/docs/architecture.html
-/docs/architecture_files/
 
 # Icon rasters, written from icon/Symplify.svg by icon/build-icons.ps1. The .ico
 # is committed because Nuitka embeds it; these loose PNGs are derived from the

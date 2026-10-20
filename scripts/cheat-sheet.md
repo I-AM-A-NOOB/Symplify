@@ -26,7 +26,8 @@ uv run python scripts/build_windows.py
 - `ziamath`/`ziafont` 的字体、`latex2mathml` 的符号表、RinUI 的 QML 树都要通过
   `--include-package(-data)` 显式带上（脚本里已配好）；**加了会读数据文件的新依赖时，先在脚本里补 include 规则**
 - 新依赖若用 `importlib.resources` 加载资源，其子包需 `--include-module=...`（Nuitka 发现不了字符串引用）
-- 本地验证：直接跑 `build/main.dist/symplify.exe` 看是否存活（GUI 无控制台，崩了 exit code=1；临时加 `--windows-console-mode=force` 可看 traceback）
+- 本地验证：直接启动 `build/main.dist/symplify.exe`，窗口应出现并保持运行（GUI 无控制台；启动失败在事件日志里常是 `0xC0000409`，不是 1）。要 traceback 就临时用 `--windows-console-mode=force` 重新构建
+- Qt 6.12 的 Windows/Native style DLL 由 QML 插件加载，Nuitka 的依赖扫描不可靠；`build_windows.py` 在 `prune_qt` 之后显式复制 `Qt6QuickControls2Windows.dll` 与 `Qt6QuickNativeStyle.dll`。缺任何一个都会在 QML 加载时失败，随后在 `QThread` 清理里 abort
 
 ## 版本管理（SemVer）
 

@@ -2,8 +2,7 @@
 
 This page is **Model-first**: it documents the pure-Python calculation core
 (`python/model/`), the two requests it answers, where those requests come from,
-and who reads what comes back. The static layer/type map lives in
-[`architecture.svg`](architecture.svg); this page is about how data actually moves.
+and who reads what comes back. It is about how data actually moves.
 
 ## The Model in one sentence
 

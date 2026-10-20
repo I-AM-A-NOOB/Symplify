@@ -175,8 +175,8 @@ qml/
                                 #     the two text traps in the list below)
 docs/
   architecture.md               # Model-first walkthrough: the two requests, the data flow
-                                # (sources in, sinks out), the write path and the error kinds;
-                                # architecture.svg = layer map
+                                # (sources in, sinks out), the backend boundary, the write path
+                                # and the error kinds.
 icon/
   Symplify.svg                  # The application icon, authored (Illustrator). The only source, and
                                 # the file the *running app* draws with (see the icon bullet under
@@ -1605,8 +1605,14 @@ backdrop floats up from 10px below while fading in, and carries the page's own t
     outlives the pages, and applying it has to happen at startup, on every change, *and* after every
     theme switch, which a page cannot do. Pages must not touch it.
   - **The accent's variants are the shades Windows itself derives** (`python/accent.py`, ported
-    from `windowsthemefinetuner`; see *Accent shading* in `README.md` for the provenance and
-    `tests/golden_accent_palettes.json` for the recorded vectors). Windows turns the accent into a
+    from `windowsthemefinetuner`, the author's own reconstruction of that behaviour — the full
+    484-vector corpus and live comparator live there; `tests/golden_accent_palettes.json` is the
+    63-vector sample this suite checks offline. The behaviour was characterised observationally
+    through the shell's accent preference and the ramp it publishes in
+    `HKCU\...\Explorer\Accent!AccentPalette`; **no Microsoft source code, binary or resource is
+    reproduced or redistributed**. The arithmetic is published standards — sRGB per IEC 61966-2-1,
+    CIELAB per CIE 15 under D65 — plus numeric parameters that are observed interface behaviour).
+    Windows turns the accent into a
     seven-entry ramp — `light3 … light1`, the accent, `dark1 … dark3` — and paints **light mode with
     `dark1`, dark mode with `light2`**, so the shape is still "darker on light, lighter on dark" but
     the values are the shell's own rather than an approximation.
