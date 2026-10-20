@@ -73,7 +73,7 @@ CMD = [
     f"--include-data-files={_QSB}=PySide6/{_QSB.name}",
     # Qt's Windows style plugin chain, loaded by QML rather than imported by
     # Python; see _NATIVE_STYLE_DLL.
-    f"--include-data-files={_NATIVE_STYLE_DLL}=.",
+    f"--include-data-files={_NATIVE_STYLE_DLL}=Qt6QuickNativeStyle.dll",
     # RinUI (python package + its QML module tree)
     "--include-package=RinUI",
     "--include-package-data=RinUI",
