@@ -1924,9 +1924,11 @@ rebuild), which is how a wrong list gets corrected without a second compile.
   (`qtquickcontrols2windowsstyleplugin.dll: module not found`) and then aborted in Qt's
   `QThread` cleanup. A console build with the DLLs copied back loads the window. The second
   name is also **not reliably discovered by Nuitka** (it is opened by a QML plugin, not
-  imported by Python), so `scripts/build_windows.py` copies it explicitly with
-  `--include-data-files`; `KEEP_QT_DLLS` alone only prevents the prune from deleting it.
-  0.7.1 still lacked it for that reason; 0.7.2 is the first asset built with the explicit copy.
+  imported by Python): an explicit `--include-data-files` entry was logged as included and
+  still did not land in `main.dist`. `scripts/build_windows.py` therefore copies both DLLs
+  into the dist **after** `prune_qt` (`_style_dlls`); `KEEP_QT_DLLS` only documents them and
+  protects against a prune before the copy. 0.7.1 lacked the file; 0.7.2 is the first asset
+  built with the post-prune copy.
   On every Qt bump, map the modules of a running build again, and **start the pruned dist
   once** before shipping: the source run and the build succeed either way, so only the pruned
   startup catches this.

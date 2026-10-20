@@ -71,9 +71,6 @@ CMD = [
     "--include-package=qmlmathplot",
     "--include-package-data=qmlmathplot",
     f"--include-data-files={_QSB}=PySide6/{_QSB.name}",
-    # Qt's Windows style plugin chain, loaded by QML rather than imported by
-    # Python; see _NATIVE_STYLE_DLL.
-    f"--include-data-files={_NATIVE_STYLE_DLL}=Qt6QuickNativeStyle.dll",
     # RinUI (python package + its QML module tree)
     "--include-package=RinUI",
     "--include-package-data=RinUI",
@@ -221,6 +218,22 @@ PRUNE_QML_DIRS = (
 CI_JOBS = os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS")
 
 
+def _style_dlls(dist: Path) -> None:
+    """Copy the Qt 6.12 Windows style DLLs that Nuitka does not ship.
+
+    `Qt6QuickControls2Windows.dll` and `Qt6QuickNativeStyle.dll` are opened by
+    QML plugins, not imported by Python. Nuitka's dependency scan missed the
+    latter even with an explicit `--include-data-files` entry, so the dist is
+    completed here after the prune; `KEEP_QT_DLLS` documents their names but is
+    not what puts them there.
+    """
+    for name in ("Qt6QuickControls2Windows.dll", "Qt6QuickNativeStyle.dll"):
+        source = _PYSIDE6_DIR / name
+        if not source.is_file():
+            sys.exit(f"missing {source}: the packaged app cannot start without it")
+        shutil.copy2(source, dist / name)
+
+
 def _size(path: Path) -> int:
     """Bytes under ``path`` (a file or a directory tree)."""
     if path.is_file():
@@ -277,6 +290,7 @@ def main() -> int:
         if not DIST.is_dir():
             sys.exit(f"no dist to prune at {DIST}")
         print(f"Pruned {prune_qt(DIST) / 1e6:.1f} MB from {DIST}")
+        _style_dlls(DIST)
         return 0
 
     if not _QSB.is_file():
@@ -301,6 +315,7 @@ def main() -> int:
     cleanup_rinui_dir()
     if code == 0:
         print(f"Pruned {prune_qt(DIST) / 1e6:.1f} MB of unused Qt modules")
+        _style_dlls(DIST)
     return code
 
 
