@@ -137,7 +137,14 @@ KEEP_QT_DLLS = frozenset({
     "qt6quickcontrols2basicstyleimpl.dll",
     "qt6quickcontrols2fusion.dll",
     "qt6quickcontrols2impl.dll",
+    # Qt 6.12's Windows style chain: the plugin needs Qt6QuickControls2Windows,
+    # and the NativeStyle plugin it imports needs Qt6QuickNativeStyle. Both were
+    # absent from the 6.11-era list; pruning them made the packaged exe fail to
+    # load QML (`qtquickcontrols2windowsstyleplugin.dll: module not found`) and
+    # then abort in QThread cleanup. Keep the names in step with Qt.
+    "qt6quickcontrols2windows.dll",
     "qt6quickcontrols2windowsstyleimpl.dll",
+    "qt6quickenativestyle.dll",
     "qt6quickeffects.dll",
     "qt6quicklayouts.dll",
     "qt6quickshapes.dll",

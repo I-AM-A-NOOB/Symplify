@@ -1918,6 +1918,13 @@ rebuild), which is how a wrong list gets corrected without a second compile.
   (`(Get-Process symplify).Modules`). Counter-intuitive but real: `qt6pdf.dll` and
   `qt6shadertools.dll` *are* loaded (the Qt Quick Controls stack pulls them in), and the Basic style
   runs alongside `qt6quickcontrols2fusion.dll` + `…windowsstyleimpl.dll`.
+  **Qt 6.12 added two names that the 6.11 measurement did not have**: the Windows style plugin
+  needs `qt6quickcontrols2windows.dll`, and the NativeStyle plugin it imports needs
+  `qt6quickenativestyle.dll`. 0.7.0 pruned both; the packaged exe failed QML load
+  (`qtquickcontrols2windowsstyleplugin.dll: module not found`) and then aborted in Qt's
+  `QThread` cleanup. A console build with the DLLs copied back loads the window. On every Qt bump,
+  map the modules of a running build again, and **start the pruned dist once** before shipping:
+  the source run and the build succeed either way, so only the pruned startup catches this.
 - `PRUNE_QML_DIRS` is the QML nothing reaches, checked with the `import` closure of the app's and
   RinUI's files. Two edges worth remembering: `QtQuick/NativeStyle` is **kept** although no app QML
   names it (QtQuick/Controls/Windows — 38 files — imports it), and `QtMultimedia` /
