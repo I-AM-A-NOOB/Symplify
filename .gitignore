@@ -4,10 +4,15 @@ __pycache__
 # IDE related files
 /.idea
 /.vscode
+/.vs
 # Distribution files
 /main.build
 /main.dist
 /build
+# RinUI writes this at import time; python/rinui_bootstrap.py keeps it away at
+# runtime, and scripts/build_windows.py cleans a build-time import.
+/RinUI/
+
 # Nuitka's diagnostics, written next to the CWD when a build fails
 nuitka-crash-report.xml
 nuitka_output.txt
@@ -25,3 +30,11 @@ nuitka_output.txt
 *.old.py
 # Local reference screenshots (not part of the source or docs)
 /screenshoots/
+
+# Compiled Qt translations; the .ts sources are committed and
+# scripts/update_translations.py regenerates these.
+/i18n/*.qm
+
+# Quarto export of docs/architecture.md; the Markdown is the source.
+/docs/architecture.html
+/docs/architecture_files/

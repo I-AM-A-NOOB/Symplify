@@ -51,9 +51,14 @@ ColumnLayout {
 
                         ComboBox {
                             Layout.preferredWidth: 150
-                            model: ["Auto", "Light", "Dark"]
-                            currentIndex: indexOf(model, settingsVM.theme)
-                            onActivated: (index) => settingsVM.theme = model[index]
+                            //: Labels are translated; the stored values stay the
+                            //: stable Auto/Light/Dark tokens the settings store and
+                            //: RinUI expect.
+                            model: [qsTr("Auto"), qsTr("Light"), qsTr("Dark")]
+                            currentIndex: indexOf(["Auto", "Light", "Dark"],
+                                                  settingsVM.theme)
+                            onActivated: (index) => settingsVM.theme =
+                                ["Auto", "Light", "Dark"][index]
                         }
                     }
 

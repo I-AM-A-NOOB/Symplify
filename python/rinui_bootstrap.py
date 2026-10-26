@@ -1,4 +1,3 @@
-# coding: utf-8
 """Boots RinUI so its own config file never appears next to the app.
 
 RinUI persists theme/backdrop/accent by itself, and it does so **at import time**:
@@ -32,7 +31,7 @@ import shutil
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 from . import window_drag
 from .settings import CONFIG_FILENAME, DEFAULTS, SettingsStore, resolve_config_dir
@@ -112,7 +111,7 @@ def prepare(root: Path) -> Runtime:
     return Runtime(store, RinUIWindow, RinUI.__version__)
 
 
-def _rinui_config(store: SettingsStore, defaults: Dict[str, Any]) -> Dict[str, Any]:
+def _rinui_config(store: SettingsStore, defaults: dict[str, Any]) -> dict[str, Any]:
     """RinUI's config mapping, carrying our appearance settings.
 
     ``win10_feat`` has to survive: it holds the backdrop alpha values RinUI needs

@@ -1,4 +1,3 @@
-# coding: utf-8
 """LaTeX -> SVG rendering via ziamath.
 
 Qt's QSvgRenderer ignores ``<use>`` transforms, so ziamath's default SVG2
@@ -7,14 +6,20 @@ embeds the glyph paths directly, which Qt renders correctly.
 """
 
 import re
+import threading
 import warnings
 from dataclasses import dataclass
-from typing import Optional, Tuple
 from urllib.parse import quote
 
 from ziamath.config import config as zconfig
 
 zconfig.svg2 = False
+
+#: ziamath/ziafont keep module-global font caches without a lock. The renderer
+#: process has its own copy, but keycaps and Variables details still render on
+#: the UI thread; this lock keeps those callers from overlapping if a service
+#: is ever used inline in the same process.
+_RENDER_LOCK = threading.RLock()
 
 _SVG_WIDTH_RE = re.compile(r'width="([\d.]+)"')
 _SVG_HEIGHT_RE = re.compile(r'height="([\d.]+)"')
@@ -23,8 +28,8 @@ _SVG_HEIGHT_RE = re.compile(r'height="([\d.]+)"')
 #: Refuse to typeset a source longer than this. The cost is linear in the glyph
 #: count, but the numbers are large: measured on this machine, ~57 ms and 0.84 MB
 #: of SVG at 1000 characters, and a `2**100000` result (30103 digits) takes 3.9 s
-#: and produces 27 MB — on the UI thread, once per history card, with the data URL
-#: held per entry. The strip takes no space when there is nothing to render and the
+#: and produces 27 MB — once per history card in the renderer process, with the
+#: data URL held per entry. The strip takes no space when there is nothing to render and the
 #: result line above carries the value, so "" is the honest answer: the outcome is
 #: still reported, the app does not stall, and nothing tries to hold 27 MB.
 MAX_LATEX_CHARS = 1000
@@ -32,9 +37,9 @@ MAX_LATEX_CHARS = 1000
 
 def latex_to_svg(
     latex: str,
-    size: Optional[float] = None,
-    color: Optional[str] = None,
-    font: Optional[str] = None,
+    size: float | None = None,
+    color: str | None = None,
+    font: str | None = None,
 ) -> str:
     """Render a LaTeX string to an SVG string, or ``''`` if it cannot be parsed.
 
@@ -118,7 +123,7 @@ class LatexStyle:
     font: str = ""
 
 
-def render_data_url(latex: str, style: LatexStyle) -> Tuple[str, int, int]:
+def render_data_url(latex: str, style: LatexStyle) -> tuple[str, int, int]:
     """Render ``latex`` for QML: ``(data URL, width, height)``.
 
     ``('', 0, 0)`` when ziamath cannot typeset it, which is the one contract every
@@ -129,19 +134,20 @@ def render_data_url(latex: str, style: LatexStyle) -> Tuple[str, int, int]:
     per-theme; the size comes back with it so the item can render at screen
     resolution (see `LatexImage`).
     """
-    svg = latex_to_svg(
-        latex,
-        size=style.size or None,
-        color=style.color or None,
-        font=style.font or None,
-    )
-    if not svg:
-        return ("", 0, 0)
-    width, height = svg_size(svg)
-    return (_DATA_URL_PREFIX + quote(svg, safe=""), width, height)
+    with _RENDER_LOCK:
+        svg = latex_to_svg(
+            latex,
+            size=style.size or None,
+            color=style.color or None,
+            font=style.font or None,
+        )
+        if not svg:
+            return ("", 0, 0)
+        width, height = svg_size(svg)
+        return (_DATA_URL_PREFIX + quote(svg, safe=""), width, height)
 
 
-def svg_size(svg: str) -> Tuple[int, int]:
+def svg_size(svg: str) -> tuple[int, int]:
     """Return the SVG's intrinsic (width, height) in pixels, or ``(0, 0)``.
 
     Used to render at screen resolution (sourceSize x devicePixelRatio) so the

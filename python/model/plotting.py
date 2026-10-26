@@ -1,4 +1,3 @@
-# coding: utf-8
 """What a result should be drawn as (pure Python, zero Qt).
 
 The plot itself lives in ``qmlmathplot`` and the viewmodel owns it; this module
@@ -25,7 +24,7 @@ solved, and everything else shows its result.
 """
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 import sympy as sp
 
@@ -77,7 +76,7 @@ RESULT_LABELS = {
 }
 
 
-def plot_variables() -> Dict[str, Any]:
+def plot_variables() -> dict[str, Any]:
     """The variables a fresh app starts with: ``x`` and ``y`` as themselves.
 
     They are ordinary entries in the variables table (not hidden): they make the
@@ -135,7 +134,7 @@ class Series:
     role: str = "result"
 
 
-def plot_series(value: Any, origin: Optional[Origin] = None) -> Tuple[Series, ...]:
+def plot_series(value: Any, origin: Origin | None = None) -> tuple[Series, ...]:
     """The curves to draw for one result, in draw order.
 
     ``origin`` is ``Success.origin`` — the model's record of the transform call
@@ -161,7 +160,7 @@ def plot_series(value: Any, origin: Optional[Origin] = None) -> Tuple[Series, ..
     return tuple(series)
 
 
-def _series(value: Any, label: str, role: str) -> Optional[Series]:
+def _series(value: Any, label: str, role: str) -> Series | None:
     """``value`` as a :class:`Series`, or None when it cannot be drawn."""
     expression = value
     implicit = False

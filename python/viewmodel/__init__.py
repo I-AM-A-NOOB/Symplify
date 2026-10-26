@@ -1,4 +1,3 @@
-# coding: utf-8
 """ViewModel layer for the QML Symplify app."""
 
 from .calculator_viewmodel import CalculatorViewModel

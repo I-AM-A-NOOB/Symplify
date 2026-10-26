@@ -1,4 +1,3 @@
-# coding: utf-8
 """Code colour themes (pure Python, zero Qt).
 
 Every family has a **dark and a light** member, because the code colours follow
@@ -55,7 +54,7 @@ neither — which means "no opinion", and the control keeps the UI theme's own
 colours.
 """
 
-from typing import Dict, List, Tuple, TypedDict
+from typing import TypedDict
 
 
 class ThemeLayer(TypedDict):
@@ -66,8 +65,8 @@ class ThemeLayer(TypedDict):
     background it sits on.
     """
 
-    styles: Dict[str, str]
-    brackets: List[str]
+    styles: dict[str, str]
+    brackets: list[str]
     background: str
     ink: str
     placeholder: str
@@ -114,13 +113,13 @@ DEFAULT_FAMILY = "one"
 #: ``colorizedBracketPairsDecorationProvider.ts``. That is the whole of VS Code's
 #: "follow the theme" behaviour for brackets, and it is what this app follows too:
 #: the family's own six when it states them, these when it does not.
-VSCODE_BRACKET_COLORS: Dict[str, Tuple[str, ...]] = {
+VSCODE_BRACKET_COLORS: dict[str, tuple[str, ...]] = {
     "dark": ("#ffd700", "#da70d6", "#179fff"),
     "light": ("#0431fa", "#319331", "#7b3814"),
 }
 
 #: family -> {"dark" | "light" -> {"styles", "brackets", "background", "ink"}}.
-THEMES: Dict[str, Dict[str, ThemeLayer]] = {
+THEMES: dict[str, dict[str, ThemeLayer]] = {
     "one": {
         "dark": {
             "styles": {
@@ -558,7 +557,7 @@ THEMES: Dict[str, Dict[str, ThemeLayer]] = {
 }
 
 
-def family_ids() -> List[str]:
+def family_ids() -> list[str]:
     """The family ids, in the order the settings page lists them."""
     return [family for family, _ in FAMILIES]
 

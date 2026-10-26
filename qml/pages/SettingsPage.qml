@@ -10,8 +10,8 @@ import "../components"
 // and then one card per row, and the sections themselves are separated by the
 // column's own spacing.
 //
-// Each section is a component of its own — `SettingsInterfaceSection`,
-// `SettingsWorkspaceSection`, `SettingsLanguageSection`, `SettingsFileSection`,
+// Each section is a component of its own — `SettingsLanguageSection`,
+// `SettingsInterfaceSection`, `SettingsWorkspaceSection`, `SettingsFileSection`,
 // `SettingsAboutSection` — because five of them is all this page ever was: the
 // page keeps the frame and the order, and every section keeps its own state (the
 // label/value pairs its combos pass their index through) and its own dialog.
@@ -59,9 +59,9 @@ Item {
                 reservedHeight: frame.headerHeight
             }
 
+            SettingsLanguageSection {}
             SettingsInterfaceSection {}
             SettingsWorkspaceSection {}
-            SettingsLanguageSection {}
             SettingsFileSection {}
             SettingsAboutSection {}
         }

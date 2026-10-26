@@ -2,9 +2,16 @@
 # Optimized for high school level mathematics
 #
 # A key is either a plain string — it shows that text and types it, the common
-# case — or a mapping with `label` (what the key shows) and `insert` (what it
-# types into the input). Use the mapping where the mathematical glyph differs
-# from the name it inserts: `√` shows, `sqrt(` types.
+# case — or a mapping with `label` (plain text, also the fallback), `latex`
+# (optional typeset keycap) and `insert` (what it types into the input). Use the
+# mapping where the glyph differs from the name it inserts: `√` shows,
+# `sqrt` types. LaTeX keycaps are rendered with the LaTeX font at the keyboard
+# font size; leave `latex` out for ordinary text, numbers and function names.
+#
+# A tab may also define `shiftGrid` in the same shape. The keyboard's Shift
+# toggle shows that grid while it is on; tabs without one ignore Shift. Keep the
+# shift grid explicit rather than uppercasing base keys: function names must stay
+# lowercase, and Greek/custom labels do not always have a simple ASCII case.
 
 basic:
   title: "Basic"
@@ -12,7 +19,7 @@ basic:
     - ["7", "8", "9", "/", ""]
     - ["4", "5", "6", "*", ")"]
     - ["1", "2", "3", "-", "**"]
-    - ["0", ".", "=", "+", { label: "√", insert: "sqrt" }]
+    - ["0", ".", "=", "+", { label: "√", latex: '\sqrt{\phantom{x}}', insert: "sqrt" }]
 
 alphabet:
   title: "Alphabet"
@@ -20,6 +27,10 @@ alphabet:
     - ["q", "w", "e", "r", "t", "y", "u", "i", "o", "p"]
     - ["a", "s", "d", "f", "g", "h", "j", "k", "l"]
     - ["", "z", "x", "c", "v", "b", "n", "m"]
+  shiftGrid:
+    - ["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"]
+    - ["A", "S", "D", "F", "G", "H", "J", "K", "L"]
+    - ["", "Z", "X", "C", "V", "B", "N", "M"]
 
 functions:
   title: "Functions"
@@ -28,18 +39,18 @@ functions:
     - ["asin", "acos", "atan"]
     - ["log", "ln", "log10", "exp"]
     - [
-        { label: "|x|", insert: "abs" },
-        { label: "√", insert: "sqrt" },
-        { label: "x!", insert: "factorial" },
-        { label: "∛", insert: "cbrt" },
+        { label: "|x|", latex: '\left|x\right|', insert: "abs" },
+        { label: "√", latex: '\sqrt{\phantom{x}}', insert: "sqrt" },
+        { label: "x!", latex: 'x!', insert: "factorial" },
+        { label: "∛", latex: '\sqrt[3]{\phantom{x}}', insert: "cbrt" },
       ]
 
 calculus:
   title: "Calculus"
   grid:
     - ["limit", "diff", "integrate", "series"]
-    - [{ label: "+∞", insert: "+oo" }, { label: "-∞", insert: "-oo" }, { label: "∞", insert: "zoo" }]
-    - [{ label: "π", insert: "pi" }, { label: "e", insert: "E" }, { label: "i", insert: "I" }]
+    - [{ label: "+∞", latex: '+\infty', insert: "+oo" }, { label: "-∞", latex: '-\infty', insert: "-oo" }, { label: "∞", latex: '\infty', insert: "zoo" }]
+    - [{ label: "π", latex: '\pi', insert: "pi" }, { label: "e", latex: 'e', insert: "E" }, { label: "i", latex: 'i', insert: "I" }]
     - ["summation", "product"]
 
 algebra:
@@ -54,24 +65,24 @@ symbols:
   title: "Symbols"
   grid:
     - ["+", "-", "*", "/", "**"]
-    - ["=", "<", ">", { label: "≤", insert: "<=" }, { label: "≥", insert: ">=" }]
-    - ["", ")", "|", { label: "π", insert: "pi" }, { label: "e", insert: "E" }]
-    - ["deg", "rad", "%", "!", { label: "√", insert: "sqrt" }]
+    - ["=", "<", ">", { label: "≤", latex: '\le', insert: "<=" }, { label: "≥", latex: '\ge', insert: ">=" }]
+    - ["", ")", "|", { label: "π", latex: '\pi', insert: "pi" }, { label: "e", latex: 'e', insert: "E" }]
+    - ["deg", "rad", "%", "!", { label: "√", latex: '\sqrt{\phantom{x}}', insert: "sqrt" }]
 
 constants:
   title: "Constants"
   grid:
     - [
-        { label: "π", insert: "pi" },
-        { label: "e", insert: "E" },
-        { label: "i", insert: "I" },
-        { label: "+∞", insert: "+oo" },
-        { label: "-∞", insert: "-oo" },
-        { label: "∞", insert: "zoo" },
+        { label: "π", latex: '\pi', insert: "pi" },
+        { label: "e", latex: 'e', insert: "E" },
+        { label: "i", latex: 'i', insert: "I" },
+        { label: "+∞", latex: '+\infty', insert: "+oo" },
+        { label: "-∞", latex: '-\infty', insert: "-oo" },
+        { label: "∞", latex: '\infty', insert: "zoo" },
       ]
     - [
-        { label: "φ", insert: "GoldenRatio" },
-        { label: "γ", insert: "EulerGamma" },
+        { label: "φ", latex: '\varphi', insert: "GoldenRatio" },
+        { label: "γ", latex: '\gamma', insert: "EulerGamma" },
         { label: "G", insert: "Catalan" },
         { label: "infinite", insert: "inf" },
         { label: "NaN", insert: "nan" },

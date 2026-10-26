@@ -1,4 +1,3 @@
-# coding: utf-8
 """How a value is spelled in TeX.
 
 Two steps put a formula on screen, and this is the first: **value → TeX source**,

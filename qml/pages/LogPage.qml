@@ -42,8 +42,23 @@ Item {
 
     // Opening the page has to land on the newest entry, and the rich text lays
     // out over more than one frame — so this runs on completion and again as the
-    // content height settles, rather than only when an entry arrives.
-    Component.onCompleted: Qt.callLater(page.scrollToTail)
+    // content height settles, rather than only when an entry arrives. The log
+    // model only renders/signals rich text while this page is the active stack
+    // item: a long log being re-laid out while navigating away from it was felt
+    // as the Settings page blocking.
+    Component.onCompleted: {
+        logVM.setDisplayActive(visible)
+        Qt.callLater(page.scrollToTail)
+    }
+    Component.onDestruction: {
+        if (logVM)
+            logVM.setDisplayActive(false)
+    }
+    onVisibleChanged: {
+        if (logVM)
+            logVM.setDisplayActive(visible)
+    }
+
 
     Connections {
         target: logScroll

@@ -1,4 +1,3 @@
-# coding: utf-8
 """Build Symplify for Windows with Nuitka (MSVC, standalone dir, optimized).
 
 Produces ``build/main.dist/symplify.exe`` plus the QML/RinUI resources, then
@@ -98,6 +97,10 @@ CMD = [
     "--include-package-data=python",
     # QML views (loaded by path at runtime next to the exe)
     "--include-data-dir=qml=qml",
+    # Compiled Qt translation catalogues; `.ts` sources are fine to ship in the
+    # repository, but `update_translations.py` produces the `.qm` files the app
+    # actually loads.
+    "--include-data-dir=i18n=i18n",
     # The application icon, read at runtime for the window and the taskbar; the
     # same file Nuitka also embeds into the exe above.
     "--include-data-dir=icon=icon",
@@ -280,6 +283,31 @@ def cleanup_rinui_dir() -> None:
             pass          # not empty: leave whatever else is in there
 
 
+def compile_translations() -> None:
+    """Compile the committed .ts files so the build ships their .qm files.
+
+    The `.qm` outputs are git-ignored (the .ts sources are the source of truth),
+    so a clean checkout has none. Doing this here keeps the release and a local
+    build equally complete; a translator only needs to run Qt Linguist.
+    """
+    i18n = ROOT / "i18n"
+    sources = sorted(i18n.glob("symplify_*.ts"))
+    if not sources:
+        return
+    executable = Path(sys.executable).with_name(
+        "pyside6-lrelease.exe" if os.name == "nt" else "pyside6-lrelease"
+    )
+    if not executable.is_file():
+        executable = Path(shutil.which("pyside6-lrelease") or "")
+    if not executable.is_file():
+        sys.exit("pyside6-lrelease was not found; cannot compile translations")
+    for source in sources:
+        subprocess.run(
+            [str(executable), str(source), "-qm", str(source.with_suffix(".qm"))],
+            cwd=ROOT, check=True,
+        )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--prune-only", action="store_true",
@@ -292,6 +320,8 @@ def main() -> int:
         print(f"Pruned {prune_qt(DIST) / 1e6:.1f} MB from {DIST}")
         _style_dlls(DIST)
         return 0
+
+    compile_translations()
 
     if not _QSB.is_file():
         sys.exit(

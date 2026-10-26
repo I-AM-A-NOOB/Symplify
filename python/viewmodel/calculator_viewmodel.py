@@ -1,4 +1,3 @@
-# coding: utf-8
 """Calculator viewmodel for the QML Symplify app.
 
 Exposes the Calculator model to QML through typed properties and slots.
@@ -6,14 +5,13 @@ The widgets app's eager plot-data computation (``create_plot_data`` /
 ``compute_plot_data``) and legacy assignment path are not carried over.
 """
 
-from typing import Any, List, Optional
+from typing import TYPE_CHECKING, Any
 
-from PySide6.QtCore import Property, QObject, Signal, Slot
-from PySide6.QtGui import QColor
+from PySide6.QtCore import Property, QCoreApplication, QObject, QTimer, Signal, Slot
 from qmlmathplot import Curve, ImplicitCurve, Plot
 from qmlmathplot.model import func_glsl
 
-from ..latex_render import LatexStyle, render_data_url
+from ..latex_render import LatexStyle
 from ..model.calculator import Assignment, ErrorKind, Failure, Result, Success
 from ..model.plotting import is_plot_variable, plot_series, plot_variable_warning
 from ..model.variable import VariableManager
@@ -21,7 +19,11 @@ from ..model.variants import Variant
 from .calculation_backend import InlineBackend
 from .history_viewmodel import HistoryModel
 from .input_mode import InputMode
+from .latex_service import LatexRenderService
 from .log_viewmodel import LogViewModel
+
+if TYPE_CHECKING:
+    from .variables_viewmodel import VariablesModel
 
 #: The plot's theme, per UI side: Matplotlib's own default and its
 #: `dark_background` counterpart (qmlmathplot ships both as style sheets). The
@@ -48,6 +50,7 @@ class CalculatorViewModel(QObject):
     inputTextChanged = Signal()
     assignInputChanged = Signal()
     resultChanged = Signal()
+    variantsChanged = Signal()
     plotChanged = Signal()
     warningOccurred = Signal(str, str)
     #: ``backendBusy`` / ``backendStatus`` changed.
@@ -58,9 +61,10 @@ class CalculatorViewModel(QObject):
         variable_manager: VariableManager,
         history: HistoryModel,
         log: LogViewModel,
-        variables_model: Optional["VariablesModel"] = None,
-        parent: Optional[QObject] = None,
-        backend: Optional[QObject] = None,
+        variables_model: VariablesModel | None = None,
+        parent: QObject | None = None,
+        backend: QObject | None = None,
+        latex_service: LatexRenderService | None = None,
     ):
         """Initialize the calculator viewmodel.
 
@@ -70,6 +74,8 @@ class CalculatorViewModel(QObject):
             backend: Calculation transport. None keeps the synchronous in-process
                 backend (tests/headless); the application passes a process
                 backend with a timeout.
+            latex_service: Renderer shared with History. None creates one; with
+                no QCoreApplication it renders inline.
         """
         super().__init__(parent)
         self._variable_manager = variable_manager
@@ -88,25 +94,43 @@ class CalculatorViewModel(QObject):
         self._latex_svg_url = ""
         self._latex_width = 0
         self._latex_height = 0
-        #: Alternative forms of the current answer, already rendered for QML.
+        #: Alternative forms of the current answer; their artwork is filled by
+        #: the renderer as each request completes.
         self._variants: tuple[Variant, ...] = ()
-        self._variant_items: List[dict] = []
+        self._variant_items: list[dict] = []
+        #: Tokens handed to `LatexRenderService`, mapped to their display target
+        #: (`("result", -1)` or `("variant", row)`). A new result or style
+        #: clears the map, which makes late completions stale.
+        self._latex_pending: dict[str, tuple[str, int]] = {}
+        self._latex_seq = 0
         #: Calculation crosses a backend boundary. The default is synchronous
         #: (tests, headless callers); the application passes a process backend
         #: with a timeout. The viewmodel allocates request ids, so both take the
         #: same path and stale replies are ignored.
         self._backend = backend if backend is not None else InlineBackend(self)
         self._backend.finished.connect(self._on_backend_finished)
+        self._backend.variantsReady.connect(self._on_variants_ready)
         self._backend.timedOut.connect(self._on_backend_timed_out)
         self._backend.failed.connect(self._on_backend_failed)
         self._request_seq = 0
-        self._active_request: Optional[int] = None
-        self._pending: Optional[dict] = None
+        self._active_request: int | None = None
+        self._pending: dict | None = None
+        #: The request whose result is displayed. Only its late variant rows may
+        #: be applied; a new request clears it immediately.
+        self._last_completed_request: int | None = None
         self._backend_busy = False
         self._backend_status = "ready"
         #: Theme ink, font size and LaTeX font file, in one value; built by
         #: `MainViewModel`, which owns the settings and sees the theme.
         self._latex_style = LatexStyle()
+        # One renderer process shared with History. With no QApplication the
+        # service renders inline, keeping the tests free of event-loop setup.
+        self._latex_service = (
+            latex_service if latex_service is not None else LatexRenderService(self)
+        )
+        self._latex_service.rendered.connect(self._on_latex_rendered)
+        self._latex_service.failed.connect(self._on_latex_failed)
+        self._latex_service.warning.connect(self._on_latex_warning)
         # The plot is state that has to survive a page switch — RinUI rebuilds
         # pages on every navigation — so it lives here, and the page injects it
         # into its `PlotView`. The curves are its children and outlive the page
@@ -120,9 +144,12 @@ class CalculatorViewModel(QObject):
         # the scene, so an export carries it too. qmlmathplot starts without one;
         # everything we draw is labelled, so it is always wanted.
         self._plot.legend = True
-        self._curves: List[Curve] = []
+        self._curves: list[Curve] = []
         self._series: tuple = ()
         self._plot_error = ""
+        #: Incremented for every result; a scheduled plot from an older result
+        #: must not replace the curves of a newer one.
+        self._plot_token = 0
         # A fresh page has nothing to typeset: the formula area stays empty and the
         # outcome box above it carries the placeholder.
         self._refresh_strip()
@@ -193,21 +220,24 @@ class CalculatorViewModel(QObject):
     def _get_latex_height(self) -> int:
         return self._latex_height
 
-    def _build_latex_url(self, latex: str) -> str:
-        """Render LaTeX for the formula area, storing its data URL and size."""
-        self._latex_svg_url, self._latex_width, self._latex_height = render_data_url(
-            latex, self._latex_style
-        )
-        return self._latex_svg_url
-
     def _clear_latex(self) -> None:
         """Empty the formula area's artwork."""
         self._latex_svg_url = ""
         self._latex_width = 0
         self._latex_height = 0
 
+    def _request_result_latex(self) -> None:
+        """Ask the renderer for the result's SVG, if there is one."""
+        self._clear_latex()
+        if not self._result_latex:
+            return
+        self._latex_seq += 1
+        token = f"{self._latex_seq}:result"
+        self._latex_pending[token] = ("result", -1)
+        self._latex_service.request(token, self._result_latex, self._latex_style)
+
     def _refresh_strip(self) -> None:
-        """Decide what the formula area holds, and render it.
+        """Decide what the formula area holds, and request its artwork.
 
         The result's own LaTeX, or nothing at all: the area is the formula's alone,
         and the outcome line above carries whatever there is to *read* — a value, a
@@ -215,17 +245,14 @@ class CalculatorViewModel(QObject):
         turned a sentence into artwork and put the placeholder where the formula
         goes.)
         """
-        if self._result_latex:
-            self._build_latex_url(self._result_latex)
-        else:
-            self._clear_latex()
+        self._request_result_latex()
 
     def _apply_variants(self, rows: Any) -> None:
-        """Render the alternative forms computed by the backend.
+        """Publish the alternative forms computed by the backend.
 
         The symbolic work (`doit`, `expand`, `factor`, `N`) already happened
-        inside the backend's deadline; the UI only turns each row's LaTeX into a
-        data URL.
+        inside the backend's deadline. The rows are visible immediately; each
+        row's artwork follows from the renderer.
         """
         self._variants = tuple(rows or ())
         self._render_variants()
@@ -234,26 +261,61 @@ class CalculatorViewModel(QObject):
         """Forget the alternative forms (a failure or a cleared result)."""
         self._variants = ()
         self._variant_items = []
+        self.variantsChanged.emit()
 
     def _render_variants(self) -> None:
-        """Render each variant's LaTeX for the QML card."""
-        items: List[dict] = []
+        """Build the card rows now and request their artwork in parallel."""
+        items: list[dict] = []
         for variant in self._variants:
-            data_url, width, height = (
-                render_data_url(variant.latex, self._latex_style)
-                if variant.latex else ("", 0, 0)
-            )
             items.append({
                 "kind": variant.kind,
                 "expression": variant.expression,
                 "latex": variant.latex,
-                "latexUrl": data_url,
-                "naturalWidth": width,
-                "naturalHeight": height,
+                "latexUrl": "",
+                "naturalWidth": 0,
+                "naturalHeight": 0,
             })
         self._variant_items = items
+        self.variantsChanged.emit()
+        for index, variant in enumerate(self._variants):
+            if not variant.latex:
+                continue
+            self._latex_seq += 1
+            token = f"{self._latex_seq}:variant:{index}"
+            self._latex_pending[token] = ("variant", index)
+            self._latex_service.request(token, variant.latex, self._latex_style)
 
-    def _get_variants(self) -> List[dict]:
+    def _on_latex_rendered(
+        self, token: str, url: str, width: int, height: int
+    ) -> None:
+        """Fill the result strip or one variant row when its SVG is ready."""
+        target = self._latex_pending.pop(token, None)
+        if target is None:
+            return
+        kind, index = target
+        if kind == "result":
+            self._latex_svg_url = url
+            self._latex_width = width
+            self._latex_height = height
+            self.resultChanged.emit()
+            return
+        if 0 <= index < len(self._variant_items):
+            row = self._variant_items[index]
+            row["latexUrl"] = url
+            row["naturalWidth"] = width
+            row["naturalHeight"] = height
+            self.variantsChanged.emit()
+
+    def _on_latex_failed(self, token: str, message: str) -> None:
+        """Log an unexpected renderer failure; the text surfaces still work."""
+        if self._latex_pending.pop(token, None) is not None:
+            self._log.add_warning(f"LaTeX render failed: {message}", "Calculator")
+
+    def _on_latex_warning(self, message: str) -> None:
+        """Write a renderer warning on the UI thread, where the log lives."""
+        self._log.add_warning(message, "Calculator")
+
+    def _get_variants(self) -> list[dict]:
         return self._variant_items
 
     def set_latex_style(self, style: LatexStyle) -> None:
@@ -262,11 +324,14 @@ class CalculatorViewModel(QObject):
         One entry point for the three knobs: they all mean "draw it again", and
         they now arrive together — the theme owns the ink, the settings store the
         size and the font file, and `MainViewModel` assembles both into one
-        `LatexStyle`. The data URL changes, so the `Image` refreshes itself.
+        `LatexStyle`. A new style invalidates every token; old renders may finish
+        but cannot overwrite the new artwork.
         """
         if style == self._latex_style:
             return
         self._latex_style = style
+        self._latex_service.begin_generation("calculator")
+        self._latex_pending.clear()
         self._refresh_strip()
         self._render_variants()
         self.resultChanged.emit()
@@ -294,7 +359,7 @@ class CalculatorViewModel(QObject):
     #: The result card's rows: {kind, expression, latex, latexUrl,
     #: naturalWidth, naturalHeight}. Empty on an error or a result with no
     #: alternative worth showing.
-    variants = Property("QVariantList", _get_variants, notify=resultChanged)
+    variants = Property("QVariantList", _get_variants, notify=variantsChanged)
 
     def _get_backend_busy(self) -> bool:
         return self._backend_busy
@@ -435,6 +500,10 @@ class CalculatorViewModel(QObject):
         self._backend.cancel()
         self._active_request = None
         self._pending = None
+        self._last_completed_request = None
+        self._latex_service.begin_generation("calculator")
+        self._latex_pending.clear()
+        self._plot_token += 1
         self._set_backend_state(False, "ready")
         self._result_text = ""
         self._result_latex = ""
@@ -446,22 +515,45 @@ class CalculatorViewModel(QObject):
         self.resultChanged.emit()
 
     def _apply_result(self, result: Result) -> None:
-        """Apply a request's outcome to the exposed display properties."""
+        """Apply a request's outcome, then schedule its plot separately."""
+        # A new outcome invalidates every render from the previous one, even if
+        # it is still in the renderer's queue.
+        self._latex_service.begin_generation("calculator")
+        self._latex_pending.clear()
+        self._clear_variants()
         if isinstance(result, Success):
             self._result_text = str(result.value)
             self._result_latex = result.latex
             self._is_error = False
             self._error_message = ""
-            self._set_plot(plot_series(result.value, result.origin))
         else:
             self._result_text = ""
             self._result_latex = ""
             self._is_error = True
             self._error_message = self._format_failure(result)
-            self._clear_variants()
-            self._set_plot(())
+        # Capture the generation before any notification: the renderer can
+        # complete synchronously in headless mode, and a listener may start
+        # another calculation, which must own the plot.
+        self._plot_token += 1
+        token = self._plot_token
         self._refresh_strip()
         self.resultChanged.emit()
+
+        # Plot preparation is not part of the result. It stays on the UI thread
+        # (qmlmathplot is Qt/GPU state) but runs after this notification.
+        if QCoreApplication.instance() is None:
+            self._apply_plot(result, token)
+        else:
+            QTimer.singleShot(0, lambda: self._apply_plot(result, token))
+
+    def _apply_plot(self, result: Result, token: int) -> None:
+        """Apply the curves for one result if it is still the current one."""
+        if token != self._plot_token:
+            return
+        if isinstance(result, Success):
+            self._set_plot(plot_series(result.value, result.origin))
+        else:
+            self._set_plot(())
 
     @staticmethod
     def _format_failure(failure: Failure) -> str:
@@ -484,6 +576,9 @@ class CalculatorViewModel(QObject):
         """
         if self._active_request is not None:
             self._backend.cancel()
+        # A variant message from the previous answer must not attach to the
+        # result of this request, even if it arrives while this one is running.
+        self._last_completed_request = None
         self._request_seq += 1
         self._active_request = self._request_seq
         self._pending = pending
@@ -500,7 +595,7 @@ class CalculatorViewModel(QObject):
                 self._active_request, f"{type(exc).__name__}: {exc}"
             )
 
-    def _take_pending(self, request_id: int) -> Optional[dict]:
+    def _take_pending(self, request_id: int) -> dict | None:
         """Claim a reply, or return None when it belongs to a cancelled request."""
         if request_id != self._active_request:
             return None
@@ -509,22 +604,30 @@ class CalculatorViewModel(QObject):
         self._active_request = None
         return pending
 
-    def _on_backend_finished(
-        self, request_id: int, result: Result, variant_rows: object
-    ) -> None:
+    def _on_backend_finished(self, request_id: int, result: Result) -> None:
         """A model answer arrived: display it, then record its effects."""
         pending = self._take_pending(request_id)
         if pending is None:
             return
         self._set_backend_state(False, "ready")
-        # Set the rows before `_apply_result` emits `resultChanged`, so the card
-        # and the result update in one notification.
-        self._apply_variants(variant_rows if isinstance(result, Success) else ())
+        # Identify the displayed result before notifying: a listener may start
+        # another request, which must invalidate this one's late variants.
+        self._last_completed_request = request_id
+        # Result first: it no longer waits for optional variant rows.
         self._apply_result(result)
         if isinstance(result, Success):
             self._record_success(pending, result)
         else:
             self._record_failure(pending, result, allow_invalid=True)
+
+    @Slot(int, object)
+    def _on_variants_ready(self, request_id: int, rows: object) -> None:
+        """Attach optional rows to the already displayed result, if it is current."""
+        if request_id != self._last_completed_request:
+            return
+        if self._active_request is not None:
+            return
+        self._apply_variants(rows)
 
     def _on_backend_timed_out(self, request_id: int) -> None:
         """The backend killed a request at its deadline."""
@@ -618,6 +721,16 @@ class CalculatorViewModel(QObject):
             self._log.add_warning(
                 f"Failed to store invalid entry: {exc}", "Calculator"
             )
+
+    @Slot()
+    def warmUpBackend(self) -> None:
+        """Start the calculation and renderer processes after the first frame.
+
+        The application calls this once after the first frame; the workers'
+        imports then overlap window setup instead of the first Enter/result.
+        """
+        self._backend.warm_up()
+        self._latex_service.warm_up()
 
     @Slot(str)
     def calculate(self, expression: str) -> None:

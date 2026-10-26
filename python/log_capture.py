@@ -1,4 +1,3 @@
-# coding: utf-8
 """Routes what the interpreter and Qt say into the app's own log.
 
 Qt's warnings and uncaught Python exceptions are invisible in a packaged build:
@@ -35,10 +34,10 @@ raises underneath it regardless.
 
 import sys
 import traceback
-from pathlib import Path
 import warnings
+from pathlib import Path
 from types import TracebackType
-from typing import TYPE_CHECKING, Optional, Type
+from typing import TYPE_CHECKING
 
 from .viewmodel.log_viewmodel import LogLevel, LogViewModel
 
@@ -182,9 +181,9 @@ def _level_for(msg_type: "QtMsgType") -> LogLevel:
 def _install_excepthook(sink: LogViewModel) -> None:
     """Report uncaught exceptions, keeping Python's own reporting intact."""
     def hook(
-        exc_type: Type[BaseException],
+        exc_type: type[BaseException],
         exc_value: BaseException,
-        exc_tb: Optional[TracebackType],
+        exc_tb: TracebackType | None,
     ) -> None:
         if _shutting_down:
             return

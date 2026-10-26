@@ -1,4 +1,3 @@
-# coding: utf-8
 """Input mode of the calculator page.
 
 UI state, not model state: it says which input row the user is looking at, so it

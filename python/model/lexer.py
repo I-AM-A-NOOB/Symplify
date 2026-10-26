@@ -1,4 +1,3 @@
-# coding: utf-8
 """Tokenizing the calculator's expression language (pure Python, zero Qt).
 
 The point of this module is that the *lexical* rules live next to the rules that
@@ -19,8 +18,9 @@ SymPy can resolve, and ``x²`` splits into a name and a stray character instead
 of looking like one identifier.
 """
 
+from collections.abc import Mapping, Sequence
 from enum import Enum, auto
-from typing import Any, List, Mapping, NamedTuple, Optional, Sequence
+from typing import Any, NamedTuple
 
 from .variable import SYMPY_CONSTANTS, sympy_callables
 
@@ -130,7 +130,7 @@ def _name_kind(name: str, scope: Mapping[str, Any]) -> TokenKind:
     return TokenKind.NAME
 
 
-def _operator_at(text: str, start: int) -> Optional[str]:
+def _operator_at(text: str, start: int) -> str | None:
     """The operator at ``start``, longest match first, or None."""
     for operator in _OPERATORS:
         if text.startswith(operator, start):
@@ -138,7 +138,7 @@ def _operator_at(text: str, start: int) -> Optional[str]:
     return None
 
 
-def tokenize(text: str, scope: Optional[Mapping[str, Any]] = None) -> List[Token]:
+def tokenize(text: str, scope: Mapping[str, Any] | None = None) -> list[Token]:
     """Every run of ``text`` as a :class:`Token`, in order.
 
     Args:
@@ -150,7 +150,7 @@ def tokenize(text: str, scope: Optional[Mapping[str, Any]] = None) -> List[Token
         A list of tokens covering the whole of ``text``, gaps included.
     """
     scope = {} if scope is None else scope
-    tokens: List[Token] = []
+    tokens: list[Token] = []
     index = 0
     length = len(text)
 

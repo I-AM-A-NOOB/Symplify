@@ -1,4 +1,3 @@
-# coding: utf-8
 """Font discovery and preference-list handling (pure Python, zero Qt).
 
 Two jobs the settings page needs:
@@ -20,13 +19,12 @@ viewmodel, so this module stays testable without a QApplication.
 """
 
 import os
-import warnings
 import re
 import sys
 import tempfile
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 #: Families tried, in order, for code text (monospace preferred). Picked so the
 #: Windows, macOS and Linux entries cover the same ground; the generic keyword
@@ -45,7 +43,7 @@ DEFAULT_KEYBOARD_FAMILY = (
 )
 
 #: Generic keywords a user may type, expanded into real families to try.
-GENERIC_EXPANSIONS: Dict[str, Tuple[str, ...]] = {
+GENERIC_EXPANSIONS: dict[str, tuple[str, ...]] = {
     "monospace": (
         "Cascadia Mono", "Consolas", "SF Mono", "Menlo", "Monaco",
         "DejaVu Sans Mono", "Liberation Mono", "Courier New", "Noto Sans Mono",
@@ -71,17 +69,17 @@ CODE_GLYPHS = "0123456789+-*/^=<>()[]{}.,;:%|!_"
 _MATH_FONT_CACHE_DIRNAME = "symplify-fonts"
 
 
-def split_families(text: str) -> List[str]:
+def split_families(text: str) -> list[str]:
     """Parse a comma-separated preference list into family names, in order."""
     return [part.strip() for part in str(text or "").split(",") if part.strip()]
 
 
-def expand_keyword(name: str) -> Tuple[str, ...]:
+def expand_keyword(name: str) -> tuple[str, ...]:
     """``name`` as candidate families: generic keywords expand, others pass through."""
     return GENERIC_EXPANSIONS.get(name.strip().casefold(), (name,))
 
 
-def font_directories() -> List[Path]:
+def font_directories() -> list[Path]:
     """The platform's font directories, in the order a font would be found.
 
     Mirrors what ziafont searches (``ziafont/findfont.py``) plus the per-user
@@ -113,9 +111,9 @@ def font_directories() -> List[Path]:
     return [d for d in dirs if d.is_dir()]
 
 
-def _font_files() -> List[Path]:
+def _font_files() -> list[Path]:
     """Every font file in the platform font directories (recursive)."""
-    files: List[Path] = []
+    files: list[Path] = []
     for directory in font_directories():
         for path, _dirs, names in os.walk(directory):
             for name in names:
@@ -124,7 +122,7 @@ def _font_files() -> List[Path]:
     return files
 
 
-def _math_families(path: Path) -> List[str]:
+def _math_families(path: Path) -> list[str]:
     """Family names in ``path`` whose font carries a ``MATH`` table.
 
     A broken or unreadable file yields an empty list rather than raising: font
@@ -137,7 +135,7 @@ def _math_families(path: Path) -> List[str]:
             fonts = TTCollection(path, lazy=True).fonts
         else:
             fonts = [TTFont(path, lazy=True, fontNumber=0)]
-        names: List[str] = []
+        names: list[str] = []
         for font in fonts:
             if "MATH" not in font:
                 continue
@@ -188,7 +186,7 @@ def math_font_typesets(family: str) -> bool:
 
 
 @lru_cache(maxsize=1)
-def math_font_choices() -> Tuple[Dict[str, Any], ...]:
+def math_font_choices() -> tuple[dict[str, Any], ...]:
     """System fonts that can render math, as ``{family, path, collection}``.
 
     Cached: the scan reads the table directory of every installed font (~0.2 s for
@@ -197,7 +195,7 @@ def math_font_choices() -> Tuple[Dict[str, Any], ...]:
     layout: see ``math_font_typesets``, which the settings page runs on the one font
     the user picks instead of on every candidate.
     """
-    choices: List[Dict[str, Any]] = []
+    choices: list[dict[str, Any]] = []
     seen = set()
     for path in sorted(_font_files()):
         for family in _math_families(path):
@@ -217,7 +215,7 @@ def _slug(name: str) -> str:
     return re.sub(r"[^A-Za-z0-9]+", "-", name).strip("-").lower() or "font"
 
 
-def _extract_collection(path: Path, family: str) -> Optional[str]:
+def _extract_collection(path: Path, family: str) -> str | None:
     """Write ``family`` out of a ``.ttc`` as a standalone ``.ttf`` (cached).
 
     ziafont opens a font file as a single font and cannot read a collection, so
@@ -243,7 +241,7 @@ def _extract_collection(path: Path, family: str) -> Optional[str]:
     return None
 
 
-def math_font_path(family: str) -> Optional[str]:
+def math_font_path(family: str) -> str | None:
     """The file to hand ziamath for ``family``; ``None`` means "use the default".
 
     An empty or unknown family falls back to the default — ziamath's bundled

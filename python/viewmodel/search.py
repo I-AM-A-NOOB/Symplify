@@ -1,4 +1,3 @@
-# coding: utf-8
 """Live search filters for the Variables and History pages.
 
 Both pages have a search box whose match mode can be switched. Filtering lives in

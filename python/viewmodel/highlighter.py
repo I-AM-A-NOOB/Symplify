@@ -1,4 +1,3 @@
-# coding: utf-8
 """Painting code in the QML text items.
 
 QML has no ``QSyntaxHighlighter``, but ``TextArea.textDocument`` hands out the
@@ -14,16 +13,16 @@ spans for the whole text are recomputed and the document rehighlighted, rather
 than only the block that changed.
 """
 
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
+from collections.abc import Callable, Mapping, Sequence
+from typing import Any
 
-from PySide6.QtCore import QObject
 from PySide6.QtGui import QColor, QSyntaxHighlighter, QTextCharFormat, QTextDocument
 from PySide6.QtQuick import QQuickTextDocument
 
 from ..code_style import Style, color_for, spans
 
 #: ``(start_in_block, length, format)`` — what one block has to paint.
-BlockFormat = Tuple[int, int, QTextCharFormat]
+BlockFormat = tuple[int, int, QTextCharFormat]
 
 #: What the highlighter asks for the current name -> value scope.
 ScopeProvider = Callable[[], Mapping[str, Any]]
@@ -35,9 +34,9 @@ class CodeHighlighter(QSyntaxHighlighter):
     def __init__(
         self,
         document: QTextDocument,
-        scope_provider: Optional[ScopeProvider] = None,
-        styles: Optional[Mapping[Style, str]] = None,
-        bracket_colors: Optional[Sequence[str]] = None,
+        scope_provider: ScopeProvider | None = None,
+        styles: Mapping[Style, str] | None = None,
+        bracket_colors: Sequence[str] | None = None,
     ):
         super().__init__(document)
         self._scope_provider = scope_provider
@@ -45,16 +44,16 @@ class CodeHighlighter(QSyntaxHighlighter):
         # default palette or the bracket rainbow), so there is one such rule.
         self._styles = styles
         self._bracket_colors = bracket_colors
-        self._formats: Dict[int, List[BlockFormat]] = {}
-        self._cache: Dict[str, QTextCharFormat] = {}
+        self._formats: dict[int, list[BlockFormat]] = {}
+        self._cache: dict[str, QTextCharFormat] = {}
         self._recomputing = False
         document.contentsChanged.connect(self._on_contents_changed)
         self._recompute()
 
     def set_palette(
         self,
-        styles: Optional[Mapping[Style, str]],
-        bracket_colors: Optional[Sequence[str]],
+        styles: Mapping[Style, str] | None,
+        bracket_colors: Sequence[str] | None,
     ) -> None:
         """Recolour an attached highlighter in place.
 
@@ -83,7 +82,7 @@ class CodeHighlighter(QSyntaxHighlighter):
         try:
             document = self.document()
             scope = None if self._scope_provider is None else self._scope_provider()
-            per_block: Dict[int, List[BlockFormat]] = {}
+            per_block: dict[int, list[BlockFormat]] = {}
             for span in spans(document.toPlainText(), scope):
                 block = document.findBlock(span.start)
                 if not block.isValid():
@@ -123,9 +122,9 @@ class CodeHighlighter(QSyntaxHighlighter):
 
 def attach(
     text_document: QQuickTextDocument,
-    scope_provider: Optional[ScopeProvider] = None,
-    styles: Optional[Mapping[Style, str]] = None,
-    bracket_colors: Optional[Sequence[str]] = None,
+    scope_provider: ScopeProvider | None = None,
+    styles: Mapping[Style, str] | None = None,
+    bracket_colors: Sequence[str] | None = None,
 ) -> CodeHighlighter:
     """Code colouring for a QML text item's ``textDocument`` property.
 

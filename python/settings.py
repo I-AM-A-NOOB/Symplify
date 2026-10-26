@@ -1,4 +1,3 @@
-# coding: utf-8
 """Application settings: where they live and how they are stored.
 
 Pure Python (no Qt) so the whole store is testable headless.
@@ -34,7 +33,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 import yaml
 
@@ -54,10 +53,11 @@ CONFIG_FILENAME = "config.yaml"
 APP_DIRNAME = "Symplify"
 
 #: Every setting the app understands, with its default.
-DEFAULTS: Dict[str, Any] = {
+DEFAULTS: dict[str, Any] = {
     "version": 2,
     "appearance": {
         "theme": "Auto",          # Auto | Light | Dark
+        "language": "system",     # system | language code (see i18n/*.qm)
         "backdrop": "mica",       # mica | acrylic | tabbed | none (Windows only)
         "accent": "#605ed2",      # the CUSTOM accent colour, #rrggbb (accent_mode == custom)
         "accent_mode": "default", # default (RinUI's own colour) | system (QPalette) | custom
@@ -98,6 +98,8 @@ DEFAULTS: Dict[str, Any] = {
         "keyboard_size": 16,
         "latex_font": "",         # "" = ziamath's bundled STIX Two Math
         "latex_size": 24,         # ziamath's own default font size, in points
+        # A filename under <config dir>/keyboards/; "" = the shipped layout.
+        "keyboard_layout": "",
     },
     "window": {
         "remember": True,         # restore size/position on the next launch
@@ -132,6 +134,7 @@ _HEX_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
 #: Every leaf key that must be validated on load and on write.
 _KNOWN_KEYS = (
     "appearance.theme",
+    "appearance.language",
     "appearance.backdrop",
     "appearance.accent",
     "appearance.accent_mode",
@@ -146,6 +149,7 @@ _KNOWN_KEYS = (
     "workspace.keyboard_size",
     "workspace.latex_font",
     "workspace.latex_size",
+    "workspace.keyboard_layout",
     "window.remember",
     "window.width",
     "window.height",
@@ -160,7 +164,7 @@ _WORKSPACE_KEYS = tuple(key.split(".", 1)[1] for key in _KNOWN_KEYS
                         if key.startswith("workspace."))
 
 
-def _platform(system: Optional[str] = None) -> str:
+def _platform(system: str | None = None) -> str:
     """Which platform's convention to follow (overridable for tests)."""
     if system:
         return system
@@ -173,9 +177,9 @@ def _platform(system: Optional[str] = None) -> str:
 
 def resolve_config_dir(
     root: Path,
-    env: Optional[Dict[str, str]] = None,
-    system: Optional[str] = None,
-) -> Tuple[Path, bool]:
+    env: dict[str, str] | None = None,
+    system: str | None = None,
+) -> tuple[Path, bool]:
     """Resolve the configuration directory for this launch.
 
     Args:
@@ -201,7 +205,7 @@ def resolve_config_dir(
     return base / APP_DIRNAME.lower(), False
 
 
-def _merge_defaults(loaded: Any) -> Dict[str, Any]:
+def _merge_defaults(loaded: Any) -> dict[str, Any]:
     """Overlay a loaded mapping onto the defaults (unknown keys survive)."""
     values = copy.deepcopy(DEFAULTS)
     if not isinstance(loaded, dict):
@@ -228,15 +232,15 @@ class SettingsStore:
         """Initialize the store for ``path`` (not read yet — call :meth:`load`)."""
         self.path = Path(path)
         self.is_portable = is_portable
-        self.values: Dict[str, Any] = copy.deepcopy(DEFAULTS)
+        self.values: dict[str, Any] = copy.deepcopy(DEFAULTS)
         self.warning = ""
 
     @classmethod
     def open(
         cls,
         root: Path,
-        env: Optional[Dict[str, str]] = None,
-        system: Optional[str] = None,
+        env: dict[str, str] | None = None,
+        system: str | None = None,
     ) -> "SettingsStore":
         """Resolve the config location for ``root``, then load it."""
         directory, is_portable = resolve_config_dir(root, env, system)
@@ -274,7 +278,7 @@ class SettingsStore:
         self.update({key: value})
         return self.get(key)
 
-    def update(self, values: Dict[str, Any]) -> None:
+    def update(self, values: dict[str, Any]) -> None:
         """Set several dotted keys and persist once (window geometry, resets)."""
         for key, value in values.items():
             self._write_key(key, self._validate_known(key, value))
@@ -386,6 +390,16 @@ class SettingsStore:
         if key == "workspace.latex_font":
             # A family name from the dropdown, or "" for ziamath's own font.
             return value.strip() if isinstance(value, str) else default
+        if key == "workspace.keyboard_layout":
+            # A bare filename inside the settings folder's keyboards/ directory.
+            # A path is not a layout name, and only YAML files are offered.
+            text = value.strip() if isinstance(value, str) else ""
+            if not text:
+                return ""
+            name = Path(text).name
+            if name != text or Path(name).suffix.lower() not in (".yaml", ".yml"):
+                return ""
+            return name
         if key == "workspace.bracket_colors":
             # A list of colours, one per nesting level. Entries that are not
             # `#rrggbb` are dropped rather than rejecting the line, and what is

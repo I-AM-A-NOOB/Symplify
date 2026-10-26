@@ -1,4 +1,3 @@
-# coding: utf-8
 """What a piece of code should look like (pure Python, zero Qt).
 
 The one place that turns text into *colour spans*. Two renderers consume the
@@ -21,8 +20,9 @@ highlighters on one document silently erase each other.
 """
 
 import html
+from collections.abc import Mapping, Sequence
 from enum import Enum, auto
-from typing import Any, Dict, List, Mapping, NamedTuple, Optional, Sequence, Tuple
+from typing import Any, NamedTuple
 
 from . import code_themes
 from .brackets import DEFAULT_COLORS as BRACKET_COLORS
@@ -54,11 +54,11 @@ class CodeSpan(NamedTuple):
     start: int
     length: int
     style: Style
-    layer: Optional[int] = None
+    layer: int | None = None
 
 
 #: Which token kinds are worth a span of their own.
-_KIND_STYLES: Dict[TokenKind, Style] = {
+_KIND_STYLES: dict[TokenKind, Style] = {
     TokenKind.NUMBER: Style.NUMBER,
     TokenKind.VARIABLE: Style.VARIABLE,
     TokenKind.CALLABLE: Style.CALLABLE,
@@ -67,7 +67,7 @@ _KIND_STYLES: Dict[TokenKind, Style] = {
     TokenKind.UNKNOWN: Style.UNKNOWN,
 }
 
-def theme(family: str, dark: bool) -> Tuple[Mapping[Style, str], Tuple[str, ...]]:
+def theme(family: str, dark: bool) -> tuple[Mapping[Style, str], tuple[str, ...]]:
     """The palette and bracket colours for a family at the active UI theme.
 
     Every family in ``code_themes`` has a dark and a light member, so the code
@@ -103,7 +103,7 @@ def theme(family: str, dark: bool) -> Tuple[Mapping[Style, str], Tuple[str, ...]
     return styles, brackets
 
 
-def surface(family: str, dark: bool) -> Tuple[str, str, str]:
+def surface(family: str, dark: bool) -> tuple[str, str, str]:
     """The family's ``(background, ink, placeholder)`` for a code input.
 
     Any of them may be ``""``, which means the family has nothing to say — High
@@ -119,19 +119,19 @@ def surface(family: str, dark: bool) -> Tuple[str, str, str]:
 
 
 #: ``"number" -> Style.NUMBER``: how ``code_themes`` names the styles.
-_STYLE_BY_NAME: Dict[str, Style] = {style.name.lower(): style for style in Style}
+_STYLE_BY_NAME: dict[str, Style] = {style.name.lower(): style for style in Style}
 
 #: Style -> colour, used when the theme cannot answer — an unknown family, or a
 #: caller with no palette at all (headless, tests). **Only what is unambiguous**:
 #: numbers, names, callables and constants are left to the control's own text
 #: colour, because a fixed colour cannot read on both themes and the bracket
 #: rainbow already occupies the hue wheel.
-DEFAULT_STYLES: Dict[Style, str] = {
+DEFAULT_STYLES: dict[Style, str] = {
     Style.UNKNOWN: "#ff0000",       # a character the language has no use for
 }
 
 
-def spans(text: str, scope: Optional[Mapping[str, Any]] = None) -> List[CodeSpan]:
+def spans(text: str, scope: Mapping[str, Any] | None = None) -> list[CodeSpan]:
     """Everything in ``text`` worth painting, in order.
 
     Args:
@@ -146,7 +146,7 @@ def spans(text: str, scope: Optional[Mapping[str, Any]] = None) -> List[CodeSpan
     if not text:
         return []
 
-    merged: List[CodeSpan] = []
+    merged: list[CodeSpan] = []
     for token in tokenize(text, scope):
         style = _KIND_STYLES.get(token.kind)
         if style is not None:
@@ -162,9 +162,9 @@ def spans(text: str, scope: Optional[Mapping[str, Any]] = None) -> List[CodeSpan
 
 def color_for(
     span: CodeSpan,
-    styles: Optional[Mapping[Style, str]] = None,
-    bracket_colors: Optional[Sequence[str]] = None,
-) -> Optional[str]:
+    styles: Mapping[Style, str] | None = None,
+    bracket_colors: Sequence[str] | None = None,
+) -> str | None:
     """The colour a span is painted with, or None to leave it to the control.
 
     Both renderers ask this, so neither can invent a colour of its own — and a
@@ -190,9 +190,9 @@ def color_for(
 
 def to_rich_text(
     text: str,
-    scope: Optional[Mapping[str, Any]] = None,
-    styles: Optional[Mapping[Style, str]] = None,
-    bracket_colors: Optional[Sequence[str]] = None,
+    scope: Mapping[str, Any] | None = None,
+    styles: Mapping[Style, str] | None = None,
+    bracket_colors: Sequence[str] | None = None,
 ) -> str:
     """``text`` as markup, for the read-only places that show an expression.
 
@@ -207,7 +207,7 @@ def to_rich_text(
     if not marked:
         return html.escape(text)
 
-    out: List[str] = []
+    out: list[str] = []
     cursor = 0
     for span in marked:
         if span.start < cursor:

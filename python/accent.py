@@ -1,4 +1,3 @@
-# coding: utf-8
 """The accent shades Windows derives from a chosen colour (pure Python, zero Qt).
 
 Windows does not paint the accent colour it is handed. It derives a ramp of seven
@@ -67,10 +66,10 @@ Superseded
     (L 35.9 -> 65.1), and no single blend factor reaches it.
 """
 
-from typing import NamedTuple, Tuple
+from typing import NamedTuple
 
 #: ``(r, g, b)``, one byte per channel.
-Rgb = Tuple[int, int, int]
+Rgb = tuple[int, int, int]
 
 #: White point of the sRGB primaries, scaled so that ``Y`` spans 0..100.
 _WHITE = (95.047, 100.0, 108.883)
@@ -134,11 +133,11 @@ class _Lab(NamedTuple):
 
 
 class _Hsl(NamedTuple):
-    """HSL with ``h`` in turns (0..1), ``s`` and ``l`` in 0..1."""
+    """HSL with ``h`` in turns (0..1), ``s`` and ``lightness`` in 0..1."""
 
     h: float
     s: float
-    l: float
+    lightness: float
 
 
 # --- sRGB / CIELAB / HSL primitives ---------------------------------------
@@ -228,17 +227,17 @@ def _rgb_to_hsl(rgb: Rgb) -> _Hsl:
     return _Hsl(hue / 6, saturation, lightness)
 
 
-def _sector_channels(hsl: _Hsl) -> Tuple[float, float, float]:
+def _sector_channels(hsl: _Hsl) -> tuple[float, float, float]:
     """HSL as three sRGB values in 0..255, before any quantisation.
 
     The sextant tuple is written literally and in this order on purpose: it is the
     expression the OS evaluates, and reordering the additions (through a weights
     table, say) shifts the last bit and hence some bytes.
     """
-    chroma = (1 - abs(2 * hsl.l - 1)) * hsl.s
+    chroma = (1 - abs(2 * hsl.lightness - 1)) * hsl.s
     sextant = (hsl.h * 6) % 6
     middle = chroma * (1 - abs(sextant % 2 - 1))
-    minimum = hsl.l - chroma / 2
+    minimum = hsl.lightness - chroma / 2
     r, g, b = (
         (chroma, middle, 0.0),
         (middle, chroma, 0.0),
@@ -282,10 +281,10 @@ def _lerp_rounded(first: Rgb, second: Rgb, t: float) -> Rgb:
 def uses_lab_pipeline(rgb: Rgb) -> bool:
     """Whether the shell would take the Lab path for this accent colour."""
     hsl = _rgb_to_hsl(rgb)
-    return HSL_L_MIN <= hsl.l <= HSL_L_MAX and hsl.s >= HSL_S_MIN
+    return HSL_L_MIN <= hsl.lightness <= HSL_L_MAX and hsl.s >= HSL_S_MIN
 
 
-def _lab_ramp(rgb: Rgb) -> Tuple[Rgb, ...]:
+def _lab_ramp(rgb: Rgb) -> tuple[Rgb, ...]:
     lab = _rgb_to_lab(rgb)
     accent = _lab_to_rgb(lab._replace(L=_clamp(lab.L, LAB_L_MIN, LAB_L_MAX)))
     anchors = {
@@ -305,7 +304,7 @@ def _lab_ramp(rgb: Rgb) -> Tuple[Rgb, ...]:
     return tuple(ramp)
 
 
-def _hsl_ramp(rgb: Rgb) -> Tuple[Rgb, ...]:
+def _hsl_ramp(rgb: Rgb) -> tuple[Rgb, ...]:
     hue, saturation, lightness = _rgb_to_hsl(rgb)
     lightness = _clamp(lightness, HSL_L_MIN, HSL_L_MAX)
     reach = abs(lightness - 0.5)
@@ -317,7 +316,7 @@ def _hsl_ramp(rgb: Rgb) -> Tuple[Rgb, ...]:
     return tuple(ramp)
 
 
-def palette(rgb: Rgb) -> Tuple[Rgb, ...]:
+def palette(rgb: Rgb) -> tuple[Rgb, ...]:
     """The seven accent shades for ``rgb``, ordered light3 .. dark3."""
     return _lab_ramp(rgb) if uses_lab_pipeline(rgb) else _hsl_ramp(rgb)
 
@@ -355,7 +354,7 @@ def for_scheme(color: str, dark: bool) -> str:
     return _hex(palette(rgb)[DARK_MODE_INDEX if dark else LIGHT_MODE_INDEX])
 
 
-def variants(color: str) -> Tuple[str, ...]:
+def variants(color: str) -> tuple[str, ...]:
     """The trio the preview strip shows, darkest to lightest.
 
     The two shades the schemes paint with around the accent itself: the ramp's

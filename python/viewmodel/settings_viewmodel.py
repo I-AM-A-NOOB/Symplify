@@ -1,4 +1,3 @@
-# coding: utf-8
 """Settings viewmodel: the settings store on one side, RinUI and QML on the other.
 
 The store (``python/settings.py``) is the single source of truth; RinUI's own
@@ -13,10 +12,21 @@ passed in rather than reached for globally. Rendering settings are applied by
 """
 
 import sys
-from typing import Dict, Optional, Tuple
 from functools import lru_cache
+from pathlib import Path
 
-from PySide6.QtCore import Property, QObject, QPoint, QTimer, Qt, QUrl, Signal, Slot
+from PySide6.QtCore import (
+    Property,
+    QCoreApplication,
+    QObject,
+    QPoint,
+    Qt,
+    QTimer,
+    QTranslator,
+    QUrl,
+    Signal,
+    Slot,
+)
 from PySide6.QtGui import (
     QColor,
     QDesktopServices,
@@ -37,7 +47,17 @@ from ..fonts import (
     math_font_typesets,
     split_families,
 )
-from ..keyboard_config import label_glyphs
+from ..keyboard_config import (
+    keyboard_dir,
+    keyboard_files,
+    label_glyphs,
+    new_keyboard_file,
+)
+from ..localization import (
+    available_languages,
+    resolve_language,
+    translation_file,
+)
 from ..settings import DEFAULTS, SettingsStore
 
 
@@ -120,12 +140,16 @@ class SettingsViewModel(QObject):
     latexSizeChanged = Signal()
     latexFontErrorChanged = Signal()
     accentChanged = Signal()
+    languageChanged = Signal()
+    keyboardLayoutsChanged = Signal()
+    keyboardErrorChanged = Signal()
 
     def __init__(
         self,
         store: SettingsStore,
-        theme_manager: Optional[QObject] = None,
-        parent: Optional[QObject] = None,
+        theme_manager: QObject | None = None,
+        parent: QObject | None = None,
+        translation_dir: Path | None = None,
     ):
         """Initialize the settings viewmodel.
 
@@ -133,11 +157,15 @@ class SettingsViewModel(QObject):
             store: The loaded settings store.
             theme_manager: RinUI's ``ThemeManager``; when None (tests) appearance
                 is still persisted but not applied to the running UI.
+            translation_dir: Folder holding ``symplify_<code>.qm`` files; the
+                repository's ``i18n/`` by default.
         """
         super().__init__(parent)
         self._store = store
         #: The family the last refused pick named, for the page's dialog.
         self._latex_font_error = ""
+        #: Why creating/opening the custom keyboard folder failed, if it did.
+        self._keyboard_error = ""
         #: OS accent per colour scheme ({False: light, True: dark}); empty when
         #: the platform cannot be asked for both (see _capture_system_accents).
         self._system_accents: dict = {}
@@ -145,7 +173,13 @@ class SettingsViewModel(QObject):
         #: paletteChanged, which would call back into the capture.
         self._capturing_accents = False
         self._theme_manager = theme_manager
-        self._window: Optional[QObject] = None
+        self._translation_dir = (
+            Path(translation_dir) if translation_dir is not None
+            else Path(__file__).resolve().parents[2] / "i18n"
+        )
+        self._translator: QTranslator | None = None
+        self._languages = available_languages(self._translation_dir)
+        self._window: QObject | None = None
         self._geometry_wired = False
         self._geometry_timer = QTimer(self)
         self._geometry_timer.setSingleShot(True)
@@ -154,7 +188,7 @@ class SettingsViewModel(QObject):
 
         #: The colour picked by the picker, held here until the drag settles —
         #: see _set_custom_accent. None means the store is authoritative.
-        self._pending_accent: Optional[str] = None
+        self._pending_accent: str | None = None
         self._accent_timer = QTimer(self)
         self._accent_timer.setSingleShot(True)
         self._accent_timer.setInterval(400)
@@ -168,13 +202,64 @@ class SettingsViewModel(QObject):
         # what the `system` accent mode reports, so a change to the OS accent has
         # to be followed while that mode is active.
         app = QGuiApplication.instance()
-        if app is not None:
+        if app is not None and hasattr(app, "styleHints"):
             # Capture before connecting: the switch below would otherwise emit
             # paletteChanged and re-enter this object.
             self._capture_system_accents()
             app.paletteChanged.connect(self._on_palette_changed)
+        self._apply_language()
 
     # --- appearance -------------------------------------------------------
+
+    def _get_language(self) -> str:
+        """The stored language choice (``system`` or a concrete code)."""
+        return str(self._store.get("appearance.language") or "system")
+
+    def _set_language(self, code: str) -> None:
+        known = {entry["code"] for entry in self._languages}
+        known.add("system")
+        if code not in known:
+            code = "system"
+        if code == self._get_language():
+            return
+        self._store.set("appearance.language", code)
+        self._apply_language()
+        self.languageChanged.emit()
+        self.changed.emit()
+
+    def _get_languages(self) -> list:
+        """Compiled languages; the UI prepends its translated system row."""
+        return list(self._languages)
+
+    def _apply_language(self) -> None:
+        """Install the selected translation, if a matching ``.qm`` exists.
+
+        A no-op without an application (headless tests). Removing the previous
+        translator before installing the next one prevents two catalogues from
+        overlapping during a live switch.
+        """
+        app = QCoreApplication.instance()
+        if app is None:
+            return
+        if self._translator is not None:
+            old = self._translator
+            app.removeTranslator(old)
+            old.deleteLater()
+            self._translator = None
+        code = resolve_language(self._get_language())
+        # English is the source language, but an optional `symplify_en.qm` can
+        # override the source copy without editing QML. If it is absent, the
+        # source strings are the fallback.
+        path = translation_file(self._translation_dir, code)
+        if path is None:
+            return
+        translator = QTranslator(self)
+        if translator.load(str(path)):
+            app.installTranslator(translator)
+            self._translator = translator
+
+    language = Property(str, _get_language, _set_language, notify=changed)
+    languages = Property("QVariantList", _get_languages, constant=True)
 
     def _apply_appearance(self) -> None:
         """Push the stored appearance into RinUI (no-op without a theme manager).
@@ -309,7 +394,7 @@ class SettingsViewModel(QObject):
         hints = app.styleHints()
         self._capturing_accents = True
         original = hints.colorScheme()
-        captured: Dict[str, str] = {}
+        captured: dict[str, str] = {}
         try:
             for scheme, keys in (
                 (Qt.ColorScheme.Dark, ("base", "dark")),
@@ -607,7 +692,9 @@ class SettingsViewModel(QObject):
         (`keyboard_config.label_glyphs`), which is the only place a missing
         character would be visible.
         """
-        return _chain_missing_glyphs(self._get_keyboard_family(), label_glyphs())
+        return _chain_missing_glyphs(
+            self._get_keyboard_family(), label_glyphs(self._keyboard_layout_path())
+        )
 
     def _get_latex_font_error(self) -> str:
         return self._latex_font_error
@@ -735,7 +822,7 @@ class SettingsViewModel(QObject):
             pass
         window.showMaximized()
 
-    def _startup_size(self) -> Tuple[int, int]:
+    def _startup_size(self) -> tuple[int, int]:
         """The size the window should be *created* with.
 
         Never larger than the screen the window will open on — a geometry saved
@@ -803,6 +890,105 @@ class SettingsViewModel(QObject):
         })
         self.changed.emit()
 
+    # --- custom keyboard --------------------------------------------------
+
+    def _keyboard_folder(self) -> Path:
+        return keyboard_dir(self._store.path.parent)
+
+    def _keyboard_layout_path(self) -> Path | None:
+        name = self._get_keyboard_layout()
+        return self._keyboard_folder() / name if name else None
+
+    def _get_keyboard_folder(self) -> str:
+        return str(self._keyboard_folder())
+
+    def _get_keyboard_layouts(self) -> list:
+        return [path.name for path in keyboard_files(self._keyboard_folder())]
+
+    def _get_keyboard_layout(self) -> str:
+        return self._store.get("workspace.keyboard_layout")
+
+    def _set_keyboard_layout(self, name: str) -> None:
+        name = name.strip() if isinstance(name, str) else ""
+        if name and name not in self._get_keyboard_layouts():
+            name = ""
+        self._store.set("workspace.keyboard_layout", name)
+        self.changed.emit()
+
+    def _get_keyboard_error(self) -> str:
+        return self._keyboard_error
+
+    @Slot(result=str)
+    def suggestKeyboardName(self) -> str:
+        """The next free ``myboard-N`` name, counted like a new variable."""
+        taken = {
+            Path(name).stem.casefold()
+            for name in self._get_keyboard_layouts()
+        }
+        counter = 1
+        while f"myboard-{counter}".casefold() in taken:
+            counter += 1
+        return f"myboard-{counter}"
+
+    @Slot()
+    def refreshKeyboardLayouts(self) -> None:
+        """Re-list the folder; reset a selection whose file has disappeared."""
+        names = self._get_keyboard_layouts()
+        self.keyboardLayoutsChanged.emit()
+        if self._get_keyboard_layout() not in [""] + names:
+            self._set_keyboard_layout("")
+
+    @Slot(str, str, result=str)
+    def newKeyboardLayout(self, name: str, source: str) -> str:
+        """Copy a layout into the settings folder under ``name`` and select it.
+
+        ``source`` is ``""`` for the shipped layout or a filename currently in
+        the keyboard folder. Returns the created filename, or ``""`` after
+        putting the reason in ``keyboardError``.
+        """
+        source_path: Path | None = None
+        if source:
+            if source not in self._get_keyboard_layouts():
+                self._keyboard_error = f"{source} is not in the keyboard folder"
+                self.keyboardErrorChanged.emit()
+                return ""
+            source_path = self._keyboard_folder() / source
+        try:
+            path = new_keyboard_file(
+                self._keyboard_folder(), source=source_path, name=name
+            )
+        except (OSError, ValueError) as exc:
+            self._keyboard_error = str(exc)
+            self.keyboardErrorChanged.emit()
+            return ""
+        self._keyboard_error = ""
+        self.keyboardErrorChanged.emit()
+        self.keyboardLayoutsChanged.emit()
+        self._set_keyboard_layout(path.name)
+        return path.name
+
+    @Slot()
+    def clearKeyboardError(self) -> None:
+        if not self._keyboard_error:
+            return
+        self._keyboard_error = ""
+        self.keyboardErrorChanged.emit()
+
+    @Slot()
+    def openKeyboardFolder(self) -> None:
+        """Open the settings-folder keyboards directory, creating it if needed."""
+        folder = self._keyboard_folder()
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            self._keyboard_error = str(exc)
+            self.keyboardErrorChanged.emit()
+            return
+        if self._keyboard_error:
+            self._keyboard_error = ""
+            self.keyboardErrorChanged.emit()
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
+
     # --- config file ------------------------------------------------------
 
     def _get_config_path(self) -> str:
@@ -828,8 +1014,12 @@ class SettingsViewModel(QObject):
         # not fire after the reset and resurrect the colour the user just wiped.
         self._accent_timer.stop()
         self._pending_accent = None
+        old_language = self._get_language()
         self._store.reset()
         self._apply_appearance()
+        self._apply_language()
+        if old_language != self._get_language():
+            self.languageChanged.emit()
         self.accentChanged.emit()
         self.latexSizeChanged.emit()
         self.changed.emit()
@@ -856,7 +1046,7 @@ class SettingsViewModel(QObject):
         return family_label(family)
 
     @Slot(bool, result="QVariantMap")
-    def codeSurface(self, dark: bool) -> Dict[str, str]:
+    def codeSurface(self, dark: bool) -> dict[str, str]:
         """The code theme's ``background``, ``ink`` and ``placeholder`` for a code input.
 
         The page passes the *effective* theme, as it does for the highlighter
@@ -971,5 +1161,16 @@ class SettingsViewModel(QObject):
     configPath = Property(str, _get_config_path, constant=True)
     configMode = Property(str, _get_config_mode, constant=True)
     warning = Property(str, _get_warning, notify=changed)
+    #: The folder holding user keyboard copies, and the filenames it offers.
+    keyboardFolder = Property(str, _get_keyboard_folder, constant=True)
+    keyboardLayouts = Property(
+        "QVariantList", _get_keyboard_layouts, notify=keyboardLayoutsChanged
+    )
+    keyboardLayout = Property(
+        str, _get_keyboard_layout, _set_keyboard_layout, notify=changed
+    )
+    keyboardError = Property(
+        str, _get_keyboard_error, notify=keyboardErrorChanged
+    )
 
 

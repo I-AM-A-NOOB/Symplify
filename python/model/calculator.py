@@ -1,4 +1,3 @@
-# coding: utf-8
 """Symbolic calculation model built on SymPy.
 
 The one place where user input becomes a value: audit, parse, evaluate. This
@@ -17,24 +16,154 @@ two fractions. Every value is therefore run through ``sympy.simplify`` (see
 derivative still knows the function it came from.
 """
 
+import ast
 import difflib
 import keyword
 import operator
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Any, List, Mapping, Optional, Union
+from functools import lru_cache
+from typing import Any
 
 import sympy
 from sympy.parsing.sympy_parser import (
     convert_xor,
     implicit_multiplication,
-    parse_expr,
+    null,
     standard_transformations,
+    stringify_expr,
 )
+
 from .latex import render_latex, render_latex_definition
 from .plotting import Origin
 from .variable import is_sympy_name, sympy_callables, validate_name
+
+#: SymPy callables that parse/compile/print/evaluate strings or shells. They are
+#: removed from the parser's globals and rejected at the AST gate as well: the
+#: calculator's input is untrusted, and ``parse_expr`` itself is an ``eval``.
+_UNSAFE_CALLS = frozenset({
+    "S", "sympify", "parse_expr", "evaluate", "lambdify", "codegen",
+    "autowrap", "ufuncify", "llvm_callable", "import_module", "preview",
+    "init_printing", "init_session", "plot", "plot_implicit", "plot_parametric",
+    "plot3d", "pprint", "pretty_print", "print_tree", "pager_print", "textplot",
+})
+
+#: Constructors whose string argument is data, not source. ``Symbol``/``Function``
+#: carry names; ``Float`` carries the numeric literal the tokenizer produced.
+_STRING_CALLS = frozenset({"Symbol", "Dummy", "Wild", "Function", "Float"})
+
+_SAFE_BINOPS = (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod, ast.Pow)
+_SAFE_UNARYOPS = (ast.UAdd, ast.USub)
+_SAFE_COMPARES = (ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE)
+_FLOAT_RE = re.compile(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?")
+
+
+class _UnsafeExpression(ValueError):
+    """The transformed expression is outside the calculator's safe grammar."""
+
+
+@lru_cache(maxsize=1)
+def _parser_globals() -> dict:
+    """A SymPy namespace with no Python builtins and no eval/compile helpers."""
+    namespace: dict = {}
+    exec("from sympy import *", namespace)
+    namespace.pop("__builtins__", None)
+    for name in tuple(namespace):
+        if (name in _UNSAFE_CALLS
+                or name.startswith("print_")
+                or name.startswith("pprint_")):
+            namespace.pop(name, None)
+    # The transformations use these names for ``max(a, b)``/``min(a, b)``.
+    namespace["max"] = sympy.Max
+    namespace["min"] = sympy.Min
+    # Explicit, so eval cannot inject the real builtins behind our back.
+    namespace["__builtins__"] = {}
+    return namespace
+
+
+def _validate_safe_ast(node: ast.AST, allowed_names: set[str]) -> None:
+    """Reject everything except arithmetic, SymPy calls, lists and indexing.
+
+    The input goes through SymPy's tokenizer, so the generated code is Python.
+    Attribute access, lambdas, comprehensions, imports and arbitrary calls are
+    the escape routes from that code; none of them is part of the calculator's
+    expression language.
+    """
+    if isinstance(node, ast.Expression):
+        _validate_safe_ast(node.body, allowed_names)
+    elif isinstance(node, ast.Constant):
+        value = node.value
+        if isinstance(value, str) or isinstance(value, bytes) or value is None \
+                or value is Ellipsis:
+            raise _UnsafeExpression("string constants are not supported")
+    elif isinstance(node, ast.Name):
+        if not isinstance(node.ctx, ast.Load):
+            raise _UnsafeExpression("assignment is not allowed in an expression")
+        if node.id.startswith("__") or node.id not in allowed_names:
+            raise _UnsafeExpression(f"unknown name '{node.id}'")
+    elif isinstance(node, ast.BinOp):
+        if not isinstance(node.op, _SAFE_BINOPS):
+            raise _UnsafeExpression("operator is not supported")
+        _validate_safe_ast(node.left, allowed_names)
+        _validate_safe_ast(node.right, allowed_names)
+    elif isinstance(node, ast.UnaryOp):
+        if not isinstance(node.op, _SAFE_UNARYOPS):
+            raise _UnsafeExpression("operator is not supported")
+        _validate_safe_ast(node.operand, allowed_names)
+    elif isinstance(node, ast.Compare):
+        if not all(isinstance(op, _SAFE_COMPARES) for op in node.ops):
+            raise _UnsafeExpression("comparison is not supported")
+        _validate_safe_ast(node.left, allowed_names)
+        for comparator in node.comparators:
+            _validate_safe_ast(comparator, allowed_names)
+    elif isinstance(node, ast.Call):
+        if not isinstance(node.func, ast.Name):
+            raise _UnsafeExpression("only named functions can be called")
+        name = node.func.id
+        if name.startswith("__") or name in _UNSAFE_CALLS or name not in allowed_names:
+            raise _UnsafeExpression(f"function '{name}' is not allowed")
+        allow_strings = name in _STRING_CALLS
+        for argument in node.args:
+            if allow_strings and isinstance(argument, ast.Constant) \
+                    and isinstance(argument.value, str):
+                if name == "Float" and not _FLOAT_RE.fullmatch(argument.value):
+                    raise _UnsafeExpression("invalid numeric literal")
+                continue
+            _validate_safe_ast(argument, allowed_names)
+        for keyword_arg in node.keywords:
+            if keyword_arg.arg is None:
+                raise _UnsafeExpression("keyword expansion is not supported")
+            if allow_strings and isinstance(keyword_arg.value, ast.Constant) \
+                    and isinstance(keyword_arg.value.value, str):
+                continue
+            _validate_safe_ast(keyword_arg.value, allowed_names)
+    elif isinstance(node, (ast.List, ast.Tuple)):
+        for element in node.elts:
+            _validate_safe_ast(element, allowed_names)
+    elif isinstance(node, ast.Subscript):
+        _validate_safe_ast(node.value, allowed_names)
+        _validate_safe_ast(node.slice, allowed_names)
+    elif isinstance(node, ast.Slice):
+        for part in (node.lower, node.upper, node.step):
+            if part is not None:
+                _validate_safe_ast(part, allowed_names)
+    else:
+        raise _UnsafeExpression(f"{type(node).__name__} is not supported")
+
+
+def _safe_parse_expr(text: str, local_dict: dict, transformations: tuple) -> Any:
+    """`parse_expr`'s transform/eval pipeline, gated to a safe AST."""
+    globals_dict = _parser_globals()
+    try:
+        code = stringify_expr(text, local_dict, globals_dict, transformations)
+        tree = ast.parse(code, mode="eval")
+        _validate_safe_ast(tree, set(globals_dict) | set(local_dict))
+        return eval(compile(tree, "<symplify>", "eval"), globals_dict, local_dict)
+    finally:
+        for name in local_dict.pop(null, ()):
+            local_dict[name] = null
 
 
 class ErrorKind(Enum):
@@ -77,7 +206,7 @@ class Success:
     expression: str
     value: Any
     latex: str
-    origin: Optional[Origin] = None
+    origin: Origin | None = None
 
 
 @dataclass(frozen=True)
@@ -98,7 +227,7 @@ class Failure:
 
 
 #: Result of any request: exactly one of the two shapes.
-Result = Union[Success, Failure]
+Result = Success | Failure
 
 
 @dataclass(frozen=True)
@@ -183,7 +312,7 @@ class _TransformRecorder:
 
     def __init__(self) -> None:
         """Start an empty record for one evaluation."""
-        self._calls: List[tuple] = []
+        self._calls: list[tuple] = []
 
     def namespace(self, scope: Mapping[str, Any]) -> dict:
         """``scope`` plus a recording wrapper for every transform not in it."""
@@ -203,7 +332,7 @@ class _TransformRecorder:
 
         return call
 
-    def top_level(self, value: Any) -> Optional[Origin]:
+    def top_level(self, value: Any) -> Origin | None:
         """The call the request *was*, or None when it was not one.
 
         Identity, not equality: ``parse_expr`` returns the call's own object for
@@ -230,7 +359,7 @@ class Calculator:
         )
 
     def evaluate(
-        self, expression: str, scope: Optional[Mapping[str, Any]] = None
+        self, expression: str, scope: Mapping[str, Any] | None = None
     ) -> Result:
         """Evaluate ``expression`` with ``scope`` as the visible variables.
 
@@ -253,7 +382,7 @@ class Calculator:
         return self._parse(expression, variables)
 
     def assign(
-        self, assignment: Assignment, scope: Optional[Mapping[str, Any]] = None
+        self, assignment: Assignment, scope: Mapping[str, Any] | None = None
     ) -> Result:
         """Answer an ``Assignment``: validate the target, then evaluate.
 
@@ -309,7 +438,7 @@ class Calculator:
         # operator is not repeated — `x += 1` is reported as the `x = …` it made.
         return Success(request, value, render_latex_definition(target, value))
 
-    def unknown_calls(self, expression: str, scope: Mapping[str, Any]) -> List[str]:
+    def unknown_calls(self, expression: str, scope: Mapping[str, Any]) -> list[str]:
         """Names used as calls that resolve to no function, in order of use.
 
         ``implicit_multiplication`` silently rewrites an unknown call into a
@@ -318,7 +447,7 @@ class Calculator:
         alone: those resolve to a value, and juxtaposition with a value is the
         documented meaning of ``f(x)`` there.
         """
-        found: List[str] = []
+        found: list[str] = []
         for name in _CALL_RE.findall(expression):
             if name in scope or is_sympy_name(name) or keyword.iskeyword(name):
                 continue
@@ -327,17 +456,21 @@ class Calculator:
         return found
 
     def _parse(self, expression: str, scope: Mapping[str, Any]) -> Result:
-        """Parse ``expression`` (sympy auto-evaluates as it constructs)."""
+        """Parse through SymPy's tokenizer, then a safe-AST eval boundary.
+
+        ``parse_expr`` itself is ``eval`` on generated code; see
+        `_safe_parse_expr`. SymPy auto-evaluates as it constructs the value.
+        """
         text = expression.strip()
         if not text:
             return Failure(expression, ErrorKind.SYNTAX, "nothing to evaluate")
         recorder = _TransformRecorder()
         try:
-            value = parse_expr(
-                text,
-                transformations=self.transformations,
-                local_dict=recorder.namespace(scope),
+            value = _safe_parse_expr(
+                text, recorder.namespace(scope), self.transformations
             )
+        except _UnsafeExpression as exc:
+            return Failure(expression, ErrorKind.SYNTAX, str(exc))
         except SyntaxError as exc:
             return Failure(expression, ErrorKind.SYNTAX, str(exc))
         except Exception as exc:

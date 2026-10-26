@@ -1,4 +1,3 @@
-# coding: utf-8
 """Regenerate ``icon/Symplify.ico`` (and the loose PNGs) from ``icon/Symplify.svg``.
 
     uv run python scripts/build_icon.py

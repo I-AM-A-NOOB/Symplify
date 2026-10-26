@@ -1,4 +1,3 @@
-# coding: utf-8
 """Bump Symplify's version (SemVer) and keep the two sources in sync.
 
 Usage (from the repo root):

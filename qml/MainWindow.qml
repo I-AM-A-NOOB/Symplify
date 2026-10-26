@@ -1,5 +1,6 @@
 import QtQuick 2.15
 import RinUI
+import "components"
 
 FluentWindow {
     id: window
@@ -54,6 +55,17 @@ FluentWindow {
         applyLogColors()
         applyLatexColors()
         applyPlotTheme()
+        showKeyboardLoadError()
+        // Start the calculation worker after the first frame so its SymPy
+        // import does not land on the user's first Enter.
+        Qt.callLater(calcVM.warmUpBackend)
+    }
+
+    function showKeyboardLoadError() {
+        if (vm.keyboardLoadError !== "" && !vm.keyboardLoadErrorShown) {
+            keyboardLoadDialog.open()
+            vm.markKeyboardLoadErrorShown()
+        }
     }
 
     // The plot's style follows the app's side (seaborn's base style sheets).
@@ -224,5 +236,15 @@ FluentWindow {
             calcVM.clear_result()
             navigationView.push(Qt.resolvedUrl("pages/CalculatorPage.qml"))
         }
+
+        function onKeyboardLoadErrorChanged() {
+            showKeyboardLoadError()
+        }
+    }
+
+    MessageDialog {
+        id: keyboardLoadDialog
+        title: qsTr("Keyboard could not be loaded")
+        body: vm.keyboardLoadError
     }
 }

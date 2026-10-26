@@ -1,4 +1,3 @@
-# coding: utf-8
 """Turn VS Code's and other editors' themes into the palette data for the app.
 
 Maintenance script. Run it after a VS Code update — or when a theme source moves —
@@ -34,7 +33,6 @@ import sys
 import urllib.request
 import zipfile
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 #: The VS Code release the bundled themes are taken from. Kept in step with the
 #: editor the app is developed against; a re-extraction after an update is a
@@ -71,7 +69,7 @@ AYU_REF = "2c6feb7215bf7ca6c8c9a51066f255025df3a5b9"
 #:   which jsDelivr serves as raw text.
 #: * ``("vsix", publisher, extension, version, member)`` — a file inside a
 #:   published extension archive (a zip; see :func:`fetch_vsix`).
-Source = Tuple[str, ...]
+Source = tuple[str, ...]
 
 
 def _vscode(path: str) -> Source:
@@ -94,7 +92,7 @@ def _github(member: str) -> Source:
 #: member, which is the case for the unused material at the end (flavours that
 #: exist on one side only, kept for later and deliberately **not** in
 #: ``code_themes.FAMILIES``, so nothing can select them).
-THEME_SOURCES: Dict[str, Tuple[Optional[Source], Optional[Source]]] = {
+THEME_SOURCES: dict[str, tuple[Source | None, Source | None]] = {
     "one": (
         ("raw", "akamud/vscode-theme-onedark", "a8be970644982221f9b61fb1c4b3da74b4beab79",
          "themes/OneDark.json"),
@@ -145,12 +143,12 @@ THEME_SOURCES: Dict[str, Tuple[Optional[Source], Optional[Source]]] = {
 #: and reads as ordinary text on One Dark's. Red is the honest signal, and it is
 #: the app's choice, not the theme's — so it is recorded here rather than
 #: hand-edited into the generated table where the next re-extraction would lose it.
-OVERRIDES: Dict[str, Dict[str, str]] = {
+OVERRIDES: dict[str, dict[str, str]] = {
     "one": {"unknown": "#ff0000"},
 }
 
 #: our style key -> the scopes to try, most specific first.
-TARGETS: Dict[str, List[str]] = {
+TARGETS: dict[str, list[str]] = {
     "number": ["constant.numeric"],
     "constant": ["constant.language", "variable.language"],
     "callable": ["entity.name.function", "support.function"],
@@ -165,13 +163,13 @@ _RAW = "https://raw.githubusercontent.com/{repo}/{ref}/{path}"
 #: nor the `foreground` it derives it from. `baseColors.ts` registers
 #: `foreground`, `inputColors.ts` derives `input.placeholderForeground` from it as
 #: `transparent(foreground, 0.5)` — 0.7 in high contrast.
-FOREGROUND_DEFAULTS: Dict[str, str] = {
+FOREGROUND_DEFAULTS: dict[str, str] = {
     "dark": "#cccccc",
     "light": "#616161",
     "hcDark": "#ffffff",
     "hcLight": "#292929",
 }
-PLACEHOLDER_ALPHA: Dict[str, float] = {
+PLACEHOLDER_ALPHA: dict[str, float] = {
     "dark": 0.5,
     "light": 0.5,
     "hcDark": 0.7,
@@ -232,7 +230,7 @@ def strip_jsonc(text: str) -> str:
     of this get both wrong on real theme files, which are full of URLs and scope
     names like ``source.powershell variable.other.member``.
     """
-    out: List[str] = []
+    out: list[str] = []
     index, length = 0, len(text)
     in_string = False
     while index < length:
@@ -271,7 +269,7 @@ def strip_jsonc(text: str) -> str:
 
 #: Downloaded archives and documents, keyed by URL: one VSIX holds every member a
 #: family needs, and re-downloading it per side would be four times the traffic.
-_CACHE: Dict[str, bytes] = {}
+_CACHE: dict[str, bytes] = {}
 
 
 def fetch_url(url: str) -> bytes:
@@ -282,7 +280,7 @@ def fetch_url(url: str) -> bytes:
     return _CACHE[url]
 
 
-def fetch_vsix(publisher: str, extension: str, version: str, member: str) -> Dict:
+def fetch_vsix(publisher: str, extension: str, version: str, member: str) -> dict:
     """``member`` of a published extension archive, which is a zip.
 
     The archive is fetched from Open VSX by the version the extension was
@@ -295,7 +293,7 @@ def fetch_vsix(publisher: str, extension: str, version: str, member: str) -> Dic
     return json.loads(strip_jsonc(archive.read(member).decode("utf-8-sig")))
 
 
-def fetch_source(source: Source) -> Dict:
+def fetch_source(source: Source) -> dict:
     """The theme a :data:`Source` names, comments stripped."""
     kind = source[0]
     if kind == "raw":
@@ -330,7 +328,7 @@ def normalize(color: str) -> str:
     return "#" + digits
 
 
-def split_alpha(color: str) -> Tuple[str, float]:
+def split_alpha(color: str) -> tuple[str, float]:
     """``(color, alpha)`` — VSCode writes the alpha as ``#RRGGBBAA`` or ``#RGBA``."""
     if len(color) == 9 and color.startswith("#"):
         return color[:7], int(color[7:9], 16) / 255
@@ -348,7 +346,7 @@ def blend_over(color: str, background: str, alpha: float) -> str:
     keeps ``#RRGGBBAA`` out of QML, where eight digits would mean *AARRGGBB*.
     """
 
-    def channels(value: str) -> Tuple[int, int, int]:
+    def channels(value: str) -> tuple[int, int, int]:
         value = value.lstrip("#")
         return int(value[0:2], 16), int(value[2:4], 16), int(value[4:6], 16)
 
@@ -357,7 +355,7 @@ def blend_over(color: str, background: str, alpha: float) -> str:
     return "#" + "".join(f"{part:02x}" for part in mixed)
 
 
-def placeholder_color(colors: Dict, background: str, variant: str) -> str:
+def placeholder_color(colors: dict, background: str, variant: str) -> str:
     """VSCode's ``input.placeholderForeground`` for one theme, resolved to a solid.
 
     The theme's own value when it names one — Solarized's carry an alpha — and
@@ -379,7 +377,7 @@ def placeholder_color(colors: Dict, background: str, variant: str) -> str:
     return blend_over(normalize(color), normalize(background), alpha)
 
 
-def merge_includes(theme: Dict, base: Dict) -> Dict:
+def merge_includes(theme: dict, base: dict) -> dict:
     """``base`` with ``theme``'s own entries layered on top (later wins)."""
     merged = {
         "colors": {**base.get("colors", {}), **theme.get("colors", {})},
@@ -388,7 +386,7 @@ def merge_includes(theme: Dict, base: Dict) -> Dict:
     return merged
 
 
-def load(source: Source) -> Dict:
+def load(source: Source) -> dict:
     """A theme with its whole ``include`` chain merged in (later wins).
 
     Only ``raw`` sources can include others — a published package or archive
@@ -413,7 +411,7 @@ def load(source: Source) -> Dict:
     return merge_includes(theme, load(("raw", repo, ref, "/".join(parts))))
 
 
-def resolve(token_colors: List[Dict], target: str) -> Optional[str]:
+def resolve(token_colors: list[dict], target: str) -> str | None:
     """The colour a TextMate target scope resolves to, most specific winning.
 
     Selectors match **by prefix in both directions**, which is how TextMate and
@@ -425,7 +423,7 @@ def resolve(token_colors: List[Dict], target: str) -> Optional[str]:
     to whichever comes later in the file, which is the precedence those engines
     apply.
     """
-    best: Optional[Tuple[int, int, str]] = None
+    best: tuple[int, int, str] | None = None
     for index, entry in enumerate(token_colors):
         scopes = entry.get("scope", [])
         if isinstance(scopes, str):
@@ -444,10 +442,10 @@ def resolve(token_colors: List[Dict], target: str) -> Optional[str]:
     return normalize(best[2]) if best else None
 
 
-def palette(source: Source, variant: str) -> Tuple[Dict[str, str], List[str], str, str, str]:
+def palette(source: Source, variant: str) -> tuple[dict[str, str], list[str], str, str, str]:
     """``(styles, brackets, background, ink, placeholder)`` for one theme."""
     theme = load(source)
-    styles: Dict[str, str] = {}
+    styles: dict[str, str] = {}
     for style, targets in TARGETS.items():
         for target in targets:
             color = resolve(theme["tokenColors"], target)

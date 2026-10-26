@@ -1,4 +1,3 @@
-# coding: utf-8
 """Other spellings of a value, for the calculator's result card.
 
 The model has already answered with the *simplified* value (see
@@ -14,7 +13,7 @@ representation problem is never a calculation failure.
 """
 
 from dataclasses import dataclass
-from typing import Any, List, Optional, Tuple
+from typing import Any
 
 import sympy
 
@@ -61,7 +60,7 @@ class Variant:
 
 
 def _add(
-    out: List[Variant],
+    out: list[Variant],
     seen: set[str],
     kind: str,
     value: Any,
@@ -77,7 +76,7 @@ def _add(
     out.append(Variant(kind, value, expression, render_latex(value)))
 
 
-def _polynomial(value: Any) -> Optional[sympy.Poly]:
+def _polynomial(value: Any) -> sympy.Poly | None:
     """``value`` as a small polynomial in plain symbols, or None.
 
     The generator check keeps `sin(x)` and `pi` out: sympy will happily treat
@@ -98,7 +97,7 @@ def _polynomial(value: Any) -> Optional[sympy.Poly]:
     return polynomial
 
 
-def variants(value: Any) -> Tuple[Variant, ...]:
+def variants(value: Any) -> tuple[Variant, ...]:
     """Alternative forms worth showing beside ``value``.
 
     Only one sympy object qualifies: ``solve``'s list of roots and other
@@ -115,7 +114,7 @@ def variants(value: Any) -> Tuple[Variant, ...]:
     except Exception:  # noqa: BLE001 - unprintable means nothing to compare
         return ()
 
-    variants_out: List[Variant] = []
+    variants_out: list[Variant] = []
     seen = {base_expression}
 
     # `v.is_Integer` is None for non-numbers; `is True` keeps the check honest.

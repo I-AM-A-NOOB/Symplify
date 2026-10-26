@@ -1,9 +1,12 @@
-# coding: utf-8
 """Root viewmodel for the QML Symplify app.
 
 Aggregates the sub-viewmodels and is exposed to QML as the ``vm``
 context property.
 """
+
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any
 
 from PySide6.QtCore import (
     Property,
@@ -15,19 +18,20 @@ from PySide6.QtCore import (
     Slot,
 )
 from PySide6.QtGui import QColor, QFontMetricsF, QGuiApplication, QKeyEvent
-from typing import Any, Mapping, Optional, Tuple
 
 from .. import log_capture
 from ..brackets import parse_colors
-from ..latex_render import LatexStyle
-from ..code_style import Style, to_rich_text, theme
+from ..code_style import Style, theme, to_rich_text
+from ..keyboard_config import load_keyboard_layout
+from ..latex_render import LatexStyle, render_data_url
 from ..model.calculator import Calculator
 from ..model.variable import VariableManager
 from ..settings import SettingsStore
 from .calculator_viewmodel import CalculatorViewModel
-from .history_viewmodel import HistoryModel
-from .log_viewmodel import LogViewModel
 from .highlighter import attach
+from .history_viewmodel import HistoryModel
+from .latex_service import LatexRenderService
+from .log_viewmodel import LogViewModel
 from .search import HistoryFilterModel, VariablesFilterModel
 from .settings_viewmodel import SettingsViewModel
 from .variables_viewmodel import VariablesViewModel
@@ -46,14 +50,21 @@ class MainViewModel(QObject):
 
     sendToCode = Signal(str)
     sendToAssign = Signal(str, str, str)
+    #: `keyboardRevision` changed: LaTeX keycaps must ask for new artwork.
+    keyboardStyleChanged = Signal()
+    #: The selected custom keyboard file (or the shipped default) changed.
+    keyboardTabsChanged = Signal()
+    keyboardLoadErrorChanged = Signal()
+    keyboardLoadErrorShownChanged = Signal()
 
     def __init__(
         self,
         settings: SettingsStore,
-        theme_manager: Optional[QObject] = None,
-        parent: Optional[QObject] = None,
-        initial_variables: Optional[Mapping[str, Any]] = None,
-        calculation_backend: Optional[QObject] = None,
+        theme_manager: QObject | None = None,
+        parent: QObject | None = None,
+        initial_variables: Mapping[str, Any] | None = None,
+        calculation_backend: QObject | None = None,
+        translation_dir: Path | None = None,
     ):
         """Initialize all models and viewmodels.
 
@@ -71,6 +82,8 @@ class MainViewModel(QObject):
             calculation_backend: How calculation requests leave the UI. None
                 keeps the synchronous in-process backend (tests/headless); the
                 application passes a ``ProcessBackend`` with a timeout.
+            translation_dir: Folder with compiled ``symplify_<code>.qm`` files;
+                defaults to the repository's ``i18n/``.
         """
         super().__init__(parent)
         self._calculator = Calculator()
@@ -78,7 +91,10 @@ class MainViewModel(QObject):
         for name, value in (initial_variables or {}).items():
             self._variable_manager.save(name, value)
 
-        self._history = HistoryModel(parent=self)
+        # One renderer process for both result/variant artwork and history
+        # cards. The service owns the cache and invalidates queued work by owner.
+        self._latex_service = LatexRenderService(self)
+        self._history = HistoryModel(parent=self, latex_service=self._latex_service)
         self._log = LogViewModel(parent=self)
         self._variables_vm = VariablesViewModel(
             self._variable_manager, self._log, self._calculator, parent=self
@@ -90,6 +106,7 @@ class MainViewModel(QObject):
             variables_model=self._variables_vm.model,
             parent=self,
             backend=calculation_backend,
+            latex_service=self._latex_service,
         )
 
         # Search-filtered views: the pages bind their views to these, so the
@@ -104,6 +121,11 @@ class MainViewModel(QObject):
         #: wants needs the page background behind it (see `MainWindow`), which only
         #: the QML side has.
         self._latex_color = "#000000"
+        #: LaTeX keycaps: the same ink, the LaTeX font, but the KEYBOARD size
+        #: (not the result size) so they sit at the height of the text keys.
+        self._keycap_style: LatexStyle | None = None
+        self._keycap_revision = 0
+        self._keycap_cache: dict = {}
         #: Attached code highlighters, by their QTextDocument. A theme switch
         #: changes the palette in place instead of rebuilding the page, so the
         #: C++ highlighter needs an explicit recolour (see
@@ -111,12 +133,19 @@ class MainViewModel(QObject):
         #: destroyed hook only drops the dictionary entry.
         self._code_highlighters: dict = {}
 
-        self._settings = SettingsViewModel(settings, theme_manager, parent=self)
+        self._settings = SettingsViewModel(
+            settings, theme_manager, parent=self, translation_dir=translation_dir
+        )
         self._settings.latexSizeChanged.connect(self._apply_latex_style)
         # `changed` rather than a font-specific signal: `latexFontPath` is a
         # filesystem path resolved by `python/fonts.py`, so it is re-read on every
         # settings change rather than only when the family name changes.
         self._settings.changed.connect(self._apply_latex_style)
+        self._settings.changed.connect(self._refresh_keyboard_layout)
+        self._keyboard_layout = self._settings.keyboardLayout
+        self._keyboard_load_error = ""
+        self._keyboard_load_error_shown = False
+        self._load_keyboard()
         self._apply_latex_style()     # apply the persisted rendering settings now
 
     def install_log_capture(self) -> None:
@@ -149,6 +178,80 @@ class MainViewModel(QObject):
         self._history.set_latex_style(style)
         self._variables_filter.set_latex_style(style)
 
+        # Keycaps share the ink and the LaTeX font, but use the keyboard font
+        # size: changing the result size must not resize the keyboard, and
+        # changing the keyboard size must re-render only the current tab's
+        # LaTeX keys. Comparing the frozen style keeps unrelated settings
+        # changes from throwing the cache away.
+        keycap_style = LatexStyle(
+            color=self._latex_color,
+            size=self._settings.keyboardSize,
+            font=self._settings.latexFontPath,
+        )
+        if keycap_style != self._keycap_style:
+            self._keycap_style = keycap_style
+            self._keycap_revision += 1
+            self._keycap_cache.clear()
+            self.keyboardStyleChanged.emit()
+
+    def _keyboard_layout_path(self) -> Path | None:
+        """The chosen custom file, or None for the shipped layout."""
+        if not self._keyboard_layout:
+            return None
+        return Path(self._settings.keyboardFolder) / self._keyboard_layout
+
+    def _load_keyboard(self) -> None:
+        self._keyboard_tabs, error = load_keyboard_layout(
+            self._keyboard_layout_path()
+        )
+        self._set_keyboard_load_error(error)
+
+    def _set_keyboard_load_error(self, message: str) -> None:
+        """Publish a load failure once; the log/dialog/settings row share it."""
+        if message == self._keyboard_load_error:
+            return
+        self._keyboard_load_error = message
+        if message:
+            self._keyboard_load_error_shown = False
+            self._log.add_error(message, "Keyboard")
+        self.keyboardLoadErrorChanged.emit()
+        self.keyboardLoadErrorShownChanged.emit()
+
+    def _refresh_keyboard_layout(self) -> None:
+        """Reload the QML keyboard model when the selected file changes."""
+        name = self._settings.keyboardLayout
+        if name == self._keyboard_layout:
+            return
+        self._keyboard_layout = name
+        self._load_keyboard()
+        self.keyboardTabsChanged.emit()
+
+    @Slot()
+    def reloadKeyboardLayouts(self) -> None:
+        """Re-read the current file; the Settings refresh button calls this."""
+        self._load_keyboard()
+        self.keyboardTabsChanged.emit()
+
+    @Slot()
+    def markKeyboardLoadErrorShown(self) -> None:
+        if self._keyboard_load_error_shown:
+            return
+        self._keyboard_load_error_shown = True
+        self.keyboardLoadErrorShownChanged.emit()
+
+    @Property("QVariantList", notify=keyboardTabsChanged)
+    def keyboardTabs(self) -> list:
+        """The active keyboard's tab descriptors, for `KeyboardPanel`."""
+        return self._keyboard_tabs
+
+    @Property(str, notify=keyboardLoadErrorChanged)
+    def keyboardLoadError(self) -> str:
+        return self._keyboard_load_error
+
+    @Property(bool, notify=keyboardLoadErrorShownChanged)
+    def keyboardLoadErrorShown(self) -> bool:
+        return self._keyboard_load_error_shown
+
     @Slot(str)
     def set_latex_color(self, color: str) -> None:
         """Set the ink rendered LaTeX is drawn in (called on theme changes).
@@ -165,6 +268,36 @@ class MainViewModel(QObject):
             return
         self._latex_color = name
         self._apply_latex_style()
+
+    @Property(int, notify=keyboardStyleChanged)
+    def keyboardRevision(self) -> int:
+        """Increments when the LaTeX keycap style changes.
+
+        QML bindings pass this value alongside the LaTeX source, which is what
+        makes an already-built key ask for fresh artwork after a theme, font or
+        keyboard-size change. Pixel data is never mutated in place.
+        """
+        return self._keycap_revision
+
+    @Slot(str, int, result="QVariantMap")
+    def latexKeycap(self, latex: str, revision: int) -> dict:
+        """Rendered LaTeX keycap for one key, as ``{url, width, height}``.
+
+        Rendered lazily, only for the visible tab, and cached per revision; an
+        empty ``url`` means ziamath refused the source and the QML key falls
+        back to its plain ``label``. The size/font are the keycap style built in
+        `_apply_latex_style` (LaTeX font, keyboard size), not the result style.
+        """
+        if not latex:
+            return {}
+        key = (latex, revision)
+        cached = self._keycap_cache.get(key)
+        if cached is not None:
+            return cached
+        url, width, height = render_data_url(latex, self._keycap_style or LatexStyle())
+        cached = {"url": url, "width": width, "height": height}
+        self._keycap_cache[key] = cached
+        return cached
 
     @Property(QObject, constant=True)
     def calculator(self) -> CalculatorViewModel:
@@ -206,7 +339,7 @@ class MainViewModel(QObject):
         """Copy ``text`` to the system clipboard."""
         QGuiApplication.clipboard().setText(text)
 
-    def _palette(self, dark: bool) -> Tuple[Mapping[Style, str], Tuple[str, ...]]:
+    def _palette(self, dark: bool) -> tuple[Mapping[Style, str], tuple[str, ...]]:
         """The code palette and bracket colours every renderer paints with.
 
         The bracket half is the settings' choice: ``theme`` follows the code

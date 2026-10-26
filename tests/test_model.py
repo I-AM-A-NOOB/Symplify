@@ -1,4 +1,3 @@
-# coding: utf-8
 """Behaviour tests for the calculation model and its viewmodels.
 
 Run from the repository root:
@@ -22,19 +21,25 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from sympy import Integral, Integer, Matrix, Rational, Symbol, cos, sin
+import warnings
 
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QTextDocument
-
-import warnings
+from sympy import Integer, Integral, Matrix, Rational, Symbol, cos, sin
 
 from python.brackets import DEFAULT_COLORS, parse_colors, spans
-from python.code_style import DEFAULT_STYLES, CodeSpan, Style, color_for, surface, theme
+from python.code_style import (
+    DEFAULT_STYLES,
+    CodeSpan,
+    Style,
+    color_for,
+    surface,
+    theme,
+    to_rich_text,
+)
 from python.code_style import spans as code_spans
-from python.code_style import to_rich_text
 from python.code_themes import FAMILIES, VSCODE_BRACKET_COLORS
-from python.model.lexer import TokenKind, tokenize
+from python.latex_render import MAX_LATEX_CHARS, LatexStyle, render_data_url
 from python.model.calculator import (
     Assignment,
     Calculator,
@@ -42,10 +47,10 @@ from python.model.calculator import (
     Failure,
     Success,
 )
+from python.model.lexer import TokenKind, tokenize
 from python.model.plotting import plot_series, plot_variables
 from python.model.variable import VariableManager, is_sympy_name, validate_name
 from python.model.variants import variants
-from python.latex_render import LatexStyle, MAX_LATEX_CHARS, render_data_url
 from python.settings import DEFAULTS, SettingsStore
 from python.viewmodel.history_viewmodel import HistoryModel
 from python.viewmodel.main_viewmodel import MainViewModel
@@ -161,6 +166,25 @@ def test_only_the_first_unknown_call_is_reported():
 
 def test_unknown_symbol_alone_is_fine():
     assert ok("z") == Symbol("z")
+
+
+def test_python_escape_syntax_is_rejected():
+    """The parser is an eval underneath; no Python attribute/comprehension
+    traversal, string-eval helper or builtin call may reach its evaluator."""
+    for text in (
+        "().__class__.__bases__[0].__subclasses__()",
+        "parse_expr('1 + 1')",
+        "sympify('1 + 1')",
+        "S('1 + 1')",
+        "open('nope.txt', 'w')",
+        "__import__('os')",
+    ):
+        assert isinstance(evaluate(text), Failure), text
+    assert isinstance(evaluate("x.__class__", {"x": X}), Failure)
+
+    # Strings that are data for a constructor are still allowed; arbitrary
+    # string expressions are not.
+    assert ok('Symbol("y")') == Symbol("y")
 
 
 # --------------------------------------------------------------------------
@@ -512,7 +536,8 @@ class DeferredBackend(QObject):
     busy/timeout/cancel path can be exercised without a process or event loop.
     """
 
-    finished = Signal(int, object, object)
+    finished = Signal(int, object)
+    variantsReady = Signal(int, object)
     timedOut = Signal(int)
     failed = Signal(int, str)
     timeout_seconds = 10.0
@@ -524,6 +549,11 @@ class DeferredBackend(QObject):
 
     def submit(self, request_id, kind, payload, scope):
         self.requests.append((request_id, kind, payload, scope))
+
+    def respond(self, request_id, result, rows=()):
+        """Deliver a result and its optional rows through the real signals."""
+        self.finished.emit(request_id, result)
+        self.variantsReady.emit(request_id, rows)
 
     def cancel(self):
         self.cancels += 1
@@ -539,6 +569,96 @@ def new_vm(backend=None):
     return MainViewModel(store, calculation_backend=backend)
 
 
+def test_latex_keycaps_render_and_follow_the_keyboard_style():
+    vm = new_vm()
+    revision = vm.keyboardRevision
+    cap = vm.latexKeycap(r"\sqrt{x}", revision)
+    assert cap["url"].startswith("data:image/svg+xml")
+    assert cap["width"] > 0 and cap["height"] > 0
+    # Same source + same revision is served from the cache, not re-rendered.
+    assert vm.latexKeycap(r"\sqrt{x}", revision) is cap
+    # The cache key is the exact source: one extra space is a new entry.
+    assert vm.latexKeycap(r"\sqrt{x} ", revision) is not cap
+    # Another key does not evict the first one.
+    vm.latexKeycap(r"\pi", revision)
+    assert vm.latexKeycap(r"\sqrt{x}", revision) is cap
+
+    # The keyboard size is the keycap size: result-sized LaTeX must not
+    # resize the keyboard, and a keyboard-size change must bust the cache.
+    vm.settings.latexSize = 30
+    assert vm.keyboardRevision == revision
+    assert vm.latexKeycap(r"\sqrt{x}", revision) is cap
+    vm.settings.keyboardSize = 24
+    assert vm.keyboardRevision != revision
+    bigger = vm.latexKeycap(r"\sqrt{x}", vm.keyboardRevision)
+    assert bigger["width"] > cap["width"]
+    assert bigger is not cap
+
+    # A source ziamath refuses is reported as empty artwork, so QML can show
+    # the plain label instead of a blank key.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        assert vm.latexKeycap("\\notacommand{", vm.keyboardRevision)["url"] == ""
+
+
+def test_switching_keyboard_layout_reloads_the_model():
+    from python.keyboard_config import new_keyboard_file
+
+    vm = new_vm()
+    path = new_keyboard_file(Path(vm.settings.keyboardFolder))
+    path.write_text(
+        "tiny:\n"
+        "  title: Tiny\n"
+        "  grid:\n"
+        "    - ['z']\n",
+        encoding="utf-8",
+    )
+
+    vm.settings.keyboardLayout = path.name
+    assert [tab["title"] for tab in vm.keyboardTabs] == ["Tiny"]
+
+    path.write_text(
+        "tiny2:\n"
+        "  title: Tiny 2\n"
+        "  grid:\n"
+        "    - ['z']\n",
+        encoding="utf-8",
+    )
+    vm.reloadKeyboardLayouts()
+    assert [tab["title"] for tab in vm.keyboardTabs] == ["Tiny 2"]
+
+    path.write_text("- broken\n", encoding="utf-8")
+    vm.reloadKeyboardLayouts()
+    assert vm.keyboardLoadError and path.name in vm.keyboardLoadError
+    assert "Could not load" in vm.log.formattedLogs
+    assert vm.keyboardTabs[0]["key"] == "basic"
+    assert vm.keyboardLoadErrorShown is False
+    vm.markKeyboardLoadErrorShown()
+    assert vm.keyboardLoadErrorShown is True
+
+    vm.settings.keyboardLayout = ""
+    assert vm.keyboardLoadError == ""
+
+
+def test_log_rich_text_waits_for_its_page():
+    from python.viewmodel.log_viewmodel import LogViewModel
+
+    log = LogViewModel()
+    log.add_info("first", "Probe")
+    assert "first" in log.formattedLogs
+    assert log.richLogs == ""
+
+    log.setDisplayActive(True)
+    assert "first" in log.richLogs
+
+    log.setDisplayActive(False)
+    log.add_info("second", "Probe")
+    assert "second" in log.formattedLogs
+    assert "second" not in log.richLogs
+    log.setDisplayActive(True)
+    assert "second" in log.richLogs
+
+
 def test_calculation_waits_for_the_backend_and_reports_busy():
     backend = DeferredBackend()
     vm = new_vm(backend)
@@ -551,11 +671,98 @@ def test_calculation_waits_for_the_backend_and_reports_busy():
     assert vm.calculator.backendStatus == "calculating"
 
     result = Calculator().evaluate("x + 1", {})
-    backend.finished.emit(request_id, result, variants(result.value))
+    backend.respond(request_id, result, variants(result.value))
     assert vm.calculator.backendBusy is False
     assert vm.calculator.backendStatus == "ready"
     assert vm.calculator.resultText == "x + 1"
     assert vm.history.count == 1
+
+
+def test_result_arrives_before_optional_variants_and_stale_variants_are_ignored():
+    backend = DeferredBackend()
+    vm = new_vm(backend)
+    vm.calculator.calculate("sqrt(2)")
+    request_id, kind, payload, _scope = backend.requests[-1]
+    assert (kind, payload) == ("evaluate", "sqrt(2)")
+
+    result = Calculator().evaluate("sqrt(2)", {})
+    backend.finished.emit(request_id, result)
+    assert vm.calculator.resultText == "sqrt(2)"
+    assert vm.calculator.variants == []
+    assert vm.calculator.backendBusy is False
+
+    backend.variantsReady.emit(request_id, variants(result.value))
+    assert [row["kind"] for row in vm.calculator.variants] == ["numeric"]
+    assert vm.calculator.variants[0]["latexUrl"].startswith("data:image/svg+xml")
+
+    # A new result invalidates the previous result's late optional work.
+    vm.calculator.calculate("2 + 2")
+    second_id = backend.requests[-1][0]
+    second_result = Calculator().evaluate("2 + 2", {})
+    backend.finished.emit(second_id, second_result)
+    assert vm.calculator.resultText == "4"
+    assert vm.calculator.variants == []
+    backend.variantsReady.emit(request_id, variants(result.value))
+    assert vm.calculator.variants == []
+    assert vm.calculator.resultText == "4"
+
+
+def test_a_result_listener_starting_a_new_calculation_keeps_the_new_plot_state():
+    vm = new_vm()
+    started = []
+
+    def on_result():
+        if not started:
+            started.append(True)
+            vm.calculator.calculate("2 + 2")
+
+    vm.calculator.resultChanged.connect(on_result)
+    vm.calculator.calculate("x**2")
+    assert started
+    assert vm.calculator.resultText == "4"
+    assert vm.calculator.hasPlot is False
+
+
+def test_a_renderer_request_renders_inline_and_reuses_its_cache():
+    from python.viewmodel.latex_service import LatexRenderService
+
+    service = LatexRenderService()
+    rendered = []
+    service.rendered.connect(
+        lambda token, url, width, height: rendered.append(
+            (token, url, width, height)
+        )
+    )
+    style = LatexStyle()
+    service.request("first", r"\sqrt{2}", style)
+    assert len(rendered) == 1
+    first_token, first_url, first_width, first_height = rendered[0]
+    assert first_token == "first"
+    assert first_url.startswith("data:image/svg+xml")
+    assert first_width > 0 and first_height > 0
+
+    service.request("second", r"\sqrt{2}", style)
+    assert len(rendered) == 2
+    second_token, second_url, second_width, second_height = rendered[1]
+    assert second_token == "second"
+    assert (second_url, second_width, second_height) == (
+        first_url, first_width, first_height
+    )
+    service.shutdown()
+
+
+def test_the_renderer_cache_stays_bounded():
+    from python.viewmodel.latex_service import (
+        MAX_CACHE_ENTRIES,
+        LatexRenderService,
+    )
+
+    service = LatexRenderService()
+    style = LatexStyle()
+    for index in range(MAX_CACHE_ENTRIES + 4):
+        service.request(f"cache-{index}", f"x + {index}", style)
+    assert len(service._cache) == MAX_CACHE_ENTRIES
+    service.shutdown()
 
 
 def test_a_backend_timeout_becomes_a_failure_and_is_recorded():
@@ -585,6 +792,28 @@ def test_a_timed_out_assignment_does_not_mark_the_variable_invalid():
     assert "timed out" in history_role(vm, 0, HistoryModel.ErrorRole)
 
 
+def test_backend_failure_keeps_existing_variables_history_and_log():
+    backend = DeferredBackend()
+    vm = new_vm(backend)
+    vm.calculator.calculateAssign("x", "=", "2")
+    first_id = backend.requests[-1][0]
+    first_result = Calculator().assign(Assignment("x", "=", "2"), {})
+    backend.finished.emit(first_id, first_result)
+    assert vm.variables.model.cellAt(0, 1) == "2"
+    assert vm.history.count == 1
+
+    vm.calculator.calculateAssign("x", "=", "3")
+    second_id = backend.requests[-1][0]
+    backend.failed.emit(second_id, "worker died")
+
+    assert vm.variables.model.count == 1
+    assert vm.variables.model.cellAt(0, 0) == "x"
+    assert vm.variables.model.cellAt(0, 1) == "2"
+    assert vm.history.count == 2
+    assert "backend failed" in history_role(vm, 0, HistoryModel.ErrorRole)
+    assert "worker died" in vm.log.formattedLogs
+
+
 def test_a_new_request_cancels_the_old_one_and_ignores_its_reply():
     backend = DeferredBackend()
     vm = new_vm(backend)
@@ -595,12 +824,12 @@ def test_a_new_request_cancels_the_old_one_and_ignores_its_reply():
     assert backend.cancels >= 1
 
     first_result = Calculator().evaluate("1 + 1", {})
-    backend.finished.emit(first, first_result, variants(first_result.value))
+    backend.respond(first, first_result, variants(first_result.value))
     assert vm.calculator.backendBusy is True
     assert vm.calculator.resultText == ""
 
     second_result = Calculator().evaluate("2 + 2", {})
-    backend.finished.emit(second, second_result, variants(second_result.value))
+    backend.respond(second, second_result, variants(second_result.value))
     assert vm.calculator.resultText == "4"
     assert vm.calculator.backendStatus == "ready"
 
@@ -617,7 +846,7 @@ def test_clear_result_cancels_the_inflight_request():
     assert vm.calculator.backendStatus == "ready"
 
     result = Calculator().evaluate("1 + 1", {})
-    backend.finished.emit(request_id, result, variants(result.value))
+    backend.respond(request_id, result, variants(result.value))
     assert vm.calculator.resultText == ""
 
 

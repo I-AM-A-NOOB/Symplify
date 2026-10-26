@@ -1,4 +1,3 @@
-# coding: utf-8
 """Variable management model for the calculator.
 
 Provides CRUD operations with name validation. Independent of any UI.
@@ -12,7 +11,7 @@ behavior), and invalid input is kept as an invalid (NaN) entry.
 import keyword
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 #: Names sympy already defines, which a variable would shadow. User input is
 #: resolved against sympy's namespace, so these are exactly the names that can
@@ -120,7 +119,7 @@ class VariableEntry:
     """
 
     name: str
-    obj: Optional[Any]
+    obj: Any | None
     expr_str: str
     type_label: str
     valid: bool
@@ -131,7 +130,7 @@ class VariableManager:
 
     def __init__(self):
         """Initialize the variable manager."""
-        self._variables: Dict[str, VariableEntry] = {}
+        self._variables: dict[str, VariableEntry] = {}
 
     def validate_name(self, name: str) -> bool:
         """Check whether ``name`` is legal (delegates to the module function)."""
@@ -147,15 +146,15 @@ class VariableManager:
         """
         return is_sympy_name(name)
 
-    def entry(self, name: str) -> Optional[VariableEntry]:
+    def entry(self, name: str) -> VariableEntry | None:
         """Get the full entry for ``name``, or None if not found."""
         return self._variables.get(name)
 
-    def names(self) -> List[str]:
+    def names(self) -> list[str]:
         """Get variable names in insertion order."""
         return list(self._variables.keys())
 
-    def entries(self) -> List[VariableEntry]:
+    def entries(self) -> list[VariableEntry]:
         """Get all entries in insertion order."""
         return list(self._variables.values())
 
@@ -211,7 +210,7 @@ class VariableManager:
         """Check if a variable exists."""
         return name in self._variables
 
-    def list_all(self) -> Dict[str, Any]:
+    def list_all(self) -> dict[str, Any]:
         """Get the valid variables as a dictionary (for evaluation)."""
         return {n: e.obj for n, e in self._variables.items() if e.valid}
 

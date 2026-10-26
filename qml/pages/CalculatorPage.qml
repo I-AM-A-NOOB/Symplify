@@ -65,26 +65,72 @@ Item {
         return calcVM.inputMode === 0 ? codeInput : assignValueField
     }
 
+    function keyboardTarget() {
+        return findFocusedEditable(page) || fallbackTarget()
+    }
+
+    //: Typing over a selection replaces it, like a physical keyboard. QML's
+    //: `insert` only inserts at the cursor, so the selection has to go first.
+    function removeSelection(target) {
+        if (!target || !target.selectedText)
+            return false
+        const start = Math.min(target.selectionStart, target.selectionEnd)
+        const end = Math.max(target.selectionStart, target.selectionEnd)
+        target.remove(start, end)
+        target.cursorPosition = start
+        return true
+    }
+
     function insertToInput(text) {
-        const target = findFocusedEditable(page) || fallbackTarget()
-        if (target && target.insert)
-            target.insert(target.cursorPosition, text)
+        const target = keyboardTarget()
+        if (!target || !target.insert)
+            return
+        removeSelection(target)
+        target.insert(target.cursorPosition, text)
+    }
+
+    function backspaceInput() {
+        const target = keyboardTarget()
+        if (!target)
+            return
+        if (removeSelection(target))
+            return
+        if (target.cursorPosition > 0)
+            target.remove(target.cursorPosition - 1, target.cursorPosition)
+    }
+
+    function moveInputCursor(delta) {
+        const target = keyboardTarget()
+        if (!target)
+            return
+        target.forceActiveFocus()
+        let position = target.cursorPosition
+        if (target.selectedText) {
+            position = delta < 0
+                ? Math.min(target.selectionStart, target.selectionEnd)
+                : Math.max(target.selectionStart, target.selectionEnd)
+            if (target.deselect)
+                target.deselect()
+        } else {
+            position = Math.max(0, Math.min(target.length, position + delta))
+        }
+        target.cursorPosition = position
     }
 
     function clearInput() {
-        const target = findFocusedEditable(page) || fallbackTarget()
+        const target = keyboardTarget()
         if (target && target.clear)
             target.clear()
     }
 
     function undoInput() {
-        const target = findFocusedEditable(page) || fallbackTarget()
+        const target = keyboardTarget()
         if (target && target.undo)
             target.undo()
     }
 
     function redoInput() {
-        const target = findFocusedEditable(page) || fallbackTarget()
+        const target = keyboardTarget()
         if (target && target.redo)
             target.redo()
     }
@@ -482,9 +528,12 @@ Item {
                     }
                     KeyboardPanel {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 240
-                        Layout.minimumHeight: 200
+                        Layout.preferredHeight: 282
+                        Layout.minimumHeight: 242
                         onKeyPressed: (key) => page.insertToInput(key)
+                        onBackspacePressed: page.backspaceInput()
+                        onCursorLeftPressed: page.moveInputCursor(-1)
+                        onCursorRightPressed: page.moveInputCursor(1)
                     }
 
                     // Vertical spacer: keys keep their size regardless of window height.

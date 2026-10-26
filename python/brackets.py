@@ -1,4 +1,3 @@
-# coding: utf-8
 """Rainbow bracket pairing (pure Python, zero Qt).
 
 Ported from the QWidget app's ``RainbowBracketsHighlighter`` (v1): brackets are
@@ -12,18 +11,17 @@ from those merged spans.
 """
 
 import re
-from typing import Dict, List, Optional, Sequence, Tuple
 
 #: Bracket pairs — the ones the v1 app highlighted. Single characters: the
 #: pairing below walks the string one character at a time.
-DEFAULT_PAIRS: Dict[str, str] = {"(": ")", "[": "]", "{": "}"}
+DEFAULT_PAIRS: dict[str, str] = {"(": ")", "[": "]", "{": "}"}
 
 #: One colour per nesting depth, cycled. The v1 palette, and also what the
 #: ``custom`` bracket mode starts from and is repaired to. Kept in the canonical
 #: form ``parse_colors`` produces (lower case hex), so the settings default, the
 #: stored string and this tuple are the same value rather than three spellings of
 #: it.
-DEFAULT_COLORS: Tuple[str, ...] = (
+DEFAULT_COLORS: tuple[str, ...] = (
     "#ff6b6b",
     "#ff9f43",
     "#ffd93d",
@@ -36,7 +34,7 @@ DEFAULT_COLORS: Tuple[str, ...] = (
 _HEX_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 
-def parse_colors(text: str) -> Tuple[str, ...]:
+def parse_colors(text: str) -> tuple[str, ...]:
     """The custom palette in ``text``: comma-separated ``#rrggbb``, normalised.
 
     Entries that are not a ``#rrggbb`` colour are dropped rather than rejecting
@@ -56,14 +54,14 @@ def parse_colors(text: str) -> Tuple[str, ...]:
 ERROR_COLOR = "#ff0000"
 
 #: ``(start, length, layer)`` — ``layer`` is ``None`` for an unmatched bracket.
-Span = Tuple[int, int, Optional[int]]
+Span = tuple[int, int, int | None]
 
 
 def spans(
     text: str,
-    pairs: Dict[str, str] = DEFAULT_PAIRS,
+    pairs: dict[str, str] = DEFAULT_PAIRS,
     layers: int = len(DEFAULT_COLORS),
-) -> List[Span]:
+) -> list[Span]:
     """Every bracket in ``text`` as ``(start, length, layer)``, in order.
 
     ``layer`` is ``None`` for a bracket that never gets a partner — a stray
@@ -78,9 +76,9 @@ def spans(
 
     # Pass 1: match what can be matched and remember the strays. Keeping the
     # strays out of `matched` is what stops them from shifting the layers.
-    stack: List[Tuple[int, str]] = []           # (start, bracket)
-    matched: List[Tuple[int, int]] = []         # (opening start, closing start)
-    errors: List[int] = []
+    stack: list[tuple[int, str]] = []           # (start, bracket)
+    matched: list[tuple[int, int]] = []         # (opening start, closing start)
+    errors: list[int] = []
 
     for index, char in enumerate(text):
         if char in pairs:
@@ -95,7 +93,7 @@ def spans(
 
     # Pass 2: the depth of a pair is how many pairs enclose it, counted among the
     # matched ones only — so the outermost pair is layer 0.
-    depth: Dict[int, int] = {}
+    depth: dict[int, int] = {}
     open_count = 0
     for _, kind, order in sorted(
         [(open_start, 0, order) for order, (open_start, _) in enumerate(matched)]
@@ -107,7 +105,7 @@ def spans(
         else:
             open_count -= 1
 
-    result: List[Span] = []
+    result: list[Span] = []
     for order, (opening_start, closing_start) in enumerate(matched):
         layer = depth[order] % layers
         result.append((opening_start, 1, layer))

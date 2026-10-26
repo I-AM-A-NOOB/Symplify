@@ -1,15 +1,13 @@
-# coding: utf-8
 """Run every test module: ``uv run python -m tests``.
 
 Each module is also runnable on its own (``python -m tests.test_model``); this
 just saves remembering them.
 """
 
-import sys
 
-from . import test_model, test_settings
+from . import test_model, test_process, test_settings
 
-MODULES = (test_model, test_settings)
+MODULES = (test_model, test_settings, test_process)
 
 
 def main() -> int:

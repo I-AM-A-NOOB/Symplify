@@ -1,4 +1,3 @@
-# coding: utf-8
 """Put the application's icon on the window *class*, on Windows.
 
 **Why this is needed at all.** `QApplication.setWindowIcon` does not put an icon

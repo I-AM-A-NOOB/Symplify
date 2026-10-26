@@ -1,4 +1,3 @@
-# coding: utf-8
 """Teaches RinUI's window manager to drag the title bar the way Windows does.
 
 RinUI starts its custom-title-bar drag with::

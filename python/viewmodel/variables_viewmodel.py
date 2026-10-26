@@ -1,4 +1,3 @@
-# coding: utf-8
 """Variables viewmodel for the QML Symplify app.
 
 Exposes the VariableManager as a QAbstractTableModel so the shadow
@@ -8,7 +7,7 @@ dataChanged / remove) so views update in place instead of resetting
 wholesale.
 """
 
-from typing import Any, Optional
+from typing import Any
 
 from PySide6.QtCore import (
     Property,
@@ -49,8 +48,8 @@ class VariablesModel(QAbstractTableModel):
     def __init__(
         self,
         manager: VariableManager,
-        log: Optional[LogViewModel] = None,
-        calculator: Optional[Calculator] = None,
+        log: LogViewModel | None = None,
+        calculator: Calculator | None = None,
         parent=None,
     ):
         """Initialize the variables model."""
@@ -284,8 +283,8 @@ class VariablesViewModel(QObject):
         self,
         variable_manager: VariableManager,
         log: LogViewModel,
-        calculator: Optional[Calculator] = None,
-        parent: Optional[QObject] = None,
+        calculator: Calculator | None = None,
+        parent: QObject | None = None,
     ):
         """Initialize the variables viewmodel."""
         super().__init__(parent)

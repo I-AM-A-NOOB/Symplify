@@ -16,12 +16,9 @@ ColumnLayout {
         readonly property string bracketThemeLabel: qsTr("Follow the code theme")
         readonly property string bracketCustomLabel: qsTr("Custom")
 
-        // System fonts that can actually render math (they carry an OpenType MATH
-        // table — ziamath fails on any other font instead of substituting one), from
-        // python/fonts.py. The dropdown prepends the built-in default, so the values
-        // are "" + these families and the two lists stay in step by construction.
-        readonly property var mathFonts: settingsVM.mathFonts
-        readonly property var mathFontValues: [""].concat(mathFonts)
+        //: The keyboard switcher's values: "" is the shipped layout; everything
+        //: else is a filename from the settings folder's keyboards/ directory.
+        readonly property var keyboardFileValues: [""].concat(settingsVM.keyboardLayouts)
 
         // What each font row is actually using. These live in the collapsible body
         // rather than the header description: they name the resolved family and any
@@ -78,6 +75,8 @@ ColumnLayout {
                     // single theme: Atom One is One Dark on a dark UI and One Light on
                     // a light one, and so on for the rest.
                     ExpanderRow {
+                        id: codeThemeRow
+
                         Layout.fillWidth: true
                         title: qsTr("Code theme")
                         description: qsTr("Colours expressions in the calculator, variables and history. Follows the light/dark mode above.")
@@ -96,9 +95,14 @@ ColumnLayout {
                         // to sit directly in the body: RinUI's corner and divider
                         // bookkeeping reads the parent. These rows round nothing and
                         // divide nothing, so a group of their own is free.)
-                        RadioSettingGroup {
-                            Repeater {
-                                objectName: "codeThemeRows"
+                        Loader {
+                            Layout.fillWidth: true
+                            active: codeThemeRow.expanded
+                            onLoaded: item.width = width
+                            sourceComponent: Component {
+                                RadioSettingGroup {
+                                    Repeater {
+                                        objectName: "codeThemeRows"
 
                                 // Ids and blurbs only: the display names come from
                                 // `code_themes.FAMILIES` through the viewmodel, so the
@@ -112,10 +116,10 @@ ColumnLayout {
                                     { key: "visualstudio", blurb: qsTr("Your taste is like that of people who use NSimSun in Visual Studio.") },
                                     { key: "default", blurb: qsTr("Visual Code++") },
                                     { key: "modern", blurb: qsTr("Our new VSCode completely outclasses the old Atom and Visual Studio.") },
-                                    { key: "2026", blurb: qsTr("The new kid: more contrast, more glow.") },
+                                    { key: "2026", blurb: qsTr("The new kid: a fresh coat of paint.") },
                                     { key: "solarized", blurb: qsTr("Sun-baked and wind-worn, faded beyond recognition.") },
                                     { key: "highcontrast", blurb: qsTr("For when you would rather the code just shout.") },
-                                    { key: "github", blurb: qsTr("Every dev\'s home.") },
+                                    { key: "github", blurb: qsTr("Every dev\'s home sweet home.") },
                                     { key: "githubdefault", blurb: qsTr("GitHub\'s new repository homepage design: Give us back!") },
                                     { key: "githubcolorblind", blurb: qsTr("Zuckerberg-certified vision.") },
                                     { key: "githubhighcontrast", blurb: qsTr("Pure black, blinding white—a lifesaver for low vision.") },
@@ -131,6 +135,8 @@ ColumnLayout {
                                     checked: settingsVM.codeTheme === modelData.key
                                     onSelected: settingsVM.codeTheme = modelData.key
                                 }
+                            }
+                        }
                             }
                         }
                     }
@@ -209,6 +215,8 @@ ColumnLayout {
                     // family control gets the full card width once expanded — a
                     // preference list needs far more room than a 40% slot.
                     ExpanderRow {
+                        id: codeFontRow
+
                         Layout.fillWidth: true
                         title: qsTr("Code font")
                         description: qsTr("Typesets expressions (inputs, results, variables, history, log). A monospace face is recommended.")
@@ -225,13 +233,18 @@ ColumnLayout {
                             }
                         }
 
-                        SettingFieldRow {
-                            label: qsTr("Font family")
-                            hint: codeFontNote()
-                            showDivider: false
+                        Loader {
+                            Layout.fillWidth: true
+                            active: codeFontRow.expanded
+                            onLoaded: item.width = width
+                            sourceComponent: Component {
+                                SettingFieldRow {
+                                    label: qsTr("Font family")
+                                    hint: codeFontNote()
+                                    showDivider: false
 
-                            field: TextField {
-                                id: codeFontField
+                                    field: TextField {
+                                        id: codeFontField
 
                                 CodeContextMenu { editor: codeFontField }
 
@@ -254,12 +267,188 @@ ColumnLayout {
                                 }
                             }
                         }
+                            }
+                        }
                     }
 
                     ExpanderRow {
                         Layout.fillWidth: true
+                        title: qsTr("Custom keyboard")
+                        description: qsTr("Switch the on-screen layout, or copy the default into your settings folder to edit.")
+                        icon.name: "ic_fluent_keyboard_20_regular"
+
+                        content: Text {
+                            text: settingsVM.keyboardLayout === ""
+                                ? qsTr("Built-in default")
+                                : settingsVM.keyboardLayout
+                            color: Theme.currentTheme.colors.textSecondaryColor
+                        }
+
+                        SettingItem {
+                            title: qsTr("Configuration")
+                            description: qsTr("Files live in the keyboards folder beside config.yaml.")
+                            showDivider: false
+
+                            Row {
+                                Layout.alignment: Qt.AlignRight
+                                spacing: 6
+
+                                Item {
+                                    width: 20
+                                    height: 34
+                                    visible: vm.keyboardLoadError !== ""
+
+                                    Icon {
+                                        anchors.centerIn: parent
+                                        name: "ic_fluent_warning_20_regular"
+                                        size: 20
+                                        color: Theme.currentTheme.colors.systemCautionColor
+                                    }
+
+                                    MouseArea {
+                                        id: keyboardWarningHover
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        acceptedButtons: Qt.NoButton
+                                    }
+
+                                    Tip {
+                                        hoverTarget: keyboardWarningHover
+                                        text: vm.keyboardLoadError
+                                    }
+                                }
+
+                                ComboBox {
+                                    objectName: "keyboardLayoutCombo"
+                                    height: 34
+                                    model: [qsTr("Built-in default")].concat(settingsVM.keyboardLayouts)
+                                    currentIndex: indexOf(keyboardFileValues, settingsVM.keyboardLayout)
+                                    onActivated: (index) => {
+                                        settingsVM.keyboardLayout = keyboardFileValues[index]
+                                    }
+                                }
+
+                                Button {
+                                    objectName: "keyboardNewButton"
+                                    width: 34
+                                    height: 34
+                                    flat: true
+                                    icon.name: "ic_fluent_add_20_regular"
+                                    Tip { text: qsTr("New configuration") }
+                                    onClicked: {
+                                        settingsVM.clearKeyboardError()
+                                        newKeyboardSource.currentIndex = 0
+                                        newKeyboardName.text = settingsVM.suggestKeyboardName()
+                                        newKeyboardFlyout.open()
+                                    }
+
+                                    Flyout {
+                                        id: newKeyboardFlyout
+                                        objectName: "keyboardNewFlyout"
+                                        width: 340
+
+                                        Text {
+                                            Layout.fillWidth: true
+                                            typography: Typography.Subtitle
+                                            text: qsTr("New")
+                                        }
+
+                                        Text {
+                                            Layout.fillWidth: true
+                                            text: qsTr("Name")
+                                        }
+
+                                        TextField {
+                                            id: newKeyboardName
+                                            objectName: "keyboardNewName"
+                                            Layout.fillWidth: true
+                                            placeholderText: qsTr("my-keyboard.yaml")
+                                        }
+
+                                        Text {
+                                            Layout.fillWidth: true
+                                            text: qsTr("Copy from")
+                                        }
+
+                                        ComboBox {
+                                            id: newKeyboardSource
+                                            objectName: "keyboardNewSource"
+                                            Layout.fillWidth: true
+                                            model: [qsTr("Built-in default")].concat(settingsVM.keyboardLayouts)
+                                            currentIndex: 0
+                                        }
+
+                                        Text {
+                                            Layout.fillWidth: true
+                                            visible: settingsVM.keyboardError !== ""
+                                            text: settingsVM.keyboardError
+                                            color: Theme.currentTheme.colors.systemCriticalColor
+                                            wrapMode: Text.Wrap
+                                        }
+
+                                        RowLayout {
+                                            Layout.fillWidth: true
+
+                                            Item { Layout.fillWidth: true }
+
+                                            Button {
+                                                objectName: "keyboardNewConfirm"
+                                                text: qsTr("OK")
+                                                onClicked: {
+                                                    const created = settingsVM.newKeyboardLayout(
+                                                        newKeyboardName.text,
+                                                        keyboardFileValues[newKeyboardSource.currentIndex])
+                                                    if (created !== "") {
+                                                        newKeyboardName.text = ""
+                                                        newKeyboardFlyout.close()
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Button {
+                                    objectName: "keyboardRefreshButton"
+                                    width: 34
+                                    height: 34
+                                    flat: true
+                                    icon.name: "ic_fluent_arrow_clockwise_20_regular"
+                                    Tip { text: qsTr("Refresh") }
+                                    onClicked: {
+                                        settingsVM.refreshKeyboardLayouts()
+                                        vm.reloadKeyboardLayouts()
+                                    }
+                                }
+                            }
+                        }
+
+                        SettingCard {
+                            objectName: "keyboardOpenFolderCard"
+                            Layout.fillWidth: true
+                            title: qsTr("Open directory")
+                            description: settingsVM.keyboardFolder
+                            icon.name: "ic_fluent_folder_20_regular"
+                            clickable: true
+                            onClicked: settingsVM.openKeyboardFolder()
+                        }
+
+                        Text {
+                            Layout.fillWidth: true
+                            visible: settingsVM.keyboardError !== ""
+                            text: settingsVM.keyboardError
+                            color: Theme.currentTheme.colors.systemCriticalColor
+                            wrapMode: Text.Wrap
+                        }
+
+                    }
+
+                    ExpanderRow {
+                        id: keyboardFontRow
+
+                        Layout.fillWidth: true
                         title: qsTr("Keyboard font")
-                        description: qsTr("Typesets the on-screen keys. A serif face is recommended — the mathematical glyphs (∞ √ ∛ ≤ ≥) read better in one.")
+                        description: qsTr("Typesets text keys; LaTeX keys use the LaTeX font at this size. A serif face is recommended.")
                         icon.name: "ic_fluent_keyboard_20_regular"
 
                         content: SpinBox {
@@ -273,13 +462,18 @@ ColumnLayout {
                             }
                         }
 
-                        SettingFieldRow {
-                            label: qsTr("Font family")
-                            hint: keyboardFontNote()
-                            showDivider: false
+                        Loader {
+                            Layout.fillWidth: true
+                            active: keyboardFontRow.expanded
+                            onLoaded: item.width = width
+                            sourceComponent: Component {
+                                SettingFieldRow {
+                                    label: qsTr("Font family")
+                                    hint: keyboardFontNote()
+                                    showDivider: false
 
-                            field: TextField {
-                                id: keyboardFontField
+                                    field: TextField {
+                                        id: keyboardFontField
 
                                 CodeContextMenu { editor: keyboardFontField }
 
@@ -302,12 +496,16 @@ ColumnLayout {
                                 }
                             }
                         }
+                            }
+                        }
                     }
 
                     ExpanderRow {
+                        id: latexRow
+
                         Layout.fillWidth: true
                         title: qsTr("LaTeX font")
-                        description: qsTr("Typesets rendered results. Only fonts with OpenType math tables can be used, so the list holds the ones installed on this system.")
+                        description: qsTr("Typesets results and LaTeX keycaps. Keycaps follow the keyboard size; only fonts with OpenType math tables are listed.")
                         icon.name: "ic_fluent_math_formula_20_regular"
 
                         content: SpinBox {
@@ -321,37 +519,50 @@ ColumnLayout {
                             }
                         }
 
-                        SettingItem {
-                            title: qsTr("Font family")
-                            description: latexFontNote()
-                            showDivider: false
+                        // The MATH-font scan is the expensive part of building
+                        // this page (~0.1 s). Build the dropdown only when the
+                        // row is opened; the collapsed page pays nothing for it.
+                        Loader {
+                            Layout.fillWidth: true
+                            active: latexRow.expanded
+                            onLoaded: item.width = width
+                            sourceComponent: Component {
+                                SettingItem {
+                                    readonly property var mathFonts: settingsVM.mathFonts
+                                    readonly property var mathFontValues: [""].concat(mathFonts)
 
-                            ComboBox {
-                                // Right-aligned at the width Qt gives it: a combo knows
-                                // what its longest entry needs, and pinning it to two
-                                // thirds of the row only made it disagree with the
-                                // control beside it. The row's filler takes the slack,
-                                // so the box sits against the right edge.
-                                Layout.alignment: Qt.AlignRight
-                                // Index 0 is always the built-in font: ziamath's
-                                // bundled STIX Two Math, recommended and the only
-                                // option that needs no system font at all.
-                                model: [qsTr("Default (STIX Two Math)"), ...mathFonts]
-                                currentIndex: indexOf(mathFontValues,
-                                                           settingsVM.latexFont)
-                                // The list is built from a cheap scan (does the file
-                                // carry a MATH table?), so a font whose table the
-                                // typesetter cannot actually read is in it. Proving
-                                // that costs a real layout, so it happens here — on
-                                // the one font the user picked. A refusal leaves the
-                                // setting alone, puts the box back and says why.
-                                onActivated: (index) => {
-                                    const family = mathFontValues[index]
-                                    if (settingsVM.trySetLatexFont(family))
-                                        return
-                                    currentIndex = indexOf(mathFontValues,
-                                                                settingsVM.latexFont)
-                                    fontRejectDialog.open()
+                                    title: qsTr("Font family")
+                                    description: latexFontNote()
+                                    showDivider: false
+
+                                    ComboBox {
+                                        // Right-aligned at the width Qt gives it: a combo knows
+                                        // what its longest entry needs, and pinning it to two
+                                        // thirds of the row only made it disagree with the
+                                        // control beside it. The row's filler takes the slack,
+                                        // so the box sits against the right edge.
+                                        Layout.alignment: Qt.AlignRight
+                                        // Index 0 is always the built-in font: ziamath's
+                                        // bundled STIX Two Math, recommended and the only
+                                        // option that needs no system font at all.
+                                        model: [qsTr("Default (STIX Two Math)"), ...mathFonts]
+                                        currentIndex: indexOf(mathFontValues,
+                                                                   settingsVM.latexFont)
+                                        // The list is built from a cheap scan (does the file
+                                        // carry a MATH table?), so a font whose table the
+                                        // typesetter cannot actually read is in it. Proving
+                                        // that costs a real layout, so it happens here — on
+                                        // the one font the user picked. A refusal leaves the
+                                        // setting alone, puts the box back and says why.
+                                        onActivated: (index) => {
+                                            const family = mathFontValues[index]
+                                            if (settingsVM.trySetLatexFont(family))
+                                                return
+                                            currentIndex = indexOf(mathFontValues,
+                                                                        settingsVM.latexFont)
+                                            fontRejectDialog.open()
+                                        }
+                                    }
                                 }
                             }
                         }

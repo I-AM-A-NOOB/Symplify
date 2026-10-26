@@ -1,4 +1,3 @@
-# coding: utf-8
 """History model for the QML Symplify app.
 
 A QAbstractListModel of calculation entries rendered as cards by the
@@ -12,11 +11,11 @@ lazily per visible row and re-tinted when the theme color changes.
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Optional
 
 from PySide6.QtCore import Property, QAbstractListModel, QModelIndex, Qt, Signal, Slot
 
-from ..latex_render import LatexStyle, render_data_url
+from ..latex_render import LatexStyle
+from .latex_service import LatexRenderService
 
 
 @dataclass
@@ -33,6 +32,7 @@ class HistoryItem:
         op: Assignment operator ("=", "+=", ...; "=" for code entries).
         latex: LaTeX source of the result (for rendering and copying).
         svg_url: Cached rendered SVG data URL; rendered lazily.
+        requested: True while this item's render is queued or running.
         created: Wall-clock time of the entry. Must be a ``default_factory``:
             a plain ``= datetime.now()`` default is evaluated once at class
             definition, which stamped every entry with the import time.
@@ -45,9 +45,10 @@ class HistoryItem:
     name: str = ""
     op: str = "="
     latex: str = ""
-    svg_url: Optional[str] = None
+    svg_url: str | None = None
     natural_w: int = 0
     natural_h: int = 0
+    requested: bool = False
     created: datetime = field(default_factory=datetime.now)
 
 
@@ -55,9 +56,9 @@ class HistoryModel(QAbstractListModel):
     """List model of calculation history entries.
 
     Roles: mode / name / op / expression / result / error / latexUrl / latex /
-    time. The ``latexUrl`` role renders (and caches) the entry's result SVG with
-    the current theme color on first access; ``error`` is non-empty exactly for
-    the entries whose request failed.
+    time. ``latexUrl`` is a cache lookup; the view queues the artwork through
+    ``requestLatex`` and receives it later via ``dataChanged``. ``error`` is
+    non-empty exactly for the entries whose request failed.
     """
 
     ModeRole = Qt.UserRole + 1
@@ -74,12 +75,24 @@ class HistoryModel(QAbstractListModel):
 
     countChanged = Signal()
 
-    def __init__(self, parent=None):
-        """Initialize the history model."""
+    def __init__(self, parent=None, latex_service=None):
+        """Initialize the history model.
+
+        Args:
+            latex_service: Shared renderer. None creates one; with no
+                QCoreApplication it renders inline, which keeps the model tests
+                synchronous.
+        """
         super().__init__(parent)
-        self._items: List[HistoryItem] = []
+        self._items: list[HistoryItem] = []
         #: Theme ink, font size and LaTeX font file, in one value.
         self._latex_style = LatexStyle()
+        self._latex_service = latex_service or LatexRenderService(self)
+        #: token -> item; row indexes move when entries are inserted at the top.
+        self._latex_pending: dict[str, HistoryItem] = {}
+        self._latex_seq = 0
+        self._latex_service.rendered.connect(self._on_latex_rendered)
+        self._latex_service.failed.connect(self._on_latex_failed)
 
     def roleNames(self):
         return {
@@ -137,45 +150,70 @@ class HistoryModel(QAbstractListModel):
 
     @Slot(int)
     def requestLatex(self, row: int) -> None:
-        """Render the entry's SVG if it has not been rendered yet.
+        """Queue the entry's SVG if it has not been rendered yet.
 
         Called by the view when a card comes near the viewport. Reading the
-        ``latexUrl`` role used to do this, which meant every delegate rendered as
-        the page was built; the read is a cache lookup now and this is the only
-        thing that renders. The render notifies through ``dataChanged``, so the
-        card's own role bindings pick the result up.
+        ``latexUrl`` role stays a cache lookup; this is the only thing that
+        queues work, and the completion arrives through ``dataChanged``.
         """
-        if 0 <= row < len(self._items) and self._items[row].svg_url is None:
-            self._svg_url(row)
-
-    def _svg_url(self, row: int) -> str:
-        """Render (once) and return the entry's SVG data URL."""
+        if not 0 <= row < len(self._items):
+            return
         item = self._items[row]
-        if item.svg_url is None:
-            item.svg_url, item.natural_w, item.natural_h = render_data_url(
-                item.latex, self._latex_style
-            )
-            # Re-notify so the visible delegate re-reads the final sizes.
+        if item.svg_url is not None or item.requested:
+            return
+        item.requested = True
+        self._latex_seq += 1
+        token = f"history:{self._latex_seq}"
+        self._latex_pending[token] = item
+        self._latex_service.request(
+            token, item.latex, self._latex_style, owner="history"
+        )
+
+    def _row_of(self, item: HistoryItem) -> int | None:
+        """Current row for an item; entries can shift after a new calculation."""
+        for row, candidate in enumerate(self._items):
+            if candidate is item:
+                return row
+        return None
+
+    def _on_latex_rendered(
+        self, token: str, url: str, width: int, height: int
+    ) -> None:
+        item = self._latex_pending.pop(token, None)
+        if item is None:
+            return
+        item.svg_url = url
+        item.natural_w = width
+        item.natural_h = height
+        item.requested = False
+        row = self._row_of(item)
+        if row is not None:
             self.dataChanged.emit(
                 self.index(row, 0), self.index(row, 0),
                 [self.LatexUrlRole, self.NaturalWidthRole, self.NaturalHeightRole],
             )
-        return item.svg_url
+
+    def _on_latex_failed(self, token: str, message: str) -> None:
+        item = self._latex_pending.pop(token, None)
+        if item is not None:
+            item.requested = False
 
     def set_latex_style(self, style: LatexStyle) -> None:
-        """Re-render every entry in a new style (theme ink, settings).
+        """Drop cached SVGs and re-render lazily in a new style.
 
-        One entry point for the three knobs, as in the calculator: what changes
-        here is only the cache policy — the entries are rendered lazily and once,
-        so the cached SVGs are dropped and each card renders again when it next
-        comes near the viewport.
+        Queued renders from the old style are invalidated by the service's
+        history generation; the cards request again when they are next near the
+        viewport.
         """
         if style == self._latex_style:
             return
         self._latex_style = style
+        self._latex_service.begin_generation("history")
+        self._latex_pending.clear()
         if self._items:
             for item in self._items:
                 item.svg_url = None
+                item.requested = False
             self.dataChanged.emit(
                 self.index(0, 0),
                 self.index(len(self._items) - 1, 0),
@@ -211,6 +249,8 @@ class HistoryModel(QAbstractListModel):
         """Clear all history entries (granular removal, no reset flash)."""
         if not self._items:
             return
+        self._latex_service.begin_generation("history")
+        self._latex_pending.clear()
         self.beginRemoveRows(QModelIndex(), 0, len(self._items) - 1)
         self._items.clear()
         self.endRemoveRows()

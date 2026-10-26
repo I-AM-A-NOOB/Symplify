@@ -1,4 +1,3 @@
-# coding: utf-8
 """Log viewmodel: one list of entries, rendered twice for the page.
 
 Entries are formatted twice from the same list — a plain string for the Copy
@@ -29,7 +28,7 @@ from datetime import datetime
 from enum import Enum, auto
 from html import escape
 
-from PySide6.QtCore import Property, QObject, Signal, Slot
+from PySide6.QtCore import Property, QObject, QTimer, Signal, Slot
 
 #: How many entries are kept (and rendered). Older ones fall off the front.
 MAX_ENTRIES = 1000
@@ -77,6 +76,20 @@ class LogViewModel(QObject):
         self._formatted = ""
         self._rich = ""
         self._colors: dict[str, str] = {}
+        #: New entries and repeats can arrive in bursts (page construction emits
+        #: dozens of Qt/RinUI warnings). Append the plain/rich text immediately,
+        #: but coalesce the two property signals into one event-loop turn: a live
+        #: Log page would otherwise re-layout its whole rich text once per entry.
+        self._dirty = False
+        #: True only while a Log page is the active stack page. While away, keep
+        #: the plain text current for copying but do not rebuild or emit the
+        #: rich text: the page is moving off-screen, and a large log re-layout
+        #: there is what made navigating to Settings feel blocked.
+        self._active = False
+        self._notify_timer = QTimer(self)
+        self._notify_timer.setSingleShot(True)
+        self._notify_timer.setInterval(16)
+        self._notify_timer.timeout.connect(self._flush_logs)
 
     # -- properties --------------------------------------------------------
 
@@ -102,7 +115,10 @@ class LogViewModel(QObject):
             return
         self._colors = colors
         self.colorsChanged.emit()
-        self._render()
+        if self._active:
+            # Recolouring is one operation over the whole list; notify once.
+            self._render_strings()
+            self._schedule_notify()
 
     colors = Property("QVariantMap", _get_colors, _set_colors, notify=colorsChanged)
 
@@ -125,12 +141,31 @@ class LogViewModel(QObject):
             last = self._logs[-1]
             if (last.level, last.source, last.message) == (level, source, message):
                 last.repeat += 1
-                self._render()
+                # Only the previous line changed; rebuild once in the coalesced
+                # flush rather than once per repeated Qt warning.
+                self._dirty = True
+                self._schedule_notify()
                 return
 
-        self._logs.append(LogEntry(datetime.now(), level, message, source))
+        at_capacity = len(self._logs) >= MAX_ENTRIES
+        entry = LogEntry(datetime.now(), level, message, source)
+        self._logs.append(entry)
         self.entryAdded.emit(level.name, source, message)
-        self._render()
+        if at_capacity or self._dirty:
+            # The deque may have dropped its oldest entry, or a repeat already
+            # changed the tail; the next flush rebuilds the whole string.
+            self._dirty = True
+        elif self._active:
+            prefix_plain = "\n" if self._formatted else ""
+            prefix_rich = "<br/>" if self._rich else ""
+            self._formatted += prefix_plain + self._format_plain(entry)
+            self._rich += prefix_rich + self._format_rich(entry)
+        else:
+            # Keep Copy log current while the page is away, but leave `_rich`
+            # alone; activation rebuilds it in one pass.
+            prefix_plain = "\n" if self._formatted else ""
+            self._formatted += prefix_plain + self._format_plain(entry)
+        self._schedule_notify()
 
     def add_info(self, message: str, source: str = "System") -> None:
         """Add an info log entry."""
@@ -148,7 +183,10 @@ class LogViewModel(QObject):
     def clear(self) -> None:
         """Clear all log entries."""
         self._logs.clear()
-        self._render()
+        self._formatted = ""
+        self._rich = ""
+        self._dirty = False
+        self._schedule_notify()
 
     # -- rendering ---------------------------------------------------------
 
@@ -182,10 +220,44 @@ class LogViewModel(QObject):
             )
         )
 
-    def _render(self) -> None:
-        """Rebuild both strings from the entry list."""
+    def _render_strings(self) -> None:
+        """Rebuild both strings from the entry list (no notification)."""
         self._formatted = "\n".join(self._format_plain(e) for e in self._logs)
         # Rich text collapses newlines, so the separators have to be markup.
         self._rich = "<br/>".join(self._format_rich(e) for e in self._logs)
+        self._dirty = False
+
+    def _schedule_notify(self) -> None:
+        """Coalesce a burst of entries into one pair of property signals."""
+        if not self._active:
+            return
+        if not self._notify_timer.isActive():
+            self._notify_timer.start()
+
+    def _flush_logs(self) -> None:
+        if not self._active:
+            return
+        if self._dirty:
+            self._render_strings()
+        self.formattedLogsChanged.emit()
+        self.richLogsChanged.emit()
+
+    @Slot(bool)
+    def setDisplayActive(self, active: bool) -> None:
+        """Tell the log whether its page is the active stack page.
+
+        Inactive is the normal state while another page is being built. New
+        entries still reach `formattedLogs`, but the rich text is neither
+        rebuilt nor signalled until the page returns; activation renders it once.
+        """
+        active = bool(active)
+        if active == self._active:
+            return
+        self._active = active
+        if not active:
+            self._notify_timer.stop()
+            return
+        self._notify_timer.stop()
+        self._render_strings()
         self.formattedLogsChanged.emit()
         self.richLogsChanged.emit()

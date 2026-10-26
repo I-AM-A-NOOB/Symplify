@@ -1,4 +1,3 @@
-# coding: utf-8
 """Behaviour tests for the settings store and the RinUI bootstrap.
 
 Run from the repository root:
@@ -24,7 +23,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from PySide6.QtCore import QObject, Qt, Signal  # noqa: E402
 
 from python.brackets import DEFAULT_COLORS  # noqa: E402
-
 from python.settings import (  # noqa: E402
     CONFIG_FILENAME,
     DEFAULTS,
@@ -130,6 +128,70 @@ def test_bracket_settings_round_trip_and_repair_what_cannot_be_painted():
     assert store.set("workspace.bracket_colors", "nope, also nope") == \
         ",".join(DEFAULT_COLORS)
     assert store.set("workspace.bracket_colors", "") == ",".join(DEFAULT_COLORS)
+
+
+def test_language_defaults_to_system_and_discovers_compiled_catalogues():
+    from PySide6.QtCore import QLocale
+
+    from python.localization import (
+        available_languages,
+        resolve_language,
+        translation_file,
+    )
+
+    assert DEFAULTS["appearance"]["language"] == "system"
+    path = temp_dir() / CONFIG_FILENAME
+    store = store_at(path)
+    assert store.get("appearance.language") == "system"
+    assert store.set("appearance.language", "zh_CN") == "zh_CN"
+    assert store_at(path).get("appearance.language") == "zh_CN"
+
+    languages = temp_dir()
+    (languages / "symplify_zh_CN.qm").write_bytes(b"")
+    discovered = available_languages(languages)
+    assert {"code": "zh_CN", "name": discovered[1]["name"]} in discovered
+    assert translation_file(languages, "zh_CN") == languages / "symplify_zh_CN.qm"
+    script_variant = temp_dir()
+    (script_variant / "symplify_zh_Hans.qm").write_bytes(b"")
+    assert translation_file(script_variant, "zh_CN") == (
+        script_variant / "symplify_zh_Hans.qm")
+    # A Traditional locale must not silently receive Simplified Chinese.
+    assert translation_file(script_variant, "zh_TW") is None
+
+    both_scripts = temp_dir()
+    (both_scripts / "symplify_zh_Hans.qm").write_bytes(b"")
+    (both_scripts / "symplify_zh_Hant.qm").write_bytes(b"")
+    assert translation_file(both_scripts, "zh_CN").name == "symplify_zh_Hans.qm"
+    assert translation_file(both_scripts, "zh_SG").name == "symplify_zh_Hans.qm"
+    assert translation_file(both_scripts, "zh_TW").name == "symplify_zh_Hant.qm"
+    assert translation_file(both_scripts, "zh_HK").name == "symplify_zh_Hant.qm"
+    assert resolve_language("system", QLocale("zh_CN")) == "zh_CN"
+    assert resolve_language("zh_CN", QLocale("en_US")) == "zh_CN"
+
+
+def test_language_section_is_first_and_offers_a_system_choice():
+    from python.viewmodel.settings_viewmodel import SettingsViewModel
+
+    page = (REPO_ROOT / "qml" / "pages" / "SettingsPage.qml").read_text(
+        encoding="utf-8")
+    assert page.index("SettingsLanguageSection {}") < page.index(
+        "SettingsInterfaceSection {}")
+
+    store = store_at(temp_dir() / CONFIG_FILENAME)
+    viewmodel = SettingsViewModel(store)
+    changed = []
+    viewmodel.languageChanged.connect(lambda: changed.append(viewmodel.language))
+    assert viewmodel.language == "system"
+    viewmodel.language = "en"
+    assert store.get("appearance.language") == "en"
+    assert changed == ["en"]
+    viewmodel.language = "not-a-language"
+    assert viewmodel.language == "system"
+
+    section = (REPO_ROOT / "qml" / "components" /
+               "SettingsLanguageSection.qml").read_text(encoding="utf-8")
+    assert "qsTr(\"System default\")" in section
+    assert "settingsVM.languages" in section
 
 
 def test_the_settings_page_offers_exactly_the_families_the_data_has():
@@ -452,6 +514,114 @@ def test_malformed_keyboard_yaml_never_breaks_startup():
         assert tabs and tabs[0]["key"] == "basic" and tabs[0]["keys"]
 
 
+def test_a_key_can_carry_a_latex_label():
+    """`latex` is optional artwork; `label` stays the plain fallback and
+    `insert` stays what the key types."""
+    import python.keyboard_config as kc
+
+    path = temp_dir() / "keyboard_config.yaml"
+    path.write_text(
+        "basic:\n"
+        "  title: Basic\n"
+        "  grid:\n"
+        "    - [{label: '√', latex: '\\sqrt{x}', insert: sqrt}]\n",
+        encoding="utf-8",
+    )
+    original = kc.KEYBOARD_CONFIG_PATH
+    kc.KEYBOARD_CONFIG_PATH = path
+    try:
+        tabs = kc.load_keyboard_tabs()
+    finally:
+        kc.KEYBOARD_CONFIG_PATH = original
+    key = tabs[0]["keys"][0]
+    assert key["label"] == "√"
+    assert key["latex"] == r"\sqrt{x}"
+    assert key["insert"] == "sqrt"
+
+
+def test_a_tab_can_carry_a_shift_layer():
+    """`shiftGrid` is a second full key layer; its labels join the glyph scan."""
+    import python.keyboard_config as kc
+
+    path = temp_dir() / "keyboard_config.yaml"
+    path.write_text(
+        "basic:\n"
+        "  title: Basic\n"
+        "  grid:\n"
+        "    - ['a']\n"
+        "  shiftGrid:\n"
+        "    - ['A']\n",
+        encoding="utf-8",
+    )
+    original = kc.KEYBOARD_CONFIG_PATH
+    kc.KEYBOARD_CONFIG_PATH = path
+    try:
+        tabs = kc.load_keyboard_tabs()
+        glyphs = kc.label_glyphs()
+    finally:
+        kc.KEYBOARD_CONFIG_PATH = original
+    assert tabs[0]["keys"][0]["insert"] == "a"
+    assert tabs[0]["shiftColumns"] == 1
+    assert tabs[0]["shiftKeys"][0]["label"] == "A"
+    assert tabs[0]["shiftKeys"][0]["insert"] == "A"
+    assert "A" in glyphs
+
+
+def test_custom_keyboards_copy_the_default_and_fall_back():
+    """New files are numbered copies; a broken custom file leaves the default
+    keyboard usable instead of collapsing to the numeric keypad."""
+    import python.keyboard_config as kc
+
+    folder = temp_dir() / "keyboards"
+    first = kc.new_keyboard_file(folder)
+    second = kc.new_keyboard_file(folder)
+    assert first.name == "keyboard-1.yaml"
+    assert second.name == "keyboard-2.yaml"
+    assert kc.load_keyboard_tabs(first)[0]["key"] == "basic"
+
+    broken = folder / "broken.yaml"
+    broken.write_text("- not a mapping\n", encoding="utf-8")
+    tabs, error = kc.load_keyboard_layout(broken)
+    assert tabs[0]["key"] == "basic"
+    assert error and "broken.yaml" in error
+    assert [path.name for path in kc.keyboard_files(folder)] == [
+        "broken.yaml", "keyboard-1.yaml", "keyboard-2.yaml",
+    ]
+
+
+def test_settings_creates_and_selects_a_custom_keyboard():
+    from python.viewmodel.settings_viewmodel import SettingsViewModel
+
+    store = store_at(temp_dir() / CONFIG_FILENAME)
+    vm = SettingsViewModel(store)
+    assert vm.suggestKeyboardName() == "myboard-1"
+    name = vm.newKeyboardLayout("mine", "")
+    assert name == "mine.yaml"
+    assert vm.keyboardLayout == name
+    assert name in vm.keyboardLayouts
+    assert Path(vm.keyboardFolder, name).is_file()
+    assert vm.keyboardError == ""
+    # A second copy can use an existing custom file as its source.
+    second = vm.newKeyboardLayout("copy", name)
+    assert second == "copy.yaml"
+    assert Path(vm.keyboardFolder, second).is_file()
+    assert vm.newKeyboardLayout("../escape", "") == ""
+    assert vm.keyboardError != ""
+    assert vm.newKeyboardLayout("mine", "") == ""   # collision, no overwrite
+    assert vm.newKeyboardLayout("myboard-1", "") == "myboard-1.yaml"
+    assert vm.suggestKeyboardName() == "myboard-2"
+
+
+def test_a_keyboard_layout_name_cannot_escape_its_folder():
+    path = temp_dir() / CONFIG_FILENAME
+    store = store_at(path)
+    assert store.get("workspace.keyboard_layout") == ""
+    assert store.set("workspace.keyboard_layout", "../evil.yaml") == ""
+    assert store.set("workspace.keyboard_layout", "notes.txt") == ""
+    assert store.set("workspace.keyboard_layout", "keyboard-1.yaml") == \
+        "keyboard-1.yaml"
+
+
 def test_writes_are_atomic_and_leave_no_temp_file():
     path = temp_dir() / CONFIG_FILENAME
     store = store_at(path)
@@ -583,7 +753,7 @@ def test_the_variant_trio_is_ordered_darkest_to_lightest():
     down = channels(darker), channels(primary)
     up = channels(lighter), channels(primary)
     assert all(d <= p for d, p in zip(*down)) and any(d < p for d, p in zip(*down))
-    assert all(l >= p for l, p in zip(*up)) and any(l > p for l, p in zip(*up))
+    assert all(light >= p for light, p in zip(*up)) and any(light > p for light, p in zip(*up))
 
 
 def test_accent_shading_clamps_and_tolerates_bad_input():
@@ -845,7 +1015,8 @@ print("KEPT", "|".join(vm.codeFont.families()))
 
 # Keyboard coverage is where a gap would actually show: the layout has ∛, which
 # Consolas lacks and Cambria has. A gap in the primary face is covered by the
-# fallback; a glyph no family has is reported.
+# fallback; a glyph no family has is reported. LaTeX keys keep their labels in
+# the required set because that label is the fallback if rendering fails.
 vm.keyboardFamily = "Consolas, Cambria"
 print("COVERED", repr(vm.keyboardMissingGlyphs))
 vm.keyboardFamily = "Consolas"

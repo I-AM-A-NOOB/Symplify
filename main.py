@@ -1,4 +1,3 @@
-# coding: utf-8
 """Symplify entry point (composition root).
 
 Builds the viewmodels, registers them as flat QML context properties,
@@ -19,10 +18,9 @@ from qmlmathplot import register_qml_types
 from python import window_icon
 from python.model.plotting import plot_variables
 from python.rinui_bootstrap import prepare
-from python.keyboard_config import load_keyboard_tabs
+from python.version import __version__
 from python.viewmodel.calculation_backend import ProcessBackend
 from python.viewmodel.main_viewmodel import MainViewModel
-from python.version import __version__
 
 # Under Nuitka the entry module is the compiled binary, so resolve the
 # project root relative to the executable instead of __file__.
@@ -93,6 +91,7 @@ def main() -> int:
         window.theme_manager,
         initial_variables=plot_variables(),
         calculation_backend=ProcessBackend(CALCULATION_TIMEOUT_SECONDS),
+        translation_dir=ROOT / "i18n",
     )
     context = window.engine.rootContext()
     context.setContextProperty("vm", vm)
@@ -111,7 +110,9 @@ def main() -> int:
     context.setContextProperty("historyFilter", vm.historyFilter)
     context.setContextProperty("logVM", vm.log)
     context.setContextProperty("settingsVM", vm.settings)
-    context.setContextProperty("keyboardTabs", load_keyboard_tabs())
+    # QML does not retranslate existing bindings on its own when a translator
+    # is installed after the tree exists. The engine has the explicit hook.
+    vm.settings.languageChanged.connect(window.engine.retranslate)
 
     # Qt's warnings and any uncaught exception used to go only to a console a
     # windowed build does not have (see python/log_capture.py). Installed before

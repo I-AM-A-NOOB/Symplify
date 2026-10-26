@@ -1,4 +1,3 @@
-# coding: utf-8
 """Model layer for the QML Symplify app.
 
 Pure business logic, no Qt dependency, no view-layer concerns. The calculation
@@ -9,8 +8,8 @@ what counts as a failure, and answers with ``Success`` or ``Failure``.
 import sys
 
 from .calculator import (
-    AUGMENTED_OPS,
     ASSIGN_OPS,
+    AUGMENTED_OPS,
     Assignment,
     Calculator,
     ErrorKind,
@@ -21,8 +20,8 @@ from .calculator import (
 from .latex import render_latex, render_latex_definition
 from .plotting import (
     MAX_PLOT_EXPR_CHARS,
-    Origin,
     PLOT_SYMBOLS,
+    Origin,
     Series,
     is_plot_variable,
     plot_series,
