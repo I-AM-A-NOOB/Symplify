@@ -22,6 +22,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 I18N = ROOT / "i18n"
 TEMPLATE = I18N / "symplify.ts"
+#: Our hand-maintained translations of RinUI's own strings (their sources live
+#: in the dependency, so lupdate must not run over these files). Keep the prefix
+#: in step with `python/localization.py:RINUI_TRANSLATION_PREFIX`.
+RINUI_FRAGMENTS = I18N.glob("rinui_*.ts")
 
 
 def _tool(name: str) -> str:
@@ -59,6 +63,11 @@ def main() -> int:
 
     for path in targets:
         _run([lupdate, "qml", "-extensions", "qml", "-ts", str(path)])
+        _run([lrelease, str(path), "-qm", str(path.with_suffix(".qm"))])
+
+    #: Fragments are written by hand (their source strings belong to RinUI), so
+    #: only lrelease runs — lupdate would mark every entry obsolete.
+    for path in sorted(RINUI_FRAGMENTS):
         _run([lrelease, str(path), "-qm", str(path.with_suffix(".qm"))])
     return 0
 

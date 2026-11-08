@@ -123,6 +123,15 @@ class LatexStyle:
     font: str = ""
 
 
+def svg_data_url(markup: str) -> str:
+    """Wrap SVG markup as the data URL QML's ``Image`` takes.
+
+    One encoder for every piece of artwork the UI draws — the LaTeX renders and
+    the watermark monogram — so escaping can never differ between them.
+    """
+    return _DATA_URL_PREFIX + quote(markup, safe="")
+
+
 def render_data_url(latex: str, style: LatexStyle) -> tuple[str, int, int]:
     """Render ``latex`` for QML: ``(data URL, width, height)``.
 
@@ -144,7 +153,7 @@ def render_data_url(latex: str, style: LatexStyle) -> tuple[str, int, int]:
         if not svg:
             return ("", 0, 0)
         width, height = svg_size(svg)
-        return (_DATA_URL_PREFIX + quote(svg, safe=""), width, height)
+        return (svg_data_url(svg), width, height)
 
 
 def svg_size(svg: str) -> tuple[int, int]:

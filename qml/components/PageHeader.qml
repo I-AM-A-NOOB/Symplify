@@ -32,9 +32,74 @@ Item {
     property Flickable flickable: null
     //: The inline row the actions start out in.
     property Item inlineRow: null
+    //: The page's sections, for the sticky label: each item carries `sectionTitle`
+    //: (what the bar shows) and `subtitleOffset` (where its subtitle sits inside
+    //: the scrolling column). Pages without sections leave it empty and the bar
+    //: keeps the page title.
+    property var sections: []
     //: The page's content inset, so the actions line up with the content at rest.
     property int inset: 24
     default property alias actions: actionRow.data
+
+    //: The section whose subtitle has reached the bar's bottom edge — the one the
+    //: bar shows instead of the page title. In *content* coordinates, so it needs
+    //: no `mapToItem` snapshot: the body's content box sits at `inset`, so a
+    //: subtitle's viewport y is `inset + section.y + subtitleOffset - contentY`.
+    //: `section.y` and `subtitleOffset` are plain properties of the layouts, and
+    //: layouts notify, so opening an expander above re-evaluates this too.
+    readonly property string section: {
+        const items = header.sections
+        if (!items || items.length === 0 || header.flickable === null)
+            return ""
+        const line = header.flickable.contentY + header.y + header.height
+            - header.inset
+        let current = ""
+        for (let i = 0; i < items.length; i += 1) {
+            const item = items[i]
+            if (item && item.y + item.subtitleOffset <= line)
+                current = item.sectionTitle
+        }
+        return current
+    }
+
+    //: What the bar ought to read: the section once one has caught up, else the
+    //: page title.
+    readonly property string barTitle: header.section.length > 0
+        ? header.section : header.title
+    //: What is painted. It trails `barTitle` by one animation: the outgoing label
+    //: leaves upward, the text swaps, the incoming one arrives from below.
+    property string paintedTitle: ""
+
+    Component.onCompleted: header.paintedTitle = header.barTitle
+    onBarTitleChanged: {
+        if (header.barTitle !== header.paintedTitle)
+            swapAnimation.restart()
+    }
+
+    SequentialAnimation {
+        id: swapAnimation
+
+        //: Out: up and away, fading as it goes.
+        NumberAnimation {
+            target: titleLabel
+            property: "slide"
+            to: -7
+            duration: 110
+            easing.type: Easing.InCubic
+        }
+        //: The swap happens while the label is invisible, so the jump from below
+        //: is never seen.
+        ScriptAction { script: header.paintedTitle = header.barTitle }
+        //: In: from below, into place.
+        NumberAnimation {
+            target: titleLabel
+            property: "slide"
+            from: 7
+            to: 0
+            duration: 170
+            easing.type: Easing.OutCubic
+        }
+    }
 
     readonly property int margin: 8
     readonly property int pad: 12
@@ -143,37 +208,73 @@ Item {
         }
         spacing: header.pad
 
-        Text {
-            id: titleLabel
+        //: The label slot: what the row sizes, and what clips the swap's slide.
+        //:
+        //: `fillWidth` takes the slack when there is any and gives it back when
+        //: there is not; `minimumWidth: 0` + `elide` turn "not enough room" into an
+        //: ellipsis rather than a clash with the search box.
+        //:
+        //: No `Layout.maximumWidth: implicitWidth`, tempting as it looks. It caps
+        //: the width at *exactly* the text's advance width, and because that is
+        //: fractional, the rounded width Qt hands back is a hair under it:
+        //: `Text.truncated` goes true at full width and the title renders as
+        //: "Histo…" with the whole row empty beside it. Measured on History/Log/
+        //: Settings (w == implicit, truncated == true) while Variables, whose width
+        //: happens to land on a whole pixel, was fine. One pixel of slack instead:
+        //: invisible, and it leaves the *actions* row as the flexible one.
+        Item {
+            id: titleSlot
 
-            //: `fillWidth` takes the slack when there is any and gives it back when
-            //: there is not; `minimumWidth: 0` + `elide` turn "not enough room" into
-            //: an ellipsis rather than a clash with the search box.
-            //:
-            //: No `Layout.maximumWidth: implicitWidth` here, tempting as it looks. It
-            //: caps the width at *exactly* the text's advance width, and because that
-            //: is fractional, the rounded width Qt hands back is a hair under it:
-            //: `Text.truncated` goes true at full width and the title renders as
-            //: "Histo…" with the whole row empty beside it. Measured on History/Log/
-            //: Settings (w == implicit, truncated == true) while Variables, whose
-            //: width happens to land on a whole pixel, was fine.
+            //: Measured off a label that never had its width constrained. Reading
+            //: `titleLabel.implicitWidth` is the trap: once the text is elided at a
+            //: clamped width, that text reports *that* width as its implicit one, so
+            //: a bar that starts empty locked itself to a few pixels and the first
+            //: real title arrived invisible (measured: width 8, text "日志").
+            Text {
+                id: titleMeasure
+
+                visible: false
+                typography: Typography.Subtitle
+                text: header.paintedTitle
+            }
+
+            //: The slot must *prefer* the measured width, not zero. A bare `Item`
+            //: has no implicit width, so with a page that has actions (Log's
+            //: `CommandBar`) the row had all the slack claimed by the actions and the
+            //: slot was squeezed to nothing — the title vanished (measured: slot 8,
+            //: actions 842). Preferring the text width and capping at it leaves the
+            //: actions as the flexible half, which is the point.
             Layout.fillWidth: true
             Layout.minimumWidth: 0
-            //: Capped a hair above the text. Not `implicitWidth` exactly: a layout
-            //: hands back a rounded width and the advance width is fractional, so
-            //: capping at it flips `Text.truncated` on at full width and the title
-            //: renders as "Histo…" with the row empty beside it. One pixel of slack
-            //: is invisible, and it leaves the *actions* row as the flexible one —
-            //: which is what a `CommandBar` measures its overflow against.
-            Layout.maximumWidth: Math.ceil(implicitWidth) + 1
+            Layout.preferredWidth: titleMeasure.implicitWidth
+            Layout.maximumWidth: Math.ceil(titleMeasure.implicitWidth) + 1
             Layout.alignment: Qt.AlignVCenter
-            elide: Text.ElideRight
-            // RinUI's `Text` wraps by default, which would grow the bar instead.
-            wrapMode: Text.NoWrap
-            //: The one page title, in the bar beside the actions — the same face as
-            //: the Calculator page's command-bar title, so every page reads alike.
-            typography: Typography.Subtitle
-            text: header.title
+            implicitHeight: titleLabel.implicitHeight
+            clip: true
+
+
+            Text {
+                id: titleLabel
+                //: Probe hook, like `PageBody`'s: the sticky label's state.
+                objectName: "pageHeaderTitle"
+
+                //: Driven by `swapAnimation`: negative = leaving upward, positive =
+                //: arriving from below. Opacity follows the distance, so the swap
+                //: reads as one movement instead of a cut.
+                property real slide: 0
+
+                width: parent.width
+                y: (parent.height - height) / 2 + slide
+                opacity: Math.max(0, 1 - Math.abs(slide) / 7)
+                elide: Text.ElideRight
+                // RinUI's `Text` wraps by default, which would grow the bar instead.
+                wrapMode: Text.NoWrap
+                //: The one page title (or the section that caught up), in the bar
+                //: beside the actions — the same face as the Calculator page's
+                //: command-bar title, so every page reads alike.
+                typography: Typography.Subtitle
+                text: header.paintedTitle
+            }
         }
 
         // The gap that keeps the title's text off the actions when the two halves

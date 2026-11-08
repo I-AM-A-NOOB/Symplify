@@ -31,6 +31,9 @@ Item {
     property Flickable flickable: null
     //: The inline row inside the body, which the actions start out alongside.
     property Item inlineRow: null
+    //: The page's sections for the sticky label (see `PageHeader.sections`). Empty
+    //: keeps the bar on the page title.
+    property var sections: []
     //: The page's content inset. Bodies must lay their content out with the same.
     property int inset: 24
 
@@ -58,6 +61,7 @@ Item {
         title: scaffold.title
         flickable: scaffold.flickable
         inlineRow: scaffold.inlineRow
+        sections: scaffold.sections
         inset: scaffold.inset
     }
 }

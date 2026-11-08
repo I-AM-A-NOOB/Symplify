@@ -21,6 +21,10 @@ SYSTEM_LANGUAGE = "system"
 SOURCE_LANGUAGE = "en"
 #: `i18n/symplify_<code>.qm`; kept in one place because the UI and loader agree.
 TRANSLATION_PREFIX = "symplify"
+#: `i18n/rinui_<code>.qm`: our translations of the RinUI strings this UI shows.
+#: Hand-maintained fragments (their sources live in the dependency), so the
+#: update script compiles them without running lupdate over them.
+RINUI_TRANSLATION_PREFIX = "rinui"
 
 #: Locale → script fallbacks for Chinese. The app names its catalogues by
 #: script (`zh_Hans`, `zh_Hant`) rather than by region: a region is not a
@@ -69,7 +73,11 @@ def available_languages(directory: Path) -> list[dict[str, str]]:
     return entries
 
 
-def translation_file(directory: Path, code: str) -> Path | None:
+def translation_file(
+    directory: Path,
+    code: str,
+    prefix: str = TRANSLATION_PREFIX,
+) -> Path | None:
     """The ``.qm`` for an exact code, then for its language part.
 
     Locale codes are not perfectly consistent between Qt, Windows and file
@@ -77,6 +85,12 @@ def translation_file(directory: Path, code: str) -> Path | None:
     often named ``zh_Hans``. Exact and language-only matches win; if neither
     exists, a single catalogue with the same language part is unambiguous and is
     used as the fallback.
+
+    Args:
+        directory: Folder holding the compiled catalogues.
+        code: A resolved language code (``zh_Hans`` or a ``QLocale`` name).
+        prefix: Which catalogue family to look for — ``symplify`` (the app) or
+            ``rinui`` (the fragments covering RinUI's own strings).
     """
     root = Path(directory)
     language = code.split("_", 1)[0]
@@ -91,7 +105,7 @@ def translation_file(directory: Path, code: str) -> Path | None:
         if candidate in seen:
             continue
         seen.add(candidate)
-        path = root / f"{TRANSLATION_PREFIX}_{candidate}.qm"
+        path = root / f"{prefix}_{candidate}.qm"
         if path.is_file():
             return path
     # Hans and Hant are different writing systems; never guess one from the
@@ -99,8 +113,8 @@ def translation_file(directory: Path, code: str) -> Path | None:
     if language == "zh":
         return None
     matches = [
-        path for path in root.glob(f"{TRANSLATION_PREFIX}_*.qm")
-        if path.stem[len(TRANSLATION_PREFIX) + 1:].split("_", 1)[0] == language
+        path for path in root.glob(f"{prefix}_*.qm")
+        if path.stem[len(prefix) + 1:].split("_", 1)[0] == language
     ]
     return matches[0] if len(matches) == 1 else None
 

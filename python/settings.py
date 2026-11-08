@@ -100,6 +100,23 @@ DEFAULTS: dict[str, Any] = {
         "latex_size": 24,         # ziamath's own default font size, in points
         # A filename under <config dir>/keyboards/; "" = the shipped layout.
         "keyboard_layout": "",
+        # Enter Windows full screen when Zen mode starts. Off keeps the window
+        # frame and just hides the calculator chrome.
+        "zen_fullscreen": False,
+        # The empty result pane's watermark: "icon" (the app's Σ monogram,
+        # tinted neutral) or "random" (a random item from the pool drawn in the
+        # result ink).
+        "result_watermark": "icon",
+        # The random watermark's pool: one LaTeX snippet per item, drawn in the
+        # result's own style. The shipped items are pure mathematics, so the
+        # watermark can never be wrong. Replace the list to use your own pool.
+        "result_watermark_pool": (
+            r"e^{i\pi}+1=0",
+            r"\sum_{n=1}^{\infty}\frac{1}{n^{2}}=\frac{\pi^{2}}{6}",
+            r"\int_{-\infty}^{\infty} e^{-x^{2}}\,\mathrm{d}x=\sqrt{\pi}",
+            r"\lim_{x\to 0}\frac{\sin x}{x}=1",
+            r"\nabla\cdot\mathbf{B}=0",
+        ),
     },
     "window": {
         "remember": True,         # restore size/position on the next launch
@@ -116,6 +133,7 @@ _CHOICES = {
     "appearance.theme": ("Auto", "Light", "Dark"),
     "appearance.backdrop": ("mica", "acrylic", "tabbed", "none"),
     "appearance.accent_mode": ("default", "system", "custom"),
+    "workspace.result_watermark": ("icon", "random"),
     "workspace.code_theme": tuple(family_ids()),
     "workspace.bracket_mode": ("theme", "custom"),
 }
@@ -150,6 +168,9 @@ _KNOWN_KEYS = (
     "workspace.latex_font",
     "workspace.latex_size",
     "workspace.keyboard_layout",
+    "workspace.zen_fullscreen",
+    "workspace.result_watermark",
+    "workspace.result_watermark_pool",
     "window.remember",
     "window.width",
     "window.height",
@@ -417,8 +438,20 @@ class SettingsStore:
                 return int(value)
             except (TypeError, ValueError):
                 return None
-        if key in ("window.maximized", "window.remember",
+        if key in ("workspace.zen_fullscreen",
+                   "window.maximized", "window.remember",
                    "appearance.accent_shading",
                    "appearance.accent_os_shading"):
             return bool(value)
+        if key == "workspace.result_watermark_pool":
+            # A pool of LaTeX snippets, one item per empty-state watermark;
+            # rendered in the result's own style. YAML lists are the editable
+            # shape (a text field would mangle backslashes and braces), so a
+            # non-list is not repaired: it falls back to the shipped pool.
+            # Empty entries are dropped rather than rejecting the whole key.
+            if not isinstance(value, (list, tuple)):
+                return default
+            items = [item.strip() for item in value
+                     if isinstance(item, str) and item.strip()]
+            return items if items else default
         return value

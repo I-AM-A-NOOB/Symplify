@@ -169,13 +169,48 @@ def test_language_defaults_to_system_and_discovers_compiled_catalogues():
     assert resolve_language("zh_CN", QLocale("en_US")) == "zh_CN"
 
 
+def test_rinui_strings_are_our_own_fragments_not_its_catalogue():
+    """We own the translations of the RinUI strings this UI shows."""
+    from python.localization import RINUI_TRANSLATION_PREFIX, translation_file
+
+    assert RINUI_TRANSLATION_PREFIX == "rinui"
+    languages = temp_dir()
+    (languages / "rinui_zh_Hans.qm").write_bytes(b"")
+    (languages / "rinui_zh_Hant.qm").write_bytes(b"")
+    # The same script/region lookup as the app catalogues, on our prefix.
+    assert translation_file(languages, "zh_CN", "rinui") == (
+        languages / "rinui_zh_Hans.qm")
+    assert translation_file(languages, "zh_Hant", "rinui") == (
+        languages / "rinui_zh_Hant.qm")
+    assert translation_file(languages, "zh_TW", "rinui") == (
+        languages / "rinui_zh_Hant.qm")
+    assert translation_file(languages, "en", "rinui") is None
+    # A missing fragment is not an error: RinUI's English source is the fallback.
+    assert translation_file(temp_dir(), "zh_Hans", "rinui") is None
+
+    # The fragments actually cover the RinUI contexts this UI displays, in both
+    # writing systems. Their sources belong to the dependency, so these files
+    # cannot be checked against RinUI at test time; the runtime degrades per
+    # string (English) if RinUI renames one.
+    i18n = REPO_ROOT / "i18n"
+    for code in ("zh_Hans", "zh_Hant"):
+        text = (i18n / f"rinui_{code}.ts").read_text(encoding="utf-8")
+        for context in ("CtrlBtn", "ColorPicker", "NavigationBar", "Switch",
+                        "InfoBar", "TextInputMenu"):
+            assert f"<name>{context}</name>" in text
+        assert "<source>Maximize</source>" in text
+        assert "<source>Select All</source>" in text
+
+
 def test_language_section_is_first_and_offers_a_system_choice():
     from python.viewmodel.settings_viewmodel import SettingsViewModel
 
     page = (REPO_ROOT / "qml" / "pages" / "SettingsPage.qml").read_text(
         encoding="utf-8")
-    assert page.index("SettingsLanguageSection {}") < page.index(
-        "SettingsInterfaceSection {}")
+    #: The order is the contract; each section also carries an id for the sticky
+    #: bar, so match the component name rather than an empty `{}` block.
+    assert page.index("SettingsLanguageSection {") < page.index(
+        "SettingsInterfaceSection {")
 
     store = store_at(temp_dir() / CONFIG_FILENAME)
     viewmodel = SettingsViewModel(store)
@@ -620,6 +655,16 @@ def test_a_keyboard_layout_name_cannot_escape_its_folder():
     assert store.set("workspace.keyboard_layout", "notes.txt") == ""
     assert store.set("workspace.keyboard_layout", "keyboard-1.yaml") == \
         "keyboard-1.yaml"
+
+
+def test_zen_fullscreen_round_trips():
+    path = temp_dir() / "config.yaml"
+    store = SettingsStore(path, False)
+    assert store.get("workspace.zen_fullscreen") is False
+    assert store.set("workspace.zen_fullscreen", True) is True
+    reloaded = SettingsStore(path, False)
+    reloaded.load()
+    assert reloaded.get("workspace.zen_fullscreen") is True
 
 
 def test_writes_are_atomic_and_leave_no_temp_file():
@@ -1196,7 +1241,7 @@ def test_the_drag_fix_is_a_no_op_off_windows():
 
 
 # --------------------------------------------------------------------------
-# The RinUI bootstrap (needs a fresh process: RinUI's config is built on import)
+# The RinUI bootstrap (needs a fresh process: RinUI's config is process-wide)
 # --------------------------------------------------------------------------
 
 BOOT_SCRIPT = r"""
@@ -1209,17 +1254,26 @@ from python.rinui_bootstrap import prepare
 runtime = prepare(root)
 settings, RinUIWindow = runtime.settings, runtime.window_class
 
+from PySide6.QtCore import QCoreApplication
+
+app = QCoreApplication([])          # init_config() resolves QStandardPaths
+
+from RinUI.core import launcher
 from RinUI.core.config import RinConfig
+
+launcher.init_config()              # our wrapper: RinUI's load, then our values
 print("STORE", settings.path)
 print("THEME", settings.get("appearance.theme"))
 print("BACKDROP", settings.get("appearance.backdrop"))
 print("ACCENT", settings.get("appearance.accent"))
 print("ACCENT_MODE", settings.get("appearance.accent_mode"))
 print("RINUI", json.dumps(RinConfig.config, sort_keys=True))
+print("RINUI_CONFIG_EXISTS", RinConfig.full_path.exists())
 RinConfig["theme"] = {"current_theme": "Light"}       # must not touch disk
 RinConfig.upload_config("theme_color", "#000000")
+print("RINUI_CONFIG_EXISTS_AFTER_WRITES", RinConfig.full_path.exists())
 print("ROOT_ENTRIES", sorted(p.name for p in root.iterdir()))
-# nothing RinUI-shaped anywhere: the import ran in a scratch directory
+# our own config directory holds our file only; RinUI writes nothing at import
 print("CONFIG_DIR_ENTRIES", sorted(p.name for p in settings.path.parent.iterdir()))
 print("WINDOW", RinUIWindow.__name__)
 print("VERSION", runtime.rinui_version)
@@ -1231,7 +1285,15 @@ def run_bootstrap(root: Path, appdata: Path) -> dict:
     result = subprocess.run(
         [sys.executable, "-c", BOOT_SCRIPT, str(root)],
         cwd=str(REPO_ROOT),
-        env={**os.environ, "APPDATA": str(appdata), "PYTHONPATH": str(REPO_ROOT)},
+        env={
+            **os.environ,
+            "APPDATA": str(appdata),
+            # AppLocalDataLocation comes from LOCALAPPDATA; point it at the
+            # throwaway directory too, so a stray write cannot reach the user's
+            # real profile (and the test can see it if it happens).
+            "LOCALAPPDATA": str(appdata),
+            "PYTHONPATH": str(REPO_ROOT),
+        },
         capture_output=True,
         text=True,
         timeout=120,
@@ -1271,6 +1333,7 @@ def test_bootstrap_migrates_removes_and_never_writes_again():
     # RinUI runs on our values but can no longer persist anything
     assert '"current_theme": "Dark"' in report["RINUI"]
     assert '"backdrop_effect": "acrylic"' in report["RINUI"]
+    assert report["RINUI_CONFIG_EXISTS_AFTER_WRITES"] == "False"
     assert report["CONFIG_DIR_ENTRIES"] == "['config.yaml']"
     assert report["WINDOW"] == "RinUIWindow"
     assert report["VERSION"].count(".") >= 1
@@ -1296,6 +1359,7 @@ def test_bootstrap_leaves_the_launch_dir_clean_without_a_legacy_config():
     appdata = temp_dir()
     report = run_bootstrap(root, appdata)
     assert report["ROOT_ENTRIES"] == "[]"
+    assert report["RINUI_CONFIG_EXISTS_AFTER_WRITES"] == "False"
     assert report["CONFIG_DIR_ENTRIES"] == "['config.yaml']"
     assert report["THEME"] == "Auto"
 

@@ -54,7 +54,10 @@ from ..keyboard_config import (
     new_keyboard_file,
 )
 from ..localization import (
+    RINUI_TRANSLATION_PREFIX,
+    SYSTEM_LANGUAGE,
     available_languages,
+    language_name,
     resolve_language,
     translation_file,
 )
@@ -158,7 +161,8 @@ class SettingsViewModel(QObject):
             theme_manager: RinUI's ``ThemeManager``; when None (tests) appearance
                 is still persisted but not applied to the running UI.
             translation_dir: Folder holding ``symplify_<code>.qm`` files; the
-                repository's ``i18n/`` by default.
+                repository's ``i18n/`` by default. It also holds the
+                ``rinui_<code>.qm`` fragments (see _apply_rinui_language).
         """
         super().__init__(parent)
         self._store = store
@@ -178,13 +182,21 @@ class SettingsViewModel(QObject):
             else Path(__file__).resolve().parents[2] / "i18n"
         )
         self._translator: QTranslator | None = None
+        self._rinui_translator: QTranslator | None = None
         self._languages = available_languages(self._translation_dir)
         self._window: QObject | None = None
         self._geometry_wired = False
+        #: True only while `_apply_maximized_once` listens on visibleChanged;
+        #: disconnecting a signal that was never connected makes PySide print a
+        #: `RuntimeWarning` instead of raising, which the Log page would show.
+        self._maximized_connected = False
         self._geometry_timer = QTimer(self)
         self._geometry_timer.setSingleShot(True)
         self._geometry_timer.setInterval(500)
         self._geometry_timer.timeout.connect(self._save_geometry)
+        #: MainWindow disables this while Zen mode is full screen; otherwise the
+        #: fullscreen rect would overwrite the remembered normal geometry.
+        self._geometry_tracking_enabled = True
 
         #: The colour picked by the picker, held here until the drag settles —
         #: see _set_custom_accent. None means the store is authoritative.
@@ -231,6 +243,15 @@ class SettingsViewModel(QObject):
         """Compiled languages; the UI prepends its translated system row."""
         return list(self._languages)
 
+    def _get_system_language_name(self) -> str:
+        """The language the `system` choice resolves to, in its own name.
+
+        The picker shows it beside "System default" so the row says what it
+        will do; nothing here is translated — language names are shown natively,
+        exactly as the other rows do.
+        """
+        return language_name(resolve_language(SYSTEM_LANGUAGE))
+
     def _apply_language(self) -> None:
         """Install the selected translation, if a matching ``.qm`` exists.
 
@@ -251,15 +272,82 @@ class SettingsViewModel(QObject):
         # override the source copy without editing QML. If it is absent, the
         # source strings are the fallback.
         path = translation_file(self._translation_dir, code)
+        if path is not None:
+            translator = QTranslator(self)
+            if translator.load(str(path)):
+                app.installTranslator(translator)
+                self._translator = translator
+        self._apply_rinui_language(app, code)
+
+    def _apply_rinui_language(self, app: QCoreApplication, code: str) -> None:
+        """Install our translations of the RinUI strings this UI shows.
+
+        RinUI's control tooltips and component labels are ``qsTr`` strings too,
+        but the library only *ships* ``en_US``/``zh_CN`` and never installs
+        them. Depending on those files would leave ``zh_Hant`` users with English
+        (RinUI has no Traditional catalogue) and tie us to its package layout;
+        instead ``i18n/rinui_<code>.ts`` are hand-maintained fragments covering
+        the contexts our UI actually displays (CtrlBtn, ColorPicker,
+        NavigationBar, Switch, InfoBar, TextInputMenu). They are compiled by
+        ``scripts/update_translations.py`` and selected by the same script/region
+        lookup as the app catalogues. A string the fragment does not cover falls
+        back to RinUI's English source — degradation is per string, not per
+        language, and no RinUI file is read at runtime.
+        """
+        if self._rinui_translator is not None:
+            old = self._rinui_translator
+            app.removeTranslator(old)
+            old.deleteLater()
+            self._rinui_translator = None
+        path = translation_file(
+            self._translation_dir, code, prefix=RINUI_TRANSLATION_PREFIX
+        )
         if path is None:
             return
         translator = QTranslator(self)
         if translator.load(str(path)):
             app.installTranslator(translator)
-            self._translator = translator
+            self._rinui_translator = translator
 
     language = Property(str, _get_language, _set_language, notify=changed)
     languages = Property("QVariantList", _get_languages, constant=True)
+    systemLanguageName = Property(
+        str, _get_system_language_name, constant=True
+    )
+
+    def _get_result_watermark(self) -> str:
+        """The empty result pane's watermark: 'icon' (default) or 'random'."""
+        return str(self._store.get("workspace.result_watermark") or "icon")
+
+    def _get_result_watermark_pool(self) -> list:
+        """The random watermark's LaTeX pool; the store validates and ships it."""
+        pool = self._store.get("workspace.result_watermark_pool")
+        return list(pool) if isinstance(pool, (list, tuple)) else []
+
+    def _set_result_watermark(self, kind: str) -> None:
+        """Write the watermark kind through the store (and persist + notify)."""
+        self._store.set("workspace.result_watermark", kind)
+        # PySide does not emit the NOTIFY signal for a Python-side write, and
+        # every consumer (the calc VM's re-roll, the QML source switch) hangs
+        # off ``changed`` rather than off a property read, so emit it here.
+        self.changed.emit()
+
+    def _set_result_watermark_pool(self, items: object) -> None:
+        """Write the watermark pool through the store.
+
+        No coercion here: a string would silently explode into its characters,
+        and the store's own validator owns the list-only contract.
+        """
+        self._store.set("workspace.result_watermark_pool", items)
+        self.changed.emit()
+
+    resultWatermark = Property(
+        str, _get_result_watermark, _set_result_watermark, notify=changed
+    )
+    resultWatermarkPool = Property(
+        "QVariantList", _get_result_watermark_pool, _set_result_watermark_pool,
+        notify=changed,
+    )
 
     def _apply_appearance(self) -> None:
         """Push the stored appearance into RinUI (no-op without a theme manager).
@@ -732,6 +820,26 @@ class SettingsViewModel(QObject):
 
     # --- window geometry --------------------------------------------------
 
+    def _get_zen_fullscreen(self) -> bool:
+        return bool(self._store.get("workspace.zen_fullscreen"))
+
+    def _set_zen_fullscreen(self, enabled: bool) -> None:
+        self._store.set("workspace.zen_fullscreen", bool(enabled))
+        self.changed.emit()
+
+    @Slot(bool)
+    def setGeometryTracking(self, enabled: bool) -> None:
+        """Suspend geometry persistence around a fullscreen Zen transition."""
+        enabled = bool(enabled)
+        if enabled == self._geometry_tracking_enabled:
+            return
+        if not enabled:
+            self._geometry_timer.stop()
+            self._save_geometry()
+        self._geometry_tracking_enabled = enabled
+        if enabled:
+            self._geometry_timer.start()
+
     def _get_remember_window(self) -> bool:
         return bool(self._store.get("window.remember"))
 
@@ -772,7 +880,8 @@ class SettingsViewModel(QObject):
 
     def _on_geometry_changed(self, *_) -> None:
         """Restart the debounce (window signals carry the new value as an int)."""
-        self._geometry_timer.start()
+        if self._geometry_tracking_enabled:
+            self._geometry_timer.start()
 
     def _restore_geometry(self) -> None:
         """Move the window to its remembered position, then maximize if it was.
@@ -783,7 +892,8 @@ class SettingsViewModel(QObject):
         still being created — and then maximizing it leaves the presentation
         stale on Windows: the window fills the screen and Qt reports the right
         sizes, but what is drawn stays in the old rectangle with a white border,
-        and later resizes do not repair it. Verified against RinUI 0.4.4.1.
+        and later resizes do not repair it. Verified against RinUI 0.4.4.1; the window base is
+        unchanged in 0.5.0.
 
         The *position* is applied even when the window starts maximized, because
         Qt hands the window's declared x/y to the platform as its normal
@@ -810,16 +920,19 @@ class SettingsViewModel(QObject):
             QTimer.singleShot(0, self._apply_maximized_once)
         else:
             window.visibleChanged.connect(self._apply_maximized_once)
+            self._maximized_connected = True
 
     def _apply_maximized_once(self, *_) -> None:
         """Maximize after the window is shown, then stop listening."""
         window = self._window
         if window is None or not window.property("visible"):
             return
-        try:
-            window.visibleChanged.disconnect(self._apply_maximized_once)
-        except (RuntimeError, TypeError):
-            pass
+        if self._maximized_connected:
+            self._maximized_connected = False
+            try:
+                window.visibleChanged.disconnect(self._apply_maximized_once)
+            except (RuntimeError, TypeError):
+                pass
         window.showMaximized()
 
     def _startup_size(self) -> tuple[int, int]:
@@ -864,7 +977,8 @@ class SettingsViewModel(QObject):
         to ``Window.closing``, which passes a close event.
         """
         window = self._window
-        if window is None or not self._get_remember_window():
+        if (window is None or not self._geometry_tracking_enabled
+                or not self._get_remember_window()):
             return
         maximized = window.windowState() == Qt.WindowState.WindowMaximized
         values: dict = {"window.maximized": maximized}
@@ -1153,6 +1267,9 @@ class SettingsViewModel(QObject):
     mathFonts = Property("QVariantList", _get_math_fonts, constant=True)
     rememberWindow = Property(
         bool, _get_remember_window, _set_remember_window, notify=changed
+    )
+    zenFullscreen = Property(
+        bool, _get_zen_fullscreen, _set_zen_fullscreen, notify=changed
     )
     # Read once by MainWindow.qml to size the window at creation (see
     # _restore_geometry for why the size must not be assigned later).

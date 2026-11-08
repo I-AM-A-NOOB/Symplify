@@ -500,6 +500,79 @@ def test_variants_stop_at_their_degree_and_type_guards():
     assert variants(Matrix([[1, 2]])) == ()
 
 
+def test_every_qml_viewmodel_reference_exists():
+    """QML fails *silently* on a name the viewmodel does not have: the binding
+    reads `undefined`, and `!undefined` is true — which is how a watermark test
+    written against `calcVM.hasResult` (a property that never existed) kept the
+    mark on screen behind a result instead of hiding it. This holds every
+    `calcVM.`/`settingsVM.`/... reference in the QML to the real objects."""
+    import re
+    from pathlib import Path
+
+    store = SettingsStore(temp_dir() / "config.yaml")
+    store.load()
+    viewmodel = MainViewModel(store)
+    owners = {
+        "vm": viewmodel,
+        "calcVM": viewmodel.calculator,
+        "varsVM": viewmodel.variables,
+        "variablesModel": viewmodel.variables.model,
+        "historyVM": viewmodel.history,
+        "logVM": viewmodel.log,
+        "settingsVM": viewmodel.settings,
+    }
+    pattern = re.compile(r"\b(" + "|".join(owners) + r")\.([A-Za-z_][A-Za-z0-9_]*)")
+    qml_root = Path(__file__).resolve().parents[1] / "qml"
+    missing = {}
+    for path in qml_root.rglob("*.qml"):
+        for owner, prop in pattern.findall(path.read_text(encoding="utf-8")):
+            if not hasattr(owners[owner], prop):
+                missing.setdefault(f"{owner}.{prop}", []).append(path.name)
+    assert missing == {}, missing
+
+
+def test_the_watermark_setting_round_trips_and_reaches_the_calculator():
+    """``resultWatermark`` is a writable setting that re-rolls the calculator's
+    empty pane. The icon is the monogram tinted to the formulas' own ink; the
+    random kind typesets at one fixed size, whatever the result size is set to;
+    the pool validates and falls back."""
+    store = SettingsStore(temp_dir() / "config.yaml")
+    store.load()
+    vm = MainViewModel(store)
+    assert vm.settings.resultWatermark == "icon"
+
+    # The icon draws the monogram markup in the current ink (the placeholder
+    # fill is substituted), and a theme switch really recolours it.
+    icon_url = vm.calculator.watermarkSvgUrl
+    assert icon_url.startswith("data:image/svg+xml")
+    vm.set_latex_color("#ff0000")
+    assert "%23ff0000" in vm.calculator.watermarkSvgUrl
+
+    # The settings write reaches the calculator through the shared `changed`
+    # signal, so the switch happens in the write itself, and the random pick's
+    # artwork follows synchronously (the renderer answers on its own channel).
+    vm.settings.resultWatermark = "random"
+    assert vm.calculator.watermarkSvgUrl.startswith("data:image/svg+xml")
+    width = vm.calculator.watermarkWidth
+    height = vm.calculator.watermarkHeight
+    assert width > 0 and height > 0
+    # The mark is fixed-size: the result size setting does not touch it.
+    vm.settings.latexSize = 96
+    assert (vm.calculator.watermarkWidth, vm.calculator.watermarkHeight) == (
+        width, height)
+    vm.settings.resultWatermark = "icon"
+
+    # The pool: the store drops blank entries and falls back to the shipped
+    # list for non-list input; an unknown kind falls back to the icon.
+    vm.settings.resultWatermarkPool = ["", r"e+1"]
+    assert vm.settings.resultWatermarkPool == [r"e+1"]
+    vm.settings.resultWatermarkPool = "nonsense"
+    assert vm.settings.resultWatermarkPool == list(
+        DEFAULTS["workspace"]["result_watermark_pool"])
+    vm.settings.resultWatermark = "nonsense"
+    assert vm.settings.resultWatermark == "icon"
+
+
 def test_calculator_exposes_rendered_variants_and_clears_them():
     vm = new_vm()
     vm.calculator.calculate("sqrt(2)")
@@ -568,6 +641,18 @@ def new_vm(backend=None):
     store.load()
     return MainViewModel(store, calculation_backend=backend)
 
+
+def test_zen_mode_toggles_and_notifies():
+    vm = new_vm()
+    seen = []
+    vm.zenModeChanged.connect(lambda: seen.append(vm.zenMode))
+    assert vm.zenMode is False
+    vm.toggleZen()
+    assert vm.zenMode is True
+    vm.setZenMode(True)                 # idempotent: no second signal
+    vm.setZenMode(False)
+    assert vm.zenMode is False
+    assert seen == [True, False]
 
 def test_latex_keycaps_render_and_follow_the_keyboard_style():
     vm = new_vm()

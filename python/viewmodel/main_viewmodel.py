@@ -56,6 +56,8 @@ class MainViewModel(QObject):
     keyboardTabsChanged = Signal()
     keyboardLoadErrorChanged = Signal()
     keyboardLoadErrorShownChanged = Signal()
+    #: The calculator's focused, chrome-less reading mode changed.
+    zenModeChanged = Signal()
 
     def __init__(
         self,
@@ -65,6 +67,7 @@ class MainViewModel(QObject):
         initial_variables: Mapping[str, Any] | None = None,
         calculation_backend: QObject | None = None,
         translation_dir: Path | None = None,
+        icon_dir: Path | None = None,
     ):
         """Initialize all models and viewmodels.
 
@@ -82,8 +85,13 @@ class MainViewModel(QObject):
             calculation_backend: How calculation requests leave the UI. None
                 keeps the synchronous in-process backend (tests/headless); the
                 application passes a ``ProcessBackend`` with a timeout.
-            translation_dir: Folder with compiled ``symplify_<code>.qm`` files;
-                defaults to the repository's ``i18n/``.
+            translation_dir: Folder with compiled ``symplify_<code>.qm`` files
+                (and the ``rinui_<code>.qm`` fragments); defaults to the
+                repository's ``i18n/``.
+            icon_dir: Folder holding ``Symplify_mono.svg``, the markup the icon
+                watermark is built from; defaults to the ``icon/`` folder beside
+                the resolved translation folder (``ROOT/icon`` both in a
+                checkout and next to the frozen exe).
         """
         super().__init__(parent)
         self._calculator = Calculator()
@@ -107,6 +115,7 @@ class MainViewModel(QObject):
             parent=self,
             backend=calculation_backend,
             latex_service=self._latex_service,
+            icon_svg=self._read_watermark_svg(icon_dir, translation_dir),
         )
 
         # Search-filtered views: the pages bind their views to these, so the
@@ -141,12 +150,15 @@ class MainViewModel(QObject):
         # filesystem path resolved by `python/fonts.py`, so it is re-read on every
         # settings change rather than only when the family name changes.
         self._settings.changed.connect(self._apply_latex_style)
+        self._settings.changed.connect(self._apply_watermark)
         self._settings.changed.connect(self._refresh_keyboard_layout)
         self._keyboard_layout = self._settings.keyboardLayout
+        self._zen_mode = False
         self._keyboard_load_error = ""
         self._keyboard_load_error_shown = False
         self._load_keyboard()
         self._apply_latex_style()     # apply the persisted rendering settings now
+        self._apply_watermark()       # and the empty-state watermark's kind/pool
 
     def install_log_capture(self) -> None:
         """Take over Qt's and the interpreter's message streams.
@@ -159,6 +171,38 @@ class MainViewModel(QObject):
         lands in the Log page beside the app's own entries.
         """
         log_capture.install(self._log)
+
+    def _read_watermark_svg(
+        self, icon_dir: Path | None, translation_dir: Path | None
+    ) -> str:
+        """Read the monogram markup the icon watermark tints, or `""`.
+
+        Absent artwork is not an error: the pane then simply draws nothing for
+        the icon kind, while the random kind keeps working. Only when neither
+        folder is given does the repository layout supply the path, which is what
+        headless tests and the composition root's default both hit.
+        """
+        if icon_dir is not None:
+            folder = Path(icon_dir)
+        else:
+            base = (Path(translation_dir) if translation_dir is not None
+                    else Path(__file__).resolve().parents[2] / "i18n")
+            folder = base.resolve().parent / "icon"
+        try:
+            return (folder / "Symplify_mono.svg").read_text(encoding="utf-8")
+        except OSError:
+            return ""
+
+    def _apply_watermark(self) -> None:
+        """Hand the empty-result watermark's kind and pool to the calculator.
+
+        The settings viewmodel reads and validates the store; the calculator
+        viewmodel owns the empty state and the render, and re-renders on its own
+        whenever the LaTeX style changes.
+        """
+        self._calculator_vm.set_watermark(
+            self._settings.resultWatermark, self._settings.resultWatermarkPool
+        )
 
     def _apply_latex_style(self) -> None:
         """Hand the assembled `LatexStyle` to every surface that renders LaTeX.
@@ -231,6 +275,26 @@ class MainViewModel(QObject):
         """Re-read the current file; the Settings refresh button calls this."""
         self._load_keyboard()
         self.keyboardTabsChanged.emit()
+
+    def _set_zen_mode(self, enabled: bool) -> None:
+        enabled = bool(enabled)
+        if enabled == self._zen_mode:
+            return
+        self._zen_mode = enabled
+        self.zenModeChanged.emit()
+
+    @Slot()
+    def toggleZen(self) -> None:
+        """Enter or leave the calculator's focused result/plot view."""
+        self._set_zen_mode(not self._zen_mode)
+
+    @Slot(bool)
+    def setZenMode(self, enabled: bool) -> None:
+        self._set_zen_mode(enabled)
+
+    @Property(bool, notify=zenModeChanged)
+    def zenMode(self) -> bool:
+        return self._zen_mode
 
     @Slot()
     def markKeyboardLoadErrorShown(self) -> None:

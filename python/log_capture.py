@@ -1,40 +1,41 @@
-"""Routes what the interpreter and Qt say into the app's own log.
+"""Routes Qt, Python ``logging`` and the interpreter's warnings into the log page.
 
-Qt's warnings and uncaught Python exceptions are invisible in a packaged build:
-a windowed exe has no console at all (``--windows-console-mode=disable``), and
-even in development they are the one stream the Log page never showed. That is
-the stream that carries RinUI's own complaints — a QML ``ReferenceError`` per
-component instantiation, type errors from dialogs — so the app looked healthy
-while its console filled up.
+Three streams feed one sink (the log viewmodel):
 
-This module hands that stream to the :class:`LogViewModel`, which is also where
-the app's own entries (Calculator, Variables) go, and **mirrors every entry to the
-terminal as well** — filtered by level, so DEBUG and INFO go to stdout and
-WARNING and ERROR to stderr, which keeps a redirected terminal usable. The page
-remains the surface a user reads; the terminal is for development, where the page
-is not scrollable in a script and the app may not even be visible.
+* **Python ``logging``** — the standard channel, and since RinUI 0.5 the one RinUI
+  itself uses (``RinUI.core.logger``; silent until a handler is attached). A
+  handler on the root logger forwards records to the page. This is also the
+  channel for anything else in the process that logs: ziamath, fontTools, SymPy.
+* **Qt's message handler** — QML warnings and Qt's own complaints are re-emitted
+  as records on the ``Qt`` logger, so both streams share one formatting and one
+  destination. The ``Qt`` logger is pinned to DEBUG: Qt decides what is worth
+  reporting, and its info/debug messages were shown before this bridge existed.
+* **``sys.excepthook`` and ``warnings``** — an uncaught exception is an ``ERROR``
+  record on the ``Python`` logger; ``warnings`` go through
+  ``logging.captureWarnings``, which is what reaches deep library warnings in a
+  windowed build (it has no console).
 
-Two details the handlers have to get right:
+**One duplicate has to be filtered.** RinUI logs each QML warning on its own
+logger as ``QML: …``; the same warning also arrives through Qt's message handler.
+The bridge drops the RinUI copy, so one warning is one line rather than two.
 
-* **Re-entrancy.** The Qt handler runs while Qt is printing, and it ends in a
-  signal emission that can make Qt print again. A flag drops the nested call.
-* **Repeats.** RinUI emits the same warning once per instantiation; left alone
-  they bury everything else, so the viewmodel collapses consecutive identical
-  entries into one line with a count.
+**Entries are queued onto the sink's thread.** A record can be emitted from any
+thread (Qt calls its message handler from the QML compilation thread too), while
+the viewmodel is a QObject owned by the GUI thread. ``QMetaObject.invokeMethod``
+with ``Qt.QueuedConnection`` is the hand-off; it also keeps the handler free of
+the viewmodel's own signals, which is what made a re-entering Qt handler
+possible before.
 
-And one it has to survive: **shutdown**. Qt keeps printing while the interpreter
-tears its modules down — RinUI's native event filter is still running when
-`__moduleShutdown` reaches it — and by then the viewmodel behind the sink is
-gone, so a message handled at that point would raise out of `emit()` *inside*
-Qt's own event filter (which reports it as a wall of "Error calling Python
-override" frames, and prints every one of them). The handler therefore stops
-routing the moment the application says it is quitting, and drops anything that
-raises underneath it regardless.
+**Nothing here may raise**, and nothing may keep running during teardown. Qt
+keeps printing while the interpreter tears its modules down; the sink is destroyed
+in the same sweep. The bridge detaches on ``aboutToQuit`` — it removes the logging
+handler, restores Qt's own handler, stops warning capture and puts the previous
+excepthook back — and every entry point checks the shutdown flag.
 """
 
+import logging
 import sys
 import traceback
-import warnings
 from pathlib import Path
 from types import TracebackType
 from typing import TYPE_CHECKING
@@ -44,45 +45,97 @@ from .viewmodel.log_viewmodel import LogLevel, LogViewModel
 if TYPE_CHECKING:                      # Qt is imported for typing only
     from PySide6.QtCore import QMessageLogContext, QtMsgType
 
-#: Guards the Qt handler against re-entering itself through a signal emission.
-_in_handler = False
+#: The handler installed on the root logger, so teardown can remove it again.
+_handler: "logging.Handler | None" = None
 
-#: The hook this module replaced, restored on quit.
-_original_showwarning = None
+#: The excepthook this module replaced, restored on quit.
+_previous_excepthook = sys.excepthook
 
 #: Set once the application is quitting. Qt prints during teardown, after the
 #: viewmodels the sink belongs to have been destroyed.
 _shutting_down = False
 
+#: Guards the Qt handler against re-entering itself if Qt complains while it runs.
+_in_qt_handler = False
+
 
 def install(sink: LogViewModel) -> None:
-    """Send Qt messages and uncaught exceptions to ``sink``, and mirror it out.
+    """Send Qt, ``logging`` and the interpreter's messages to ``sink``.
 
     Args:
         sink: The log viewmodel, which owns the entries from here on.
     """
+    global _handler, _shutting_down
+    if _handler is not None:
+        return
+    _shutting_down = False
     sink.entryAdded.connect(_mirror_to_terminal)
-    _install_message_handler(sink)
-    _install_excepthook(sink)
-    _install_warning_hook(sink)
+
+    _handler = _ViewModelHandler(sink)
+    logging.getLogger().addHandler(_handler)
+    #: Qt's own debug/info messages were visible before this bridge; keep them.
+    logging.getLogger("Qt").setLevel(logging.DEBUG)
+
+    _install_message_handler()
+    _install_excepthook()
+    logging.captureWarnings(True)
     _detach_at_quit()
 
 
-def _install_warning_hook(sink: LogViewModel) -> None:
-    """Route Python warnings into ``sink`` too.
+class _ViewModelHandler(logging.Handler):
+    """Forward records into the log viewmodel on its own thread."""
 
-    ``warnings.warn`` writes to ``sys.stderr``, which a windowed build has none
-    of, so a warning raised deep inside a library was invisible in exactly the
-    builds that needed it. The LaTeX renderer warns when it cannot typeset
-    something (it catches its own exception, so the excepthook never sees it).
-    """
-    global _original_showwarning
-    _original_showwarning = warnings.showwarning
+    def __init__(self, sink: LogViewModel):
+        super().__init__(logging.DEBUG)
+        self._sink: LogViewModel = sink
 
-    def showwarning(message, category, filename, lineno, file=None, line=None):
-        sink.add_warning(f"{category.__name__}: {message} ({filename}:{lineno})")
+    def emit(self, record: logging.LogRecord) -> None:
+        """Hand one record to the viewmodel, or drop it at teardown."""
+        if _shutting_down:
+            return
+        try:
+            message = record.getMessage()
+            #: RinUI logs every QML warning itself; the same warning already
+            #: came through Qt. See the module docstring.
+            if record.name == "RinUI" and message.startswith("QML: "):
+                return
+            if record.exc_info:
+                message = (message + "\n" + "".join(
+                    traceback.format_exception(*record.exc_info)
+                )).strip()
 
-    warnings.showwarning = showwarning
+            from PySide6.QtCore import Q_ARG, QMetaObject, Qt
+
+            QMetaObject.invokeMethod(
+                self._sink,
+                "add_record",
+                Qt.ConnectionType.QueuedConnection,
+                Q_ARG(str, message),
+                Q_ARG(int, _level_for_record(record.levelno).value),
+                Q_ARG(str, _source_for(record)),
+            )
+        except Exception:
+            # Teardown, or a record from a thread the sink cannot reach: a log
+            # line must never take the process with it.
+            self.handleError(record)
+
+
+def _level_for_record(levelno: int) -> LogLevel:
+    """Map a Python logging level onto the page's four levels."""
+    if levelno >= logging.ERROR:
+        return LogLevel.ERROR
+    if levelno >= logging.WARNING:
+        return LogLevel.WARNING
+    if levelno >= logging.INFO:
+        return LogLevel.INFO
+    return LogLevel.DEBUG
+
+
+def _source_for(record: logging.LogRecord) -> str:
+    """The tag the page shows in brackets: short, and never a dotted path."""
+    if record.name == "py.warnings":
+        return "Warnings"
+    return record.name.rsplit(".", 1)[-1]
 
 
 def _detach_at_quit() -> None:
@@ -90,13 +143,12 @@ def _detach_at_quit() -> None:
 
     Qt's output and the interpreter's teardown overlap: RinUI's event filter keeps
     running while modules are being destroyed, and the log viewmodel is one of
-    them. Anything it printed then would be routed into a deleted QObject and
-    raise inside Qt, which prints that as a nest of "Error calling Python
-    override" frames. Detaching first turns all of it back into a plain Qt
-    message on stderr.
+    them. Anything routed then would reach a deleted QObject and raise inside Qt,
+    which prints that as a nest of "Error calling Python override" frames.
+    Detaching first turns all of it back into ordinary output.
     """
     def detach() -> None:
-        global _shutting_down
+        global _shutting_down, _handler
         _shutting_down = True
         try:
             from PySide6.QtCore import qInstallMessageHandler
@@ -104,6 +156,15 @@ def _detach_at_quit() -> None:
             qInstallMessageHandler(None)
         except Exception:              # Qt already gone: nothing left to restore
             pass
+        try:
+            logging.captureWarnings(False)
+        except Exception:
+            pass
+        if _handler is not None:
+            logging.getLogger().removeHandler(_handler)
+            _handler.close()
+            _handler = None
+        sys.excepthook = _previous_excepthook
 
     try:
         from PySide6.QtCore import QCoreApplication
@@ -131,8 +192,8 @@ def _mirror_to_terminal(level: str, source: str, message: str) -> None:
         pass
 
 
-def _install_message_handler(sink: LogViewModel) -> None:
-    """Take over Qt's message output."""
+def _install_message_handler() -> None:
+    """Turn Qt's message output into ``Qt`` logger records."""
     from PySide6.QtCore import qInstallMessageHandler
 
     def handler(
@@ -140,46 +201,47 @@ def _install_message_handler(sink: LogViewModel) -> None:
         context: "QMessageLogContext",
         message: str,
     ) -> None:
-        global _in_handler
-        if _in_handler or _shutting_down:
+        global _in_qt_handler
+        if _in_qt_handler or _shutting_down:
             return
-        _in_handler = True
+        _in_qt_handler = True
         try:
             where = ""
             file = getattr(context, "file", None)
             if file:
-                where = f"{Path(file).name}:{context.line}: "
-            sink.add_log(
-                where + message.strip(),
-                level=_level_for(msg_type),
-                source="Qt",
+                where = f"{Path(file).name}:{getattr(context, 'line', 0)}: "
+            logging.getLogger("Qt").log(
+                _python_level_for(msg_type), where + message.strip()
             )
         except Exception:
             # The sink is gone or Qt is mid-teardown: a message must never raise
             # out of the handler, least of all into Qt's own printing.
             pass
         finally:
-            _in_handler = False
+            _in_qt_handler = False
 
     # The previous handler is of no use to us: this app owns its output.
     _ = qInstallMessageHandler(handler)
 
 
-def _level_for(msg_type: "QtMsgType") -> LogLevel:
-    """Map a Qt message type onto a log level."""
+def _python_level_for(msg_type: "QtMsgType") -> int:
+    """Map a Qt message type onto a Python logging level."""
     from PySide6.QtCore import QtMsgType
 
     if msg_type == QtMsgType.QtDebugMsg:
-        return LogLevel.DEBUG
+        return logging.DEBUG
     if msg_type == QtMsgType.QtInfoMsg:
-        return LogLevel.INFO
+        return logging.INFO
     if msg_type == QtMsgType.QtWarningMsg:
-        return LogLevel.WARNING
-    return LogLevel.ERROR          # QtCriticalMsg, QtFatalMsg
+        return logging.WARNING
+    return logging.ERROR          # QtCriticalMsg, QtFatalMsg
 
 
-def _install_excepthook(sink: LogViewModel) -> None:
-    """Report uncaught exceptions, keeping Python's own reporting intact."""
+def _install_excepthook() -> None:
+    """Report uncaught exceptions on the ``Python`` logger."""
+    global _previous_excepthook
+    _previous_excepthook = sys.excepthook
+
     def hook(
         exc_type: type[BaseException],
         exc_value: BaseException,
@@ -193,7 +255,7 @@ def _install_excepthook(sink: LogViewModel) -> None:
         # No `previous(...)`: the entry itself is mirrored to stderr now, so
         # calling the default hook would print the same traceback twice.
         try:
-            sink.add_log(text, level=LogLevel.ERROR, source="Python")
+            logging.getLogger("Python").error(text)
         except Exception:              # as in the Qt handler: teardown is not ours
             pass
 

@@ -59,11 +59,13 @@ Item {
                 reservedHeight: frame.headerHeight
             }
 
-            SettingsLanguageSection {}
-            SettingsInterfaceSection {}
-            SettingsWorkspaceSection {}
-            SettingsFileSection {}
-            SettingsAboutSection {}
+            //: The section items are the sticky bar's inputs: each exposes the
+            //: subtitle's text and where it sits (see `PageHeader.sections`).
+            SettingsLanguageSection { id: languageSection }
+            SettingsInterfaceSection { id: interfaceSection }
+            SettingsWorkspaceSection { id: workspaceSection }
+            SettingsFileSection { id: fileSection }
+            SettingsAboutSection { id: aboutSection }
         }
     }
 
@@ -75,5 +77,9 @@ Item {
         title: qsTr("Settings")
         flickable: scroll
         inlineRow: inlineTitle
+        //: The bar takes the name of whichever section the reader has scrolled to:
+        //: the previous label leaves upward and the new one arrives from below.
+        sections: [languageSection, interfaceSection, workspaceSection,
+                   fileSection, aboutSection]
     }
 }

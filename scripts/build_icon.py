@@ -1,4 +1,4 @@
-"""Regenerate ``icon/Symplify.ico`` (and the loose PNGs) from ``icon/Symplify.svg``.
+"""Derive the shipped icon artefacts from ``icon/Symplify.svg``.
 
     uv run python scripts/build_icon.py
 
@@ -35,10 +35,14 @@ looks like — and it re-reads the container it just wrote to prove each entry's
 kind, size and offset.
 
 Output: ``icon/Symplify.ico`` (committed — Nuitka embeds it and `main.py` loads
-it) and ``icons-png/`` (git-ignored; the same nine sizes as loose PNGs, for
-anything that wants a raster).
+it), ``icons-png/`` (git-ignored; the same nine sizes as loose PNGs, for
+anything that wants a raster), and ``icon/Symplify_mono.svg`` (committed — the
+result pane's watermark draws it: the same master shape with one solid neutral
+ink instead of the gradient, derived here so the master stays the artwork's only
+source and the two variants cannot drift apart).
 """
 
+import re
 import struct
 import sys
 from pathlib import Path
@@ -50,6 +54,11 @@ from PySide6.QtSvg import QSvgRenderer
 ROOT = Path(__file__).resolve().parents[1]
 SVG = ROOT / "icon" / "Symplify.svg"
 ICO = ROOT / "icon" / "Symplify.ico"
+WATERMARK_SVG = ROOT / "icon" / "Symplify_mono.svg"
+#: A placeholder only: the app re-tints the fill to the current theme ink when it
+#: shows the watermark (see `CalculatorViewModel`), so the file stays valid on its
+#: own without being a fixed colour on screen.
+WATERMARK_INK = "#8d8d8d"
 PNG_DIR = ROOT / "icons-png"
 
 #: What Windows asks for, small to large. 256 is stored as a 0 byte in the
@@ -154,12 +163,44 @@ def read_ico(path: Path) -> list[tuple[int, str, int, int]]:
     return entries
 
 
+def write_watermark_svg() -> None:
+    """Derive the watermark SVG from the master (see the module docstring).
+
+    The master paints its one shape twice: a linear-gradient fill first, a
+    radial-gradient shade over it. Monochrome keeps a single path — the shared
+    shape with one solid fill — and drops the shade. The fill is a placeholder
+    the app substitutes with the theme ink at show time; it exists so the file
+    is a complete SVG on its own. If the two paths ever stop being one shape,
+    this derivation would drop artwork, so the script says so instead of writing
+    a wrong file.
+    """
+    master = SVG.read_text(encoding="utf-8")
+    shapes = re.findall(r'<path class="st[12]" d="([^"]+)"/>', master)
+    if len(shapes) != 2 or shapes[0] != shapes[1]:
+        raise SystemExit(
+            f"The master SVG's two paintable paths are not one shape "
+            f"({len(shapes)} paths); update the watermark derivation."
+        )
+    output = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">\n'
+        "  <!-- Derived from icon/Symplify.svg by scripts/build_icon.py; the\n"
+        "       master is the only source of the artwork. -->\n"
+        f'  <path fill="{WATERMARK_INK}" d="{shapes[0]}"/>\n'
+        "</svg>\n"
+    )
+    WATERMARK_SVG.write_text(output, encoding="utf-8")
+    print(f"watermark: {WATERMARK_SVG.relative_to(ROOT).as_posix()} "
+          f"({WATERMARK_SVG.stat().st_size} bytes)")
+
+
 def main() -> int:
     if not SVG.is_file():
         raise SystemExit(f"No source SVG at {SVG}.")
 
     _app()
 
+    write_watermark_svg()
     print(f"source   : {SVG.relative_to(ROOT).as_posix()}")
     master = render_master()
 

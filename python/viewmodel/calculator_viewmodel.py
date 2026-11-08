@@ -5,13 +5,15 @@ The widgets app's eager plot-data computation (``create_plot_data`` /
 ``compute_plot_data``) and legacy assignment path are not carried over.
 """
 
+import random
+import re
 from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import Property, QCoreApplication, QObject, QTimer, Signal, Slot
 from qmlmathplot import Curve, ImplicitCurve, Plot
 from qmlmathplot.model import func_glsl
 
-from ..latex_render import LatexStyle
+from ..latex_render import LatexStyle, svg_data_url
 from ..model.calculator import Assignment, ErrorKind, Failure, Result, Success
 from ..model.plotting import is_plot_variable, plot_series, plot_variable_warning
 from ..model.variable import VariableManager
@@ -32,6 +34,27 @@ if TYPE_CHECKING:
 #: here paints over them.
 PLOT_THEMES = {False: "default", True: "dark_background"}
 
+#: The random watermark's default pool, used when the settings pool is empty.
+#: Pure mathematics only, so nothing drawn can ever be wrong; the shipped keys
+#: in `python/settings.py` mirror this list.
+WATERMARK_POOL = (
+    r"e^{i\pi}+1=0",
+    r"\sum_{n=1}^{\infty}\frac{1}{n^{2}}=\frac{\pi^{2}}{6}",
+    r"\int_{-\infty}^{\infty} e^{-x^{2}}\,\mathrm{d}x=\sqrt{\pi}",
+    r"\lim_{x\to 0}\frac{\sin x}{x}=1",
+    r"\nabla\cdot\mathbf{B}=0",
+)
+
+#: The watermark's typesetting size, in points — fixed on purpose. It is a mark
+#: in an empty pane, not a result: it must not follow the result size setting and
+#: must not be scaled up to the pane, or a long pool item outgrows the formula it
+#: stands in for.
+WATERMARK_SIZE = 48
+
+#: The derived monogram ships one solid fill; the pane tints it to the same ink
+#: the formulas use, so both watermark kinds are one colour on screen.
+_WATERMARK_FILL = re.compile(r'fill="[^"]*"', re.IGNORECASE)
+
 
 class CalculatorViewModel(QObject):
     """Connects the Calculator model to the QML calculator page.
@@ -50,6 +73,7 @@ class CalculatorViewModel(QObject):
     inputTextChanged = Signal()
     assignInputChanged = Signal()
     resultChanged = Signal()
+    watermarkChanged = Signal()
     variantsChanged = Signal()
     plotChanged = Signal()
     warningOccurred = Signal(str, str)
@@ -65,6 +89,7 @@ class CalculatorViewModel(QObject):
         parent: QObject | None = None,
         backend: QObject | None = None,
         latex_service: LatexRenderService | None = None,
+        icon_svg: str = "",
     ):
         """Initialize the calculator viewmodel.
 
@@ -76,6 +101,9 @@ class CalculatorViewModel(QObject):
                 backend with a timeout.
             latex_service: Renderer shared with History. None creates one; with
                 no QCoreApplication it renders inline.
+            icon_svg: The monogram SVG markup the icon watermark draws, tinted to
+                the theme ink at show time (``icon/Symplify_mono.svg``). Empty
+                means the pane simply has no icon artwork.
         """
         super().__init__(parent)
         self._variable_manager = variable_manager
@@ -130,6 +158,9 @@ class CalculatorViewModel(QObject):
         )
         self._latex_service.rendered.connect(self._on_latex_rendered)
         self._latex_service.failed.connect(self._on_latex_failed)
+        #: Source markup, not a URL: the fill is the theme's ink, so the artwork
+        #: is built per theme rather than shipped pre-tinted.
+        self._icon_svg = icon_svg
         self._latex_service.warning.connect(self._on_latex_warning)
         # The plot is state that has to survive a page switch — RinUI rebuilds
         # pages on every navigation — so it lives here, and the page injects it
@@ -150,6 +181,18 @@ class CalculatorViewModel(QObject):
         #: Incremented for every result; a scheduled plot from an older result
         #: must not replace the curves of a newer one.
         self._plot_token = 0
+        #: The empty result pane's watermark. Its `kind` (`icon` or `random`)
+        #: is pushed from the settings viewmodel on every settings change; the
+        #: `pick` is the LaTeX item the pool rolled for the current empty visit
+        #: (re-rolled only when a request's outcome leaves the empty state), and
+        #: its artwork is filled by the renderer like the result's.
+        self._watermark_kind = "icon"
+        self._watermark_pool: tuple[str, ...] = ()
+        self._watermark_pick: str | None = None
+        self._watermark_dirty = False
+        self._watermark_svg_url = ""
+        self._watermark_width = 0
+        self._watermark_height = 0
         # A fresh page has nothing to typeset: the formula area stays empty and the
         # outcome box above it carries the placeholder.
         self._refresh_strip()
@@ -246,6 +289,101 @@ class CalculatorViewModel(QObject):
         goes.)
         """
         self._request_result_latex()
+        self._refresh_watermark()
+
+    def set_watermark(self, kind: str, pool: Any) -> None:
+        """Apply the watermark configuration pushed by the settings viewmodel.
+
+        Args:
+            kind: Which artwork to show while the pane is empty — `icon` (the
+                app's monogram) or `random` (one item of the pool, rendered by
+                the same process that renders results).
+            pool: The LaTeX items to roll from; empty or non-list input keeps
+                the viewmodel's built-in pool.
+        """
+        kind = str(kind).strip().lower() or "icon"
+        if kind not in ("icon", "random"):
+            kind = "icon"
+        raw_pool = list(pool) if isinstance(pool, (list, tuple)) else []
+        items = [str(item).strip() for item in raw_pool if str(item).strip()]
+        pool_items = tuple(items) if items else WATERMARK_POOL
+        if (kind, pool_items) == (self._watermark_kind, self._watermark_pool):
+            return
+        self._watermark_kind = kind
+        self._watermark_pool = pool_items
+        self._watermark_pick = None
+        self._watermark_dirty = True
+        self._refresh_watermark()
+
+    def _refresh_watermark(self) -> None:
+        """Prepare the watermark for the current empty visit.
+
+        A non-empty result leaves the pool as it was and marks this visit dirty,
+        so the next empty state re-rolls. A configuration change re-rolls as
+        well (`set_watermark` clears the pick). Everything else re-renders the
+        rolled item — a style change or a completed result's cleared artwork.
+        """
+        self._watermark_dirty = not self._result_text
+        if not self._watermark_dirty:
+            return
+        if self._watermark_kind == "icon":
+            self._show_icon_watermark()
+            return
+        if self._watermark_pick is None:
+            self._watermark_pick = random.choice(self._watermark_pool)
+        self._latex_seq += 1
+        token = f"{self._latex_seq}:watermark"
+        self._latex_pending[token] = ("watermark", -1)
+        self._latex_service.request(
+            token, self._watermark_pick, self._watermark_style()
+        )
+
+    def _watermark_style(self) -> LatexStyle:
+        """The fixed style the watermark typesets in.
+
+        Same ink and font as the results — so the two watermark kinds read as one
+        colour — but its own size, so the mark stays a mark whatever the result
+        size is set to.
+        """
+        return LatexStyle(
+            color=self._latex_style.color,
+            size=WATERMARK_SIZE,
+            font=self._latex_style.font,
+        )
+
+    def _show_icon_watermark(self) -> None:
+        """Hand QML the monogram tinted to the formulas' own ink.
+
+        The committed SVG carries one placeholder fill (see
+        ``scripts/build_icon.py``); substituting it is what makes the icon and
+        the random kind the same colour on every theme, without a layer effect
+        (a HiDPI-unsafe ``ColorOverlay`` was what the file exists to avoid).
+        """
+        markup = self._icon_svg
+        if markup:
+            markup = _WATERMARK_FILL.sub(
+                lambda match: f'fill="{self._latex_style.color}"', markup, count=1
+            )
+        url = svg_data_url(markup) if markup else ""
+        if (url, 0, 0) == (
+            self._watermark_svg_url,
+            self._watermark_width,
+            self._watermark_height,
+        ):
+            return
+        self._watermark_svg_url = url
+        self._watermark_width = 0
+        self._watermark_height = 0
+        self.watermarkChanged.emit()
+
+    def _get_watermark_svg_url(self) -> str:
+        return self._watermark_svg_url
+
+    def _get_watermark_width(self) -> int:
+        return self._watermark_width
+
+    def _get_watermark_height(self) -> int:
+        return self._watermark_height
 
     def _apply_variants(self, rows: Any) -> None:
         """Publish the alternative forms computed by the backend.
@@ -298,6 +436,11 @@ class CalculatorViewModel(QObject):
             self._latex_width = width
             self._latex_height = height
             self.resultChanged.emit()
+        if kind == "watermark":
+            self._watermark_svg_url = url
+            self._watermark_width = width
+            self._watermark_height = height
+            self.watermarkChanged.emit()
             return
         if 0 <= index < len(self._variant_items):
             row = self._variant_items[index]
@@ -400,6 +543,9 @@ class CalculatorViewModel(QObject):
         """True while there is something to draw (the page hides the area otherwise)."""
         return bool(self._curves)
 
+    watermarkSvgUrl = Property(str, _get_watermark_svg_url, notify=watermarkChanged)
+    watermarkWidth = Property(int, _get_watermark_width, notify=watermarkChanged)
+    watermarkHeight = Property(int, _get_watermark_height, notify=watermarkChanged)
     hasPlot = Property(bool, _get_has_plot, notify=plotChanged)
 
     def _get_plot_error(self) -> str:

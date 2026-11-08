@@ -11,6 +11,8 @@ Rectangle {
     signal backspacePressed()
     signal cursorLeftPressed()
     signal cursorRightPressed()
+    signal undoPressed()
+    signal redoPressed()
 
     property int currentTabIndex: 0
     //: A lock, not a one-shot: the Shift toggle stays on across tabs, but
@@ -30,10 +32,10 @@ Rectangle {
         }
     }
 
-    color: Rin.Theme.currentTheme.colors.cardColor
-    radius: Rin.Theme.currentTheme.appearance.buttonRadius
-    border.width: Rin.Theme.currentTheme.appearance.borderWidth
-    border.color: Rin.Theme.currentTheme.colors.cardBorderColor
+    //: The keys are the tiles; the keyboard itself is not another card.
+    color: "transparent"
+    radius: 0
+    border.width: 0
     // The 240px card grew by the toolbar (34) and its gap (8), so the key
     // rows keep the height they had before the cursor buttons existed.
     implicitHeight: 290
@@ -44,9 +46,11 @@ Rectangle {
         spacing: 8
 
         // Toolbar: above the tab strip and separate from both it and the key
-        // grid. Shift is a real ToggleButton (accent when locked); the cursor
-        // and backspace buttons stay transparent, and Backspace stays on the
-        // opposite end so it cannot be hit while reaching for an arrow.
+        // grid. Shift is a real ToggleButton (accent when locked); the cursor,
+        // undo/redo and backspace buttons stay transparent. The separators mark
+        // the three groups — Shift | cursor + history | Backspace — and
+        // Backspace stays on the opposite end so it cannot be hit while
+        // reaching for an arrow.
         RowLayout {
             Layout.fillWidth: true
             Layout.preferredHeight: 34
@@ -68,6 +72,11 @@ Rectangle {
                     ? "ic_fluent_keyboard_shift_uppercase_20_regular"
                     : "ic_fluent_keyboard_shift_20_regular"
                 Cmp.Tip { text: qsTr("Shift") }
+            }
+
+            Rin.ToolSeparator {
+                orientation: Qt.Vertical
+                Layout.alignment: Qt.AlignVCenter
             }
 
             Rin.Button {
@@ -98,6 +107,41 @@ Rectangle {
                 icon.name: "ic_fluent_arrow_right_20_regular"
                 onClicked: root.cursorRightPressed()
                 Cmp.Tip { text: qsTr("Move cursor right") }
+            }
+
+            Rin.ToolSeparator {
+                orientation: Qt.Vertical
+                Layout.alignment: Qt.AlignVCenter
+            }
+
+            Rin.Button {
+                objectName: "keyboardUndo"
+                Layout.preferredWidth: 34
+                Layout.preferredHeight: 34
+                Layout.alignment: Qt.AlignVCenter
+                flat: true
+                focusPolicy: Qt.NoFocus
+                autoRepeat: true
+                autoRepeatDelay: 400
+                autoRepeatInterval: 55
+                icon.name: "ic_fluent_arrow_undo_20_regular"
+                onClicked: root.undoPressed()
+                Cmp.Tip { text: qsTr("Undo") }
+            }
+
+            Rin.Button {
+                objectName: "keyboardRedo"
+                Layout.preferredWidth: 34
+                Layout.preferredHeight: 34
+                Layout.alignment: Qt.AlignVCenter
+                flat: true
+                focusPolicy: Qt.NoFocus
+                autoRepeat: true
+                autoRepeatDelay: 400
+                autoRepeatInterval: 55
+                icon.name: "ic_fluent_arrow_redo_20_regular"
+                onClicked: root.redoPressed()
+                Cmp.Tip { text: qsTr("Redo") }
             }
 
             Item { Layout.fillWidth: true }

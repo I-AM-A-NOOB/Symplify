@@ -11,8 +11,15 @@ import RinUI
 //: their index through, and `applyAccentMode`, the only reason the accent expander opens
 //: itself.
 ColumnLayout {
+    //: What the page's sticky bar shows once this subtitle reaches it, and where
+    //: the subtitle sits inside the scrolling column, so the bar can tell when
+    //: that happened (both are plain `y`/`text` bindings: layouts notify).
+    readonly property string sectionTitle: subtitle.text
+    readonly property real subtitleOffset: subtitle.y
 
-        readonly property var backdropLabels: ["Mica", "Acrylic", "Tabbed", "None"]
+
+        //: Labels are translated, values stay the stable tokens the store and
+        //: RinUI expect (the same shape as Theme mode below).
         readonly property var backdropValues: ["mica", "acrylic", "tabbed", "none"]
 
         // Order is a contract with SettingsViewModel's accent modes (the ComboBox
@@ -39,6 +46,7 @@ ColumnLayout {
                     spacing: 3
 
                     Text {
+                        id: subtitle
                         typography: Typography.BodyStrong
                         text: qsTr("Interface")
                     }
@@ -71,7 +79,8 @@ ColumnLayout {
 
                         ComboBox {
                             Layout.preferredWidth: 150
-                            model: backdropLabels
+                            model: [qsTr("Mica"), qsTr("Acrylic"),
+                                    qsTr("Mica Alt"), qsTr("None")]
                             currentIndex: indexOf(backdropValues, settingsVM.backdrop)
                             onActivated: (index) => settingsVM.backdrop = backdropValues[index]
                         }

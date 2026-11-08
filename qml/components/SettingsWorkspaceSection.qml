@@ -11,10 +11,24 @@ import RinUI
 //: `indexOf` is a three-line helper the Interface section keeps its own copy of: a shared
 //: singleton for that would cost more than it saves.
 ColumnLayout {
+    //: What the page's sticky bar shows once this subtitle reaches it, and where
+    //: the subtitle sits inside the scrolling column, so the bar can tell when
+    //: that happened (both are plain `y`/`text` bindings: layouts notify).
+    readonly property string sectionTitle: subtitle.text
+    readonly property real subtitleOffset: subtitle.y
+
         // The bracket setting's two choices, named once: the expander's header shows
         // the one in effect and the rows below are them.
         readonly property string bracketThemeLabel: qsTr("Follow the code theme")
         readonly property string bracketCustomLabel: qsTr("Custom")
+
+        // The watermark choice: the stored values stay the stable token strings
+        // the settings store expects (the same pattern as Theme mode above);
+        // labels are translated. The existing `indexOf` helper below resolves
+        // the combo's index.
+        readonly property var watermarkValues: ["icon", "random"]
+        readonly property var watermarkLabels:
+            [qsTr("App logo"), qsTr("Random maths")]
 
         //: The keyboard switcher's values: "" is the shipped layout; everything
         //: else is a filename from the settings folder's keyboards/ directory.
@@ -62,10 +76,19 @@ ColumnLayout {
             return i >= 0 ? i : 0
         }
 
+        //: What the pool field currently holds, as the rest of the font rows
+        //: state their resolved value.
+        function watermarkPoolNote() {
+            const count = settingsVM.resultWatermarkPool.length
+            return qsTr("%1 LaTeX formulas. One per line; an empty list restores the shipped ones.")
+                .arg(count)
+        }
+
                     Layout.fillWidth: true
                     spacing: 3
 
                     Text {
+                        id: subtitle
                         typography: Typography.BodyStrong
                         text: qsTr("Workspace")
                     }
@@ -449,7 +472,7 @@ ColumnLayout {
                         Layout.fillWidth: true
                         title: qsTr("Keyboard font")
                         description: qsTr("Typesets text keys; LaTeX keys use the LaTeX font at this size. A serif face is recommended.")
-                        icon.name: "ic_fluent_keyboard_20_regular"
+                        icon.name: "ic_fluent_keyboard_123_20_regular"
 
                         content: SpinBox {
                             Layout.preferredWidth: 130
@@ -568,6 +591,91 @@ ColumnLayout {
                         }
                     }
 
+                    ExpanderRow {
+                        id: watermarkRow
+                        objectName: "resultWatermarkRow"
+
+                        Layout.fillWidth: true
+                        title: qsTr("Empty result watermark")
+                        description: qsTr("What the empty result pane shows: the app's Σ monogram, or a random piece of maths.")
+                        icon.name: "ic_fluent_window_brush_20_regular"
+
+                        // The same named-choice shape as the Interface section's
+                        // Theme mode: parallel label/value arrays plus the local
+                        // `indexOf` helper below.
+                        content: ComboBox {
+                            objectName: "resultWatermarkKind"
+                            Layout.preferredWidth: 150
+                            model: watermarkLabels
+                            currentIndex: indexOf(watermarkValues,
+                                                  settingsVM.resultWatermark)
+                            onActivated: (index) => settingsVM.resultWatermark =
+                                watermarkValues[index]
+                        }
+
+                        Loader {
+                            Layout.fillWidth: true
+                            active: watermarkRow.expanded
+                            onLoaded: item.width = width
+                            sourceComponent: Component {
+                                SettingFieldRow {
+                                    label: qsTr("Random formulas")
+                                    hint: watermarkPoolNote()
+                                    showDivider: false
+
+                                    //: One LaTeX snippet per line, in the code font
+                                    //: the expressions are read in (backslashes and
+                                    //: braces stay literal). Committed when the field
+                                    //: loses focus: every commit re-rolls and redraws
+                                    //: the watermark, so per keystroke would be
+                                    //: wasteful.
+                                    field: TextArea {
+                                        id: watermarkPoolField
+
+                                        objectName: "resultWatermarkPool"
+
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: 148
+                                        placeholderText: qsTr("One LaTeX formula per line")
+                                        font.family: settingsVM.codeFontFamily
+                                        font.pixelSize: settingsVM.codeSize
+                                        wrapMode: TextEdit.NoWrap
+
+                                        text: settingsVM.resultWatermarkPool.join("\n")
+
+                                        onActiveFocusChanged: {
+                                            if (!activeFocus)
+                                                commit()
+                                        }
+                                        Component.onDestruction: commit()
+
+                                        function commit() {
+                                            const lines = text.split("\n")
+                                                .map(line => line.trim())
+                                                .filter(line => line.length > 0)
+                                            settingsVM.resultWatermarkPool = lines
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    SettingCard {
+                        Layout.fillWidth: true
+                        title: qsTr("Full screen in Zen mode")
+                        description: qsTr("Hide the window frame and use the whole screen when Zen mode starts.")
+                        icon.name: "ic_fluent_full_screen_maximize_20_regular"
+
+                        Switch {
+                            checked: settingsVM.zenFullscreen
+                            onToggled: settingsVM.zenFullscreen = checked
+                        }
+                    }
+
+                    // The kind stays the header's control; the pool is the
+                    // collapsible body, laid out like the font rows above it:
+                    // label, hint, one full-width field.
     //: A font the typesetter cannot read never becomes the setting: this says which one it
     //: was and why, then the reader can pick another (the built-in STIX Two Math always
     //: works — it is the first entry).

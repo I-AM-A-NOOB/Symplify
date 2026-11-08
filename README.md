@@ -32,6 +32,14 @@
   configurable font stacks and a single hand-editable YAML settings file.
 - **Focus navigation** — `Ctrl+Tab` / `Ctrl+Shift+Tab` cycle focus;
   `Ctrl+Return` calculates.
+- **Zen mode** — hides the input, most chrome and the navigation bar for
+  result/plot reading. The title-bar button left of minimize enters and exits;
+  `Ctrl+Alt+M` toggles it, and in windowed Zen a full-screen control sits beside
+  it. In full screen, hovering the top strip (or tapping it) brings back the
+  Exit Zen and normal minimize/windowed/close controls; a separate top InfoBar
+  explains the exit keys. `Esc` leaves full screen first,
+  then Zen — and also leaves a plain `F11` fullscreen — while `F11` toggles full
+  screen. Whether entering Zen uses full screen is configurable.
 
 ## Roadmap
 
@@ -40,21 +48,23 @@ release schedule.
 
 ### Calculator workspace
 
-The main page does **not** need a full-page UI refresh or another outer scroll
-container. It needs clearer responsibilities between the input, results and plot.
+The page now has a page-level toolbar over a resizable **SplitView** (input |
+result/plot). The plot is no longer inside the result scroller, and it moves
+beside the result when the content area is wide enough. Result and plot default
+to a 1:1 split and animate between horizontal and vertical arrangements. Result
+copies live in the result pane header and plot reset/zoom in the plot pane
+header, so neither toolbar covers the graph. The title-bar **Zen** control hides
+the input, most of the toolbar and the navigation bar, and can optionally use
+full screen with the window frame hidden (Settings → Workspace → *Full screen in
+Zen mode*); a top-edge strip restores Exit Zen in full screen. `F11` toggles
+full screen in any mode. The remaining work is:
 
-- **P0 — separate the plot from the result scroller.** Move the plot out of
-  `resultScroll` and make the right column a vertical `SplitView`: a scrollable
-  result area above, a fixed/resizable plot below. This removes the scrollbar
-  versus plot-wheel conflict and lets a long formula scroll without dragging the
-  plot away.
-- **P1 — make the left column elastic.** Let the input grow or be dragged up to a
-  cap, scroll internally past it, make the on-screen keyboard collapsible, and add
-  a lightweight **Focus result** toggle that collapses the input pane.
-- **P2 — small-window fallback.** When height is short, turn the right column into
+- **P1 — finish the keyboard.** Its undo/redo sit beside the cursor keys; the
+  on-screen keyboard still needs its own collapse control.
+- **P2 — small-window fallback.** When height is short, turn the right area into
   `Result` / `Plot` tabs instead of squeezing both.
-- **P3 — remember layout state.** Persist splitter ratios, keyboard collapsed
-  state and Focus result across sessions.
+- **P3 — remember layout state.** Persist the outer splitter width, the
+  result/plot ratio and the keyboard collapsed state across sessions.
 
 ### Editor and language
 
@@ -100,8 +110,8 @@ container. It needs clearer responsibilities between the input, results and plot
 
 ### Plot and presentation
 
-- **Plot appearance choices.** Deferred until the workspace split is in place:
-  selectable plot themes.
+- **Plot appearance choices.** With the result/plot split in place, selectable
+  plot themes are the next presentation step.
 - **Icon and branding refresh.** The application icon still needs a proper design
   pass; the installer temporarily uses its default icon until then.
 

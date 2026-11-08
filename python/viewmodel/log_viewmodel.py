@@ -16,10 +16,10 @@ the theme lives. Entries that arrive before the window exists — Qt complains
 during engine setup — render without colour and are re-rendered when the colours
 land.
 
-**Nothing here writes to the terminal.** The page is the destination for both
-streams: Qt's messages are taken off the console by :mod:`python.log_capture`, so
-echoing the app's own entries there would leave the two out of step rather than
-in step.
+**Nothing here writes to the terminal.** The page is the destination for every
+stream: Qt's messages, Python ``logging`` (RinUI included) and the interpreter's
+warnings are taken off the console by :mod:`python.log_capture`, so echoing the
+app's own entries there would leave the two out of step rather than in step.
 """
 
 from collections import deque
@@ -170,6 +170,23 @@ class LogViewModel(QObject):
     def add_info(self, message: str, source: str = "System") -> None:
         """Add an info log entry."""
         self.add_log(message, LogLevel.INFO, source)
+
+    @Slot(str, int, str)
+    def add_record(self, message: str, level: int, source: str) -> None:
+        """Add a Python ``logging`` record; the entry point the bridge queues.
+
+        Qt slots carry plain types, so the level arrives as ``LogLevel.value``.
+
+        Args:
+            message: The formatted record text.
+            level: The numeric ``LogLevel`` value.
+            source: The logger's short name, shown in brackets.
+        """
+        try:
+            mapped = LogLevel(level)
+        except ValueError:
+            mapped = LogLevel.INFO
+        self.add_log(message, mapped, source)
 
     def add_warning(self, message: str, source: str = "System") -> None:
         """Add a warning log entry."""

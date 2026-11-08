@@ -9,9 +9,6 @@ __pycache__
 /main.build
 /main.dist
 /build
-# RinUI writes this at import time; python/rinui_bootstrap.py keeps it away at
-# runtime, and scripts/build_windows.py cleans a build-time import.
-/RinUI/
 
 # Nuitka's diagnostics, written next to the CWD when a build fails
 nuitka-crash-report.xml

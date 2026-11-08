@@ -9,10 +9,17 @@ import RinUI
 //: follows the OS locale and falls back to English when no matching catalogue
 //: exists.
 ColumnLayout {
+    //: What the page's sticky bar shows once this subtitle reaches it, and where
+    //: the subtitle sits inside the scrolling column, so the bar can tell when
+    //: that happened (both are plain `y`/`text` bindings: layouts notify).
+    readonly property string sectionTitle: subtitle.text
+    readonly property real subtitleOffset: subtitle.y
+
     Layout.fillWidth: true
     spacing: 3
 
     Text {
+        id: subtitle
         typography: Typography.BodyStrong
         text: qsTr("Language")
     }
@@ -29,17 +36,44 @@ ColumnLayout {
             Layout.preferredWidth: 210
 
             //: `settingsVM.languages` contains compiled translations only. The
-            //: system row is prepended here so its label is itself translatable.
-            model: {
-                const system = [{code: "system", name: qsTr("System default")}]
-                return system.concat(settingsVM.languages)
+            //: system row is prepended here so its label is itself translatable,
+            //: and it names the language the OS resolves to: "System default"
+            //: alone leaves the reader guessing what picking it will do.
+            //:
+            //: A `ListModel`, not a JavaScript array: the label contains `qsTr`,
+            //: so an array bound to it is rebuilt by `engine.retranslate()`, and
+            //: assigning a new model resets `currentIndex` to 0 — the picker
+            //: snapped back to "System default" after every switch, until the
+            //: page was built again. Updating the row in place keeps the
+            //: selection.
+            ListModel {
+                id: languageModel
             }
-            textRole: "name"
+
+            function systemRowName() {
+                return qsTr("System default")
+                    + " (" + settingsVM.systemLanguageName + ")"
+            }
+
+            function refreshModel() {
+                const rows = [{code: "system", name: systemRowName()}]
+                    .concat(settingsVM.languages)
+                while (languageModel.count > rows.length)
+                    languageModel.remove(languageModel.count - 1)
+                for (let i = 0; i < rows.length; ++i) {
+                    if (i < languageModel.count) {
+                        languageModel.setProperty(i, "code", rows[i].code)
+                        languageModel.setProperty(i, "name", rows[i].name)
+                    } else {
+                        languageModel.append(rows[i])
+                    }
+                }
+            }
 
             function syncLanguage() {
                 const code = settingsVM.language
-                for (let i = 0; i < model.length; ++i) {
-                    if (model[i].code === code) {
+                for (let i = 0; i < languageModel.count; ++i) {
+                    if (languageModel.get(i).code === code) {
                         currentIndex = i
                         return
                     }
@@ -47,12 +81,21 @@ ColumnLayout {
                 currentIndex = 0
             }
 
-            Component.onCompleted: syncLanguage()
-            onActivated: settingsVM.language = model[currentIndex].code
+            model: languageModel
+            textRole: "name"
+
+            Component.onCompleted: {
+                refreshModel()
+                syncLanguage()
+            }
+            onActivated: settingsVM.language = languageModel.get(currentIndex).code
 
             Connections {
                 target: settingsVM
                 function onLanguageChanged() {
+                    //: The system row's label is in the new UI language; update
+                    //: it in place (a model reset would snap the selection to it).
+                    languageModel.setProperty(0, "name", languageCombo.systemRowName())
                     languageCombo.syncLanguage()
                 }
             }

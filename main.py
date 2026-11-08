@@ -13,9 +13,9 @@ from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 from qmlmathplot import register_qml_types
 
-# The bootstrap owns the RinUI import (and takes RinUI's own config directory
-# over, see python/rinui_bootstrap.py). Never import RinUI above this line.
-from python import window_icon
+# The bootstrap owns RinUI's configuration (see python/rinui_bootstrap.py), and
+# `main.py` gets the window class from it rather than importing RinUI itself.
+from python import window_drag, window_icon
 from python.model.plotting import plot_variables
 from python.rinui_bootstrap import prepare
 from python.version import __version__
@@ -42,11 +42,6 @@ def main() -> int:
     # executable with multiprocessing's flag. freeze_support() is what routes
     # that back into the worker; it is a no-op in a normal interpreter.
     multiprocessing.freeze_support()
-
-    # RinUI prints emoji to stdout; force UTF-8 so GBK consoles don't crash.
-    for stream in (sys.stdout, sys.stderr):
-        if stream is not None and hasattr(stream, "reconfigure"):
-            stream.reconfigure(encoding="utf-8", errors="replace")
 
     runtime = prepare(ROOT)
 
@@ -92,6 +87,7 @@ def main() -> int:
         initial_variables=plot_variables(),
         calculation_backend=ProcessBackend(CALCULATION_TIMEOUT_SECONDS),
         translation_dir=ROOT / "i18n",
+        icon_dir=ROOT / "icon",
     )
     context = window.engine.rootContext()
     context.setContextProperty("vm", vm)
@@ -120,6 +116,13 @@ def main() -> int:
     vm.install_log_capture()
 
     window.load(ROOT / "qml" / "MainWindow.qml")
+
+    # Windows answers the top edge of a fullscreen window as a resize border
+    # (HTTOP), so the fullscreen Zen strip's top pixels — the ones the pointer
+    # reaches the strip at — never see the mouse at all. Installed after the
+    # load because RinUI installs its own native filter there and filters run
+    # last-installed-first. See python/window_drag.py.
+    window_drag.install_fullscreen_hit_test()
 
     # And once more now that the QML has built the window. This is not
     # belt-and-braces: without it the taskbar button is a blank square.

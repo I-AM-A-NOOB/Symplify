@@ -21,9 +21,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "build" / "main.dist"
 
-#: Name of the config file RinUI writes into its own directory (see below).
-_RINUI_FILENAME = "rin_ui.json"
-
 #: qmlmathplot bakes the GLSL it generates into ``.qsb`` **at runtime** (the
 #: shader carries the user's expression), and its `qsb` lookup looks exactly
 #: here: the PySide6 package directory. In this venv that is where the wheel
@@ -263,26 +260,6 @@ def prune_qt(dist: Path) -> int:
     return freed
 
 
-def cleanup_rinui_dir() -> None:
-    """Remove the config directory RinUI drops in the project root.
-
-    ``python/rinui_bootstrap.py`` keeps that directory away at *runtime*, but
-    Nuitka imports RinUI while analysing the program, and that import happens
-    outside the bootstrap — so a build leaves ``<root>/RinUI/config/rin_ui.json``
-    behind. Only its own config file is deleted and the folders are dropped with
-    ``rmdir``, so anything else in there survives.
-    """
-    config = ROOT / "RinUI" / "config" / _RINUI_FILENAME
-    if not config.is_file():
-        return
-    config.unlink()
-    for folder in (config.parent, config.parent.parent):
-        try:
-            folder.rmdir()
-        except OSError:
-            pass          # not empty: leave whatever else is in there
-
-
 def compile_translations() -> None:
     """Compile the committed .ts files so the build ships their .qm files.
 
@@ -291,7 +268,9 @@ def compile_translations() -> None:
     build equally complete; a translator only needs to run Qt Linguist.
     """
     i18n = ROOT / "i18n"
-    sources = sorted(i18n.glob("symplify_*.ts"))
+    #: `rinui_*.ts` are hand-maintained fragments for RinUI's own strings; they
+    #: are compiled like the app catalogues (nothing reads .ts at runtime).
+    sources = sorted(i18n.glob("symplify_*.ts")) + sorted(i18n.glob("rinui_*.ts"))
     if not sources:
         return
     executable = Path(sys.executable).with_name(
@@ -342,7 +321,6 @@ def main() -> int:
         print("CI detected: adding --jobs=1 (see the note on CI_JOBS)")
     print("Nuitka build root:", ROOT)
     code = subprocess.call(command, cwd=ROOT)
-    cleanup_rinui_dir()
     if code == 0:
         print(f"Pruned {prune_qt(DIST) / 1e6:.1f} MB of unused Qt modules")
         _style_dlls(DIST)
