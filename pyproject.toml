@@ -5,13 +5,18 @@ description = "A modern symbolic calculator built with SymPy and PySide6 (QML)."
 readme = "README.md"
 requires-python = ">=3.11,<3.15"
 dependencies = [
-    "pyside6>=6.7.0",
-    "rinui>=0.5.0",
+    # Capped at the minor we ship and measure: the Qt prune list in
+    # scripts/build_windows.py is a whitelist, and a new Qt minor can add or
+    # rename DLLs it would silently delete. RinUI and qmlmathplot are capped
+    # because this app patches them (WinEventManager, init_config, save_config)
+    # and their 0.x minors break (0.4 -> 0.5 rewrote the bootstrap).
+    "pyside6>=6.12,<6.13",
+    "rinui>=0.5.0,<0.6",
     "pyyaml>=6.0.3",
     "sympy>=1.14.0",
     "ziamath>=0.13",
     "fonttools>=4.0",
-    "qmlmathplot>=0.5.0",
+    "qmlmathplot>=0.5.0,<0.6",
 ]
 
 [dependency-groups]

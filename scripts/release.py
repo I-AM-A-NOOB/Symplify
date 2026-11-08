@@ -111,8 +111,10 @@ def write_pyproject(version: str) -> None:
 
 
 def write_version_py(version: str) -> None:
+    """Rewrite the runtime copy. No coding declaration: Python 3 is UTF-8 by
+    default and the project's ruff rules (UP009) reject one, which made the file
+    fail `ruff check` the moment a release bumped it."""
     VERSION_PY.write_text(
-        '# coding: utf-8\n'
         '"""Symplify version — kept in sync with pyproject.toml by\n'
         '``scripts/release.py`` (pyproject remains the canonical source)."""\n\n'
         f'__version__ = "{version}"\n',

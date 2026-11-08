@@ -328,10 +328,10 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fonttools", specifier = ">=4.0" },
-    { name = "pyside6", specifier = ">=6.7.0" },
+    { name = "pyside6", specifier = ">=6.12,<6.13" },
     { name = "pyyaml", specifier = ">=6.0.3" },
-    { name = "qmlmathplot", specifier = ">=0.5.0" },
-    { name = "rinui", specifier = ">=0.5.0" },
+    { name = "qmlmathplot", specifier = ">=0.5.0,<0.6" },
+    { name = "rinui", specifier = ">=0.5.0,<0.6" },
     { name = "sympy", specifier = ">=1.14.0" },
     { name = "ziamath", specifier = ">=0.13" },
 ]

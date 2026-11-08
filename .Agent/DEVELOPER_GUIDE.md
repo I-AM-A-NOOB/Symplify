@@ -2427,6 +2427,11 @@ rebuild), which is how a wrong list gets corrected without a second compile.
   On every Qt bump, map the modules of a running build again, and **start the pruned dist
   once** before shipping: the source run and the build succeed either way, so only the pruned
   startup catches this.
+  The two lists are measured on **one Qt** — `QT_VERIFIED = (6, 12)` in
+  `scripts/build_windows.py`, which every build prints. When the installed Qt's major.minor
+  differs, the script prints a warning naming the four steps above instead of trusting the
+  whitelist; that is the prompt, because the docs cannot notice a `uv lock --upgrade`. Bump
+  `QT_VERIFIED` only after the measurement, never together with the dependency.
 - `PRUNE_QML_DIRS` is the QML nothing reaches, checked with the `import` closure of the app's and
   RinUI's files. Two edges worth remembering: `QtQuick/NativeStyle` is **kept** although no app QML
   names it (QtQuick/Controls/Windows — 38 files — imports it), and `QtMultimedia` /
@@ -2508,6 +2513,15 @@ Data-file pitfalls for frozen builds (update this list when you add data-reading
 
 - **SemVer**; canonical value in `pyproject.toml`, runtime copy `python/version.py`, shown in About
   via the `appVersion` context property.
+- **Third-party dependencies are range-capped, not `==`-pinned.** `uv.lock` already pins the exact
+  versions every build resolves, so `==` in `pyproject.toml` would add nothing for us and would fight
+  transitive resolution; the cap is what `pip install`/`uv sync --upgrade` need to see. The bindings
+  that matter are the ones whose minor bump can break us: `pyside6>=6.12,<6.13` (the prune list is a
+  whitelist and a new Qt minor can add or rename DLLs it deletes — see Building), and
+  `rinui>=0.5.0,<0.6` / `qmlmathplot>=0.5.0,<0.6` (both are patched or leaned on directly: RinUI's
+  `WinEventManager`, `init_config` and `save_config` are replaced, and 0.4 → 0.5 rewrote the
+  bootstrap). Lifting a cap is a verification step, not a dependency edit: measure the new version,
+  then bump the bound.
 - `python/version.py` is **rewritten wholesale** by `scripts/release.py` — never add code to it, the
   next release bump would erase it.
 - Third-party versions in About must never be hardcoded: RinUI comes from the `rinuiVersion` context
@@ -2569,7 +2583,9 @@ Data-file pitfalls for frozen builds (update this list when you add data-reading
   script worth not rediscovering: `PrivilegesRequired=lowest` +
   `PrivilegesRequiredOverridesAllowed=dialog` (no UAC prompt for a calculator; an all-users install is
   one dialog choice, `/ALLUSERS` for a script), `MinVersion=10.0.17763` (Qt 6.11's floor — Setup's own
-  default is Windows 7 SP1, so without it the installer happily installs an app that cannot start),
+  default is Windows 7 SP1, so without it the installer happily installs an app that cannot start;
+  Qt 6.12 supports Windows 10 1809+ and is **the last Qt that supports Windows 10 at all**, so a
+  6.13 bump raises this floor),
   `CloseApplications=yes` (an upgrade replaces a running copy instead of failing on a locked file) and
   `Compression=lzma2/ultra64` + `SolidCompression=yes` (78 s and 64 MB against the zip's 97 MB).
   The script refuses to compile without `MyAppVersion`, so an unversioned setup cannot be built by

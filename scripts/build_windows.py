@@ -125,6 +125,12 @@ CMD = [
 # Keep both in step with the Qt version: a bump can add or rename DLLs, and a
 # name that is missing from KEEP_QT_DLLS is deleted.
 
+#: The Qt whose running build the two lists below were measured on. Bump it only
+#: together with a fresh measurement — and when the installed Qt's major.minor
+#: differs, `main` says exactly what to re-check before shipping (see
+#: :func:`qt_hint`). Patch releases are fine: the check compares major.minor.
+QT_VERIFIED = (6, 12)
+
 #: Qt DLLs the app actually loads. Lowercase; everything else ``qt6*.dll`` goes.
 KEEP_QT_DLLS = frozenset({
     "qt6core.dll",
@@ -241,6 +247,38 @@ def _size(path: Path) -> int:
     return sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
 
 
+def qt_hint() -> str | None:
+    """What to re-verify when the installed Qt is not the measured one.
+
+    The prune is a whitelist, so a Qt that renamed a DLL, added one or moved a
+    QML module silently loses it here: the app then fails at *runtime* (a pruned
+    QML style plugin is the 0.7.0 failure, `qtquickcontrols2windowsstyleplugin.dll:
+    module not found`, then an abort in Qt's ``QThread`` cleanup). The build
+    itself cannot tell — only a started, pruned dist can. Returns None when the
+    installed Qt is the measured one.
+    """
+    from PySide6.QtCore import qVersion
+
+    installed = tuple(int(part) for part in qVersion().split(".")[:2])
+    if installed == QT_VERIFIED:
+        return None
+    verified = ".".join(str(part) for part in QT_VERIFIED)
+    return (
+        f"Qt {qVersion()} is installed, but KEEP_QT_DLLS/PRUNE_QML_DIRS were "
+        f"measured on Qt {verified}.\n"
+        "Before shipping this build:\n"
+        "  1. build, start build/main.dist/symplify.exe, and map its modules\n"
+        "     ((Get-Process symplify).Modules) against KEEP_QT_DLLS;\n"
+        "  2. walk the QML `import` closure of the remaining files against\n"
+        "     PRUNE_QML_DIRS (a renamed module is otherwise deleted unseen);\n"
+        "  3. confirm the Windows style chain still needs Qt6QuickControls2Windows\n"
+        "     and Qt6QuickNativeStyle (copied after the prune);\n"
+        "  4. start the pruned dist once — it is the only step that fails loudly.\n"
+        f"Then set QT_VERIFIED in {Path(__file__).name} to "
+        f"({installed[0]}, {installed[1]})."
+    )
+
+
 def prune_qt(dist: Path) -> int:
     """Delete the unused Qt modules from ``dist``; return the bytes freed."""
     freed = 0
@@ -292,6 +330,13 @@ def main() -> int:
     parser.add_argument("--prune-only", action="store_true",
                         help="re-prune an existing build/main.dist (no Nuitka run)")
     args = parser.parse_args()
+
+    hint = qt_hint()
+    if hint:
+        print("WARNING: the Qt module lists below are stale for this Qt.")
+        print(hint)
+    else:
+        print(f"Qt {'.'.join(str(p) for p in QT_VERIFIED)}: module lists verified.")
 
     if args.prune_only:
         if not DIST.is_dir():
