@@ -25,7 +25,9 @@ the Model decides nothing about display.
 计算 worker、Variables worker 和 LaTeX 渲染器都是独立进程。Calculator 的结果/变体、
 History 的卡片和键盘 keycap 共用渲染进程；Variables 详情面板仍在主线程同步渲染
 （短任务，且由 `render_data_url` 的内部锁串行化）。Variables worker 只在第一次变量写入时
-启动，空闲 60 s 或离开页面且无写入时回收，下一次编辑再重启。
+启动，空闲 60 s 或离开页面且无写入时回收，下一次编辑再重启。绘图计划也由计算 worker
+生成：`plot_programs.with_plot` 把 `plot_series` 转成 qmlmathplot `Program`，
+UI 只做 `Plot.add_program`，不解析表达式。
 
 ```mermaid
 flowchart LR
@@ -223,7 +225,10 @@ What the diagram is saying:
   `integrate` draw the function beside the result, `solve` draws the expression it
   solved. `origin` is recorded while the parser runs (a wrapper in its
   `local_dict`), never by re-parsing the text — the model has no parser of its
-  own, by design.
+  own, by design. The **worker** then turns each Series into a qmlmathplot
+  `Program` (`plot_programs.with_plot`) and stores the plain specs in
+  `Success.plot`; the UI only calls `Plot.add_program(program)`. The UI does not
+  parse for the plot and does not import SymPy's plotting side.
 - **Failures are history too.** A failed request is recorded with its input
   (name/op/expression for assignments) and the failure text, so the card can
   show the reason and *Send to input* can put the expression back to be fixed.
@@ -239,7 +244,7 @@ flowchart LR
     V --> V1["str(value) → resultText<br/>结果区文字 + Copy result"]
     V --> V2["_save_variable → VariableManager.save<br/>VariableEntry.obj → list_all() → 下一轮 scope"]
     V --> V3["变量表第 2/3 列<br/>expr_str / classify_type"]
-    V --> V4["plot_series(value, origin)<br/>→ qmlmathplot.Plot → PlotView 曲线"]
+    V --> V4["worker: plot_programs.with_plot(value, origin)<br/>→ Success.plot: Program[]<br/>UI: Plot.add_program → PlotView"]
 
     R -->|"Success.origin"| O["Origin(call, argument)<br/>求值时由 _TransformRecorder 记录"]
     O --> V4

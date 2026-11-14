@@ -262,12 +262,16 @@ class Success:
             when the request was exactly that call — see
             ``python/model/plotting.py``. ``None`` for everything else, and for
             assignments: a write defines one value, so it has nothing to explain.
+        plot: Plain plot specs (``{"program", "label", "role"}``) built by the
+            worker; qmlmathplot consumes the programs directly. Empty for the
+            pure model and for results with nothing to draw.
     """
 
     expression: str
     value: Any
     latex: str
     origin: Origin | None = None
+    plot: tuple = ()
 
 
 @dataclass(frozen=True)

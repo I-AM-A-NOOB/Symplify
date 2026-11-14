@@ -10,12 +10,10 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import Property, QCoreApplication, QObject, QTimer, Signal, Slot
-from qmlmathplot import Curve, ImplicitCurve, Plot
-from qmlmathplot.model import func_glsl
+from qmlmathplot import Curve, Plot
 
 from ..latex_render import LatexStyle, svg_data_url
 from ..model.calculator import Assignment, ErrorKind, Failure, Result, Success
-from ..model.plotting import plot_series
 from ..model.variable import VariableManager, reserved_name_warning
 from ..model.variants import Variant
 from .calculation_backend import InlineBackend
@@ -177,8 +175,11 @@ class CalculatorViewModel(QObject):
         # everything we draw is labelled, so it is always wanted.
         self._plot.legend = True
         self._curves: list[Curve] = []
-        self._series: tuple = ()
+        #: The worker's plain plot specs, kept so a theme change can reapply the
+        #: same Programs with the new cycle without re-parsing anything.
+        self._plot_specs: tuple = ()
         self._plot_error = ""
+        self._plot.plotErrorChanged.connect(self._on_plot_error_changed)
         #: Incremented for every result; a scheduled plot from an older result
         #: must not replace the curves of a newer one.
         self._plot_token = 0
@@ -569,74 +570,61 @@ class CalculatorViewModel(QObject):
         # dark_background's bright set) and a curve keeps the colour it was
         # given — so re-dress what is already drawn, or the palette and the
         # legend would disagree with the new theme.
-        if self._series:
-            self._set_plot(self._series)
+        if self._plot_specs:
+            self._set_plot(self._plot_specs)
 
     def _colour(self, index: int) -> str:
         """The cycle colour for slot ``index``, as the string a curve takes."""
         cycle = self._plot.color_cycle
         return cycle[index % len(cycle)] if cycle else ""
 
-    def _supported_series(self, series: tuple) -> tuple:
-        """``series`` without the curves qmlmathplot's GLSL printer cannot spell.
+    def _on_plot_error_changed(self) -> None:
+        """Mirror qmlmathplot's first curve error into the result card."""
+        error = self._plot.plotError
+        if error == self._plot_error:
+            return
+        self._plot_error = error
+        if error:
+            self._log.add_warning(f"Plot failed: {error}", "Calculator")
+        self.plotChanged.emit()
 
-        The plot is a *numeric* surface: a result that evaluates to a special
-        function (`fresnels`, `gamma`, …) has no shader spelling. Dropping that
-        one curve keeps the integrand/source curve useful and leaves the card
-        without a printer stack trace; the evaluated form is still in the result
-        card's `doit` row. `func_glsl` is the printer itself, so this asks the
-        real capability rather than keeping a second whitelist.
+    def _set_plot(self, specs: tuple) -> None:
+        """Reconcile the plot's curves with the worker's plain Programs.
+
+        The worker already decided what is drawable and produced the Program
+        (GLSL + math/numpy source); the UI only sets them, so qmlmathplot can
+        import neither SymPy nor a calculator. Curves are reused slot by slot;
+        a program whose kind changes reuses its curve, and qmlmathplot switches
+        the shader. Nothing here may raise: a plotting failure is a log/plotError
+        line, not a broken Qt slot.
         """
-        supported = []
-        for item in series:
-            try:
-                func_glsl(item.expression, "x")
-            except Exception as exc:  # noqa: BLE001 - an unprintable curve is skipped
-                reason = str(exc).splitlines()[0]
-                self._log.add_info(f"Plot skipped: {reason}", "Calculator")
-                continue
-            supported.append(item)
-        return tuple(supported)
-
-    def _set_plot(self, series: tuple) -> None:
-        """Reconcile the plot's curves with ``series``.
-
-        Curves are reused slot by slot, so recalculating the same shape only
-        changes the expressions — and qmlmathplot's bake cache makes that nearly
-        free. A slot whose artist changes kind (explicit ↔ implicit) is rebuilt,
-        because the two are different classes. Nothing here may raise: a plotting
-        failure is a log line and the card's error text, not a broken Qt slot.
-        """
-        series = self._supported_series(series)
-        self._series = series
+        self._plot_specs = tuple(specs)
         try:
-            # The longest prefix that can be updated in place.
-            keep = 0
-            while keep < min(len(self._curves), len(series)):
-                if isinstance(self._curves[keep], ImplicitCurve) != series[keep].implicit:
-                    break
-                keep += 1
+            keep = min(len(self._curves), len(self._plot_specs))
             while len(self._curves) > keep:
                 self._plot.remove_curve(self._curves.pop())
-            for index, item in enumerate(series):
+            for index, spec in enumerate(self._plot_specs):
+                program = spec["program"]
+                label = spec.get("label", "")
                 colour = self._colour(index)
                 if index < keep:
                     curve = self._curves[index]
-                    curve.expression = item.expression
-                    curve.label = item.label
+                    curve.set_program(program)
+                    curve.label = label
                     curve.color = colour
-                    continue
-                add = self._plot.add_implicit if item.implicit else self._plot.add_curve
-                self._curves.append(add(item.expression, colour, None, item.label))
-            error = next((curve.error for curve in self._curves if curve.error), "")
+                else:
+                    self._curves.append(
+                        self._plot.add_program(program, colour, None, label)
+                    )
         except Exception as exc:  # noqa: BLE001 - a plot must not break the result
-            error = f"{type(exc).__name__}: {exc}"
             for curve in list(self._curves):
                 self._plot.remove_curve(curve)
             self._curves.clear()
-        if error and error != self._plot_error:
-            self._log.add_warning(f"Plot failed: {error}", "Calculator")
-        self._plot_error = error
+            self._plot_specs = ()
+            self._plot_error = f"{type(exc).__name__}: {exc}"
+            self._log.add_warning(f"Plot failed: {self._plot_error}", "Calculator")
+        else:
+            self._on_plot_error_changed()
         self.plotChanged.emit()
 
     @Slot()
@@ -699,7 +687,7 @@ class CalculatorViewModel(QObject):
         if token != self._plot_token:
             return
         if isinstance(result, Success):
-            self._set_plot(plot_series(result.value, result.origin))
+            self._set_plot(getattr(result, "plot", ()))
         else:
             self._set_plot(())
 

@@ -26,6 +26,7 @@ from typing import Any
 
 from .model.calculator import Assignment, Calculator, ErrorKind, Failure, Success
 from .model.variants import variants
+from .plot_programs import with_plot
 from .sandbox import apply_worker_limits
 
 
@@ -79,6 +80,7 @@ def worker_main(connection: Any) -> None:
             # The answer goes out before the optional forms. SymPy's `doit`,
             # `expand` and `factor` can be the slowest part of a request, but
             # they are not needed to display the result.
+            result = with_plot(result)
             try:
                 connection.send((request_id, "result", result, ()))
                 # Variants remain part of the symbolic work and stay under the

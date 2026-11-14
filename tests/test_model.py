@@ -2046,17 +2046,19 @@ def test_an_unevaluated_integral_plots_only_the_integrand():
     assert [row["kind"] for row in vm.calculator.variants] == ["doit"]
 
 
-def test_a_special_function_result_is_dropped_instead_of_erroring():
-    """`integrate(sin(x**2), x)` answers with Fresnel/gamma functions, which the
-    GLSL printer cannot spell. The integrand stays plottable; the result curve is
-    skipped, so the card shows no `PrintMethodNotImplementedError`."""
+def test_a_special_function_result_is_drawn_by_the_cpu_fallback():
+    """0.7 no longer has to drop `fresnels`: the worker emits a CPU `adaptive`
+    program as well as GLSL, so the result and its integrand both draw."""
     vm = new_vm()
     vm.calculator.calculate("integrate(sin(x**2), x)")
     assert vm.calculator.hasPlot is True
     curves = vm.calculator.plot.curves
-    assert curves.rowCount() == 1
-    assert curves.at(0).label == "f"
+    assert curves.rowCount() == 2
+    assert [curves.at(row).label for row in range(curves.rowCount())] == [
+        "f", "∫ f dx",
+    ]
     assert curves.at(0).error == ""
+    assert curves.at(1).error == ""
     assert vm.calculator.plotError == ""
 
 

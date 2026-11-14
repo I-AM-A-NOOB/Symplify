@@ -1654,24 +1654,20 @@ mode hides the input and most chrome, and the window-level side of it lives in
 - **Plot setup follows the result, it does not precede it.** `_apply_result` applies the text and
   LaTeX source, emits `resultChanged`, then schedules `_apply_plot(result, token)` with
   `QTimer.singleShot(0, …)` (headless tests call it immediately). `_plot_token` invalidates a
-  scheduled plot when a newer result or `clear_result` arrives. `plot_series` and the
-  qmlmathplot/GPU objects stay in the UI process: the plot is interactive scene state, not
-  serializable worker output. The point of the split is only that curve reconciliation and shader
+  scheduled plot when a newer result or `clear_result` arrives. Since qmlmathplot 0.7 the
+  **worker** builds the plot payload: `python/plot_programs.py` turns each `plot_series` item into
+  a plain `qmlmathplot.Program` (GLSL + math/numpy source) and stores it in `Success.plot`.
+  The UI only calls `plot.add_program(program)`; it imports neither SymPy nor qmlmathplot's
+  calculator for the plot. The point of the split is that curve reconciliation and shader
   preparation no longer sit between the reply and the visible result.
-- **Unevaluated symbolic forms are never handed to the plotter.** `_series` rejects any
-  expression containing an `Integral`, `Derivative`, `Sum`, `Product` or `Limit` atom: those
-  have no GLSL spelling (the old failure was `PrintMethodNotImplementedError` from
-  `qmlmathplot.model._PlotGLSLPrinter` on `Integral`). `Integral(sin(x**2), x)` therefore
-  plots **only the integrand** `f = sin(x**2)`; the evaluated Fresnel/gamma form stays in the
-  result card's `doit` row. The ViewModel adds a second, printer-level guard:
-  `_supported_series` calls qmlmathplot's own `func_glsl`, so **any** expression the GLSL
-  printer cannot spell is dropped from the plot (with one Log line) while the remaining
-  curves stay — measured: `integrate(sin(x**2), x)` keeps `f` and drops the Fresnel/gamma
-  result instead of showing `PrintMethodNotImplementedError`. This is the layer split: the
-  model decides what is *meaningful and plottable* and performs symbolic evaluation;
-  qmlmathplot prints the numeric expression and reports unsupported nodes with a typed error.
-  Plotting an actually unevaluated integral would mean numeric integration inside the
-  renderer — an upstream feature, not a printer case.
+- **Unevaluated symbolic forms are skipped, but special functions are not.** `plot_series` still
+  rejects expressions containing an `Integral`, `Derivative`, `Sum`, `Product` or `Limit` atom;
+  those are not numeric curves. Everything else goes to qmlmathplot's `build_program` in the
+  worker. A special function such as `fresnels` now has a CPU `adaptive` program as well as the
+  GLSL path, so `integrate(sin(x**2), x)` draws the integrand **and** the Fresnel result via the
+  CPU fallback; the old ViewModel `_supported_series`/`func_glsl` guard is gone. A Program that
+  still fails is dropped by the worker with no result failure — `plot_series` is the model's
+  "meaningful and plottable" decision; qmlmathplot prints and reports shader errors.
 - **The Calculator's "other forms" are one card under the formula strip.** The model
   (`python/model/variants.py`) decides what is worth showing, with no Qt: `simplify(value)`
   only when it spells something different (normally it does not — every result is already
@@ -2653,10 +2649,10 @@ Data-file pitfalls for frozen builds (update this list when you add data-reading
   transitive resolution; the cap is what `pip install`/`uv sync --upgrade` need to see. The bindings
   that matter are the ones whose minor bump can break us: `pyside6>=6.12,<6.13` (the prune list is a
   whitelist and a new Qt minor can add or rename DLLs it deletes — see Building), and
-  `rinui>=0.5.0,<0.6` / `qmlmathplot>=0.5.0,<0.6` (both are patched or leaned on directly: RinUI's
-  `WinEventManager`, `init_config` and `save_config` are replaced, and 0.4 → 0.5 rewrote the
-  bootstrap). Lifting a cap is a verification step, not a dependency edit: measure the new version,
-  then bump the bound.
+  `rinui>=0.5.0,<0.6` / `qmlmathplot[calc]>=0.7.0,<0.8` (RinUI's `WinEventManager`,
+  `init_config` and `save_config` are replaced; qmlmathplot 0.7 is the Program/CPU-fallback
+  boundary the app's worker targets). Lifting a cap is a verification step, not a dependency edit:
+  measure the new version, then bump the bound.
 - `python/version.py` is **rewritten wholesale** by `scripts/release.py` — never add code to it, the
   next release bump would erase it.
 - Third-party versions in About must never be hardcoded: RinUI comes from the `rinuiVersion` context
@@ -2788,13 +2784,19 @@ draw (`python/model/plotting.py`, zero Qt), the **object** every surface binds t
   argument **and** the result (`f`, `f′`, `∫ f dx`); `solve`/`solveset`/`roots`/`linsolve`/
   `nonlinsolve`/`nsolve` draw the argument **only** (roots are not a function); everything else draws
   its result. An assignment never carries an origin — it defines one value.
-- **The `Plot` belongs to the viewmodel.** RinUI destroys and recreates pages (invariant 2), so
-  `CalculatorViewModel` owns it and a page only injects it (`PlotView { plot: calcVM.plot }`); curves
-  survive navigation, and `clear_result()`/a failure clears them. Curves are reused slot by slot (an
-  explicit↔implicit change rebuilds the tail — those are different classes), so a recalculation is an
-  expression write, not a rebuild; qmlmathplot's bake cache (source hash, in `%TEMP%`) answers the
-  second one. Shader failures become `plotError` + a log line and are shown in the card — never an
-  exception out of a slot.
+- **The Plot belongs to the viewmodel, and the worker builds its Programs.** RinUI destroys and
+  recreates pages (invariant 2), so `CalculatorViewModel` owns it and a page only injects it
+  (`PlotView { plot: calcVM.plot }`); curves survive navigation, and `clear_result()`/a failure
+  clears them. The worker's `python/plot_programs.py` converts each `plot_series` item to a
+  qmlmathplot `Program`; the ViewModel only calls `plot.add_program(program)` and
+  `curve.set_program(program)`. Curves are reused slot by slot, so a recalculation is a program
+  write, not a rebuild. qmlmathplot's `plotError`/`plotErrorChanged` is mirrored into the card;
+  shader failures never escape a Qt slot.
+- **qmlmathplot 0.7 is the UI boundary.** The package imports no SymPy at base; the worker uses
+  the optional `calc` extra to build `Program`s from the SymPy result. The UI's Plot source is
+  `None`; text parsing never happens in the UI. A Program carries the `intervals`/`adaptive`/
+  `implicit`/`data` kind and its GLSL/math/numpy sources, so CPU fallback and the interval compute
+  path remain available without importing SymPy into the UI.
 - **The plot's units are square** (`plot.aspect = 1.0`, set once with the Plot). One
   world unit is the same length on both axes, so a circle draws round and a slope
   reads as its value; the camera then shows *more* canvas when the card grows
@@ -2849,7 +2851,7 @@ draw (`python/model/plotting.py`, zero Qt), the **object** every surface binds t
   without that the seeded rows would not appear until the first write.
 - **Registration happens once, before the engine**: `main.py` calls
   `qmlmathplot.register_qml_types()` right after `prepare(ROOT)`, and the page imports
-  `QmlMathPlot 1.0`, `Qt5Compat.GraphicalEffects` and `../components` (for the ring).
+  `QmlMathPlot 2.0`, `Qt5Compat.GraphicalEffects` and `../components` (for the ring).
 - **Measured here:** `diff(x**2, x)` → two curves (`f`, `f′`) with the built-in legend and a 400×300
   offscreen render with ~4.8k painted pixels; `x + y` → one implicit curve; `2 + 2` → cleared.
   Focus, driven with `QTest` against the real window: Ctrl+Tab reaches `plotFrame`

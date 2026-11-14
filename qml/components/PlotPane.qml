@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import RinUI
-import QmlMathPlot 1.0
+import QmlMathPlot 2.0
 import Qt5Compat.GraphicalEffects
 
 //: The calculator's plot surface: the pane header (reset/zoom), the frame with

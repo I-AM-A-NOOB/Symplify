@@ -30,6 +30,7 @@ from ..backend_worker import worker_main
 from ..child_process import ChildProcess
 from ..model.calculator import Calculator, Success
 from ..model.variants import variants
+from ..plot_programs import with_plot
 
 
 class InlineBackend(QObject):
@@ -73,6 +74,7 @@ class InlineBackend(QObject):
         except Exception as exc:  # noqa: BLE001 - a crash is a report, not a raise
             self.failed.emit(request_id, f"{type(exc).__name__}: {exc}")
         else:
+            result = with_plot(result)
             self.finished.emit(request_id, result)
             variant_rows = ()
             if isinstance(result, Success):

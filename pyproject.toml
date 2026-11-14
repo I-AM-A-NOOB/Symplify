@@ -16,7 +16,7 @@ dependencies = [
     "sympy>=1.14.0",
     "ziamath>=0.13",
     "fonttools>=4.0",
-    "qmlmathplot>=0.5.0,<0.6",
+    "qmlmathplot[calc]>=0.7.0,<0.8",
 ]
 
 [dependency-groups]

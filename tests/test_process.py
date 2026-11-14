@@ -119,6 +119,40 @@ def test_importing_the_entry_point_is_worker_safe():
     assert events == {"pyside": False, "sympy": False, "qmlmathplot": False}
 
 
+def test_process_backend_attaches_plot_programs():
+    """The worker builds qmlmathplot Programs; the UI never parses for the plot."""
+    events = run_script(
+        r"""
+        import json
+        from PySide6.QtCore import QCoreApplication, QTimer
+        from python.viewmodel.calculation_backend import ProcessBackend
+
+        def main():
+            app = QCoreApplication([])
+            backend = ProcessBackend(timeout_seconds=30.0)
+            events = []
+
+            def finished(request_id, result):
+                events.append([type(result).__name__, len(result.plot),
+                               result.plot[0]["label"] if result.plot else ""])
+                app.quit()
+
+            backend.finished.connect(finished)
+            backend.failed.connect(lambda request_id, message: (
+                events.append(["failed", message]), app.quit()))
+            backend.submit(1, "evaluate", "x**2", {})
+            QTimer.singleShot(15000, app.quit)
+            app.exec()
+            backend.shutdown()
+            print(json.dumps(events))
+
+        if __name__ == "__main__":
+            main()
+        """
+    )
+    assert events == [["Success", 1, "x**2"]]
+
+
 def test_variable_writes_cross_a_real_worker():
     """The Variables page's writes use their own spawned worker.
 
