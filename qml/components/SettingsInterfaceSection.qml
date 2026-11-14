@@ -10,13 +10,8 @@ import RinUI
 //: `spacing: 3`. What is per-section is the state: the label/value pairs its combos pass
 //: their index through, and `applyAccentMode`, the only reason the accent expander opens
 //: itself.
-ColumnLayout {
-    //: What the page's sticky bar shows once this subtitle reaches it, and where
-    //: the subtitle sits inside the scrolling column, so the bar can tell when
-    //: that happened (both are plain `y`/`text` bindings: layouts notify).
-    readonly property string sectionTitle: subtitle.text
-    readonly property real subtitleOffset: subtitle.y
-
+SettingsSection {
+    label: qsTr("Interface")
 
         //: Labels are translated, values stay the stable tokens the store and
         //: RinUI expect (the same shape as Theme mode below).
@@ -42,16 +37,7 @@ ColumnLayout {
                 accentExpander.expanded = true
         }
 
-                    Layout.fillWidth: true
-                    spacing: 3
-
-                    Text {
-                        id: subtitle
-                        typography: Typography.BodyStrong
-                        text: qsTr("Interface")
-                    }
-
-                    SettingCard {
+    SettingCard {
                         Layout.fillWidth: true
                         title: qsTr("Theme mode")
                         description: qsTr("Follow the system, or force light or dark.")

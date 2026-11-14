@@ -18,26 +18,39 @@ bounded cache:
   process down. The pipe is the only boundary.
 """
 
-import multiprocessing
 import threading
+import time
 import warnings
 from collections import OrderedDict
 from typing import Any
 
 from PySide6.QtCore import QCoreApplication, QObject, QTimer, Signal
 
+from ..child_process import ChildProcess
 from ..latex_render import LatexStyle, render_data_url
 from ..latex_render_worker import render_worker_main
 
-#: Two consumers share one renderer process. The order is the index used by
+#: Three consumers share one renderer process. The order is the index used by
 #: the shared generation array; never reorder without changing both sides.
 OWNER_CALCULATOR = 0
 OWNER_HISTORY = 1
-_OWNER_INDEX = {"calculator": OWNER_CALCULATOR, "history": OWNER_HISTORY}
+OWNER_KEYCAPS = 2
+_OWNER_INDEX = {
+    "calculator": OWNER_CALCULATOR,
+    "history": OWNER_HISTORY,
+    "keycaps": OWNER_KEYCAPS,
+}
 
 #: A full SVG data URL can be large (MAX_LATEX_CHARS caps one image, not the
 #: number of results). Keep the hot entries; history items retain their own URL.
 MAX_CACHE_ENTRIES = 32
+
+#: A render that misses this deadline is treated as a dead renderer: its worker is
+#: terminated and every pending token fails. Generous on purpose — the cap is 1000
+#: characters of LaTeX, ~57 ms on the machine the cap was measured on — so only a
+#: pathological input can reach it, and the alternative is a result that never
+#: arrives while the pipe stays open.
+RENDER_TIMEOUT_SECONDS = 10.0
 
 _CacheValue = tuple[str, int, int]
 
@@ -56,12 +69,17 @@ class LatexRenderService(QObject):
         )
         #: token -> (cache key, owner index)
         self._pending: dict[str, tuple[tuple[str, LatexStyle], int]] = {}
-        self._generations = {"calculator": 0, "history": 0}
+        self._generations = {"calculator": 0, "history": 0, "keycaps": 0}
         self._generation_lock = threading.Lock()
-        self._context = multiprocessing.get_context("spawn")
-        self._process: Any = None
-        self._connection: Any = None
+        #: The spawned renderer; its extra argument (the shared generation array)
+        #: is recreated by the spawn context on every start.
+        self._worker = ChildProcess(
+            render_worker_main, args=self._renderer_args, sandboxed=True
+        )
         self._shared_generations: Any = None
+        #: When the oldest request batch must be answered, as `time.monotonic()`;
+        #: 0 while nothing is pending.
+        self._deadline = 0.0
 
         self._poll_timer = QTimer(self)
         self._poll_timer.setInterval(2)
@@ -92,6 +110,7 @@ class LatexRenderService(QObject):
                 self._pending.pop(token, None)
         if not self._pending:
             self._poll_timer.stop()
+            self._deadline = 0.0
         return value
 
     def request(
@@ -123,15 +142,12 @@ class LatexRenderService(QObject):
             generation = self._generations.get(owner, 0)
         self._pending[token] = (key, index)
         try:
-            self._ensure_worker()
-            connection = self._connection
-            if connection is None:
-                raise RuntimeError("the LaTeX renderer is not running")
-            connection.send((token, latex, style, index, generation))
+            self._worker.send((token, latex, style, index, generation))
         except Exception as exc:  # noqa: BLE001 - a renderer start/send failure
             self._pending.pop(token, None)
             self.failed.emit(token, f"{type(exc).__name__}: {exc}")
             return
+        self._deadline = time.monotonic() + RENDER_TIMEOUT_SECONDS
         self._poll_timer.start()
 
     def warm_up(self) -> None:
@@ -139,7 +155,7 @@ class LatexRenderService(QObject):
         if QCoreApplication.instance() is None:
             return
         try:
-            self._ensure_worker()
+            self._worker.ensure()
         except Exception:  # noqa: BLE001 - warm-up is optional
             self._terminate_worker()
 
@@ -147,68 +163,67 @@ class LatexRenderService(QObject):
         """Stop the renderer and drop pending work (application exit)."""
         self._poll_timer.stop()
         self._pending.clear()
+        self._deadline = 0.0
         self._terminate_worker()
 
     # -- renderer process --------------------------------------------------
 
-    def _ensure_worker(self) -> None:
-        if (self._process is not None
-                and self._process.is_alive()
-                and self._connection is not None):
-            return
-        self._terminate_worker()
-        parent, child = self._context.Pipe()
-        shared = self._context.Array(
-            "i", [self._generations["calculator"], self._generations["history"]]
+    def _renderer_args(self, context: Any) -> tuple:
+        """The child's extras: the generation array, fresh for every start.
+
+        The array must exist before the first job is sent, and the child reads it
+        before each job. Recreating it per start (rather than keeping one alive)
+        means a restarted renderer cannot inherit a stale value from a process
+        that died mid-generation.
+        """
+        self._shared_generations = context.Array(
+            "i", [self._generations["calculator"],
+                  self._generations["history"],
+                  self._generations["keycaps"]]
         )
-        process = self._context.Process(
-            target=render_worker_main,
-            args=(child, shared),
-            daemon=True,
-        )
-        process.start()
-        child.close()
-        self._process = process
-        self._connection = parent
-        self._shared_generations = shared
+        return (self._shared_generations,)
 
     def _terminate_worker(self) -> None:
         """Stop and reap the child; safe to call when there is none."""
-        connection, process = self._connection, self._process
-        self._connection = None
-        self._process = None
         self._shared_generations = None
-        if connection is not None:
-            try:
-                connection.close()
-            except OSError:
-                pass
-        if process is None:
-            return
-        if process.is_alive():
-            process.terminate()
-        process.join(0.3)
-        if process.is_alive():
-            process.kill()
-            process.join(0.3)
+        self._worker.stop()
 
     def _poll(self) -> None:
-        """Read one renderer response, or notice that the child died."""
+        """Drain every ready renderer response, or notice that the child died.
+
+        The renderer answers one message per queued job, and a style change can
+        queue a result, several variants and a screenful of history cards at
+        once. Reading one per 2 ms tick put a floor under the whole batch;
+        draining the pipe per tick removes it.
+        """
         if not self._pending:
             self._poll_timer.stop()
+            self._deadline = 0.0
             return
-        connection = self._connection
+        if time.monotonic() >= self._deadline:
+            self._renderer_stopped(
+                f"the LaTeX renderer exceeded {RENDER_TIMEOUT_SECONDS:g} s"
+            )
+            return
+        connection = self._worker.connection
         if connection is None:
             self._renderer_stopped("the LaTeX renderer is not running")
             return
         try:
-            if not connection.poll(0):
-                return
-            response = connection.recv()
+            while connection.poll(0):
+                self._handle(connection.recv())
+                if not self._pending:
+                    break
         except (EOFError, OSError) as exc:
             self._renderer_stopped(f"the LaTeX renderer stopped ({exc})")
             return
 
+        if not self._pending:
+            self._poll_timer.stop()
+            self._deadline = 0.0
+
+    def _handle(self, response: tuple) -> None:
+        """Apply one renderer message."""
         kind = response[0]
         token = response[1]
         if kind == "skipped":
@@ -229,14 +244,13 @@ class LatexRenderService(QObject):
                 for warning_message in messages:
                     self.warning.emit(warning_message)
                 self.failed.emit(token, message)
-        if not self._pending:
-            self._poll_timer.stop()
 
     def _renderer_stopped(self, message: str) -> None:
         """Fail pending tokens once, then let the next request restart."""
         tokens = list(self._pending)
         self._pending.clear()
         self._poll_timer.stop()
+        self._deadline = 0.0
         self.warning.emit(message)
         for token in tokens:
             self.failed.emit(token, message)

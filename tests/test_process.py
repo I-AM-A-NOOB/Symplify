@@ -21,11 +21,31 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PYTHON = sys.executable
 
+#: Every child script's preamble. Qt's build tools sit beside the interpreter, and
+#: `shutil.which` only finds them when `Scripts/` is on PATH — which `uv run`
+#: arranges and a direct `.venv/Scripts/python.exe` invocation does not. Resolving
+#: beside the interpreter first keeps the suite runnable either way. Concatenated
+#: *after* the dedent on purpose: the scripts below are written indented.
+TOOL_LOOKUP = '''\
+import os
+import shutil
+import sys
+from pathlib import Path
+
+def lrelease() -> str:
+    """pyside6-lrelease, beside this interpreter first, then on PATH."""
+    beside = Path(sys.executable).with_name(
+        "pyside6-lrelease" + (".exe" if os.name == "nt" else ""))
+    if beside.is_file():
+        return str(beside)
+    return shutil.which("pyside6-lrelease") or "pyside6-lrelease"
+'''
+
 
 def run_script(source: str) -> list[Any]:
     """Run a small script in a fresh interpreter and return its JSON events."""
     path = Path(tempfile.mkdtemp(prefix="symplify_process_")) / "smoke.py"
-    path.write_text(textwrap.dedent(source), encoding="utf-8")
+    path.write_text(TOOL_LOOKUP + textwrap.dedent(source), encoding="utf-8")
     env = {**os.environ}
     env["PYTHONPATH"] = str(REPO_ROOT) + os.pathsep + env.get("PYTHONPATH", "")
     result = subprocess.run(
@@ -34,6 +54,8 @@ def run_script(source: str) -> list[Any]:
         env=env,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=120,
     )
     assert result.returncode == 0, result.stderr
@@ -74,6 +96,203 @@ def test_process_backend_sends_result_before_variants():
         """
     )
     assert events[:2] == [["result", "Success"], ["variants", 1]]
+
+
+def test_importing_the_entry_point_is_worker_safe():
+    """Spawn re-imports main.py in every worker; it must not pull Qt/SymPy in.
+
+    The UI imports live inside `main()` now. Before that, a calculation worker
+    paid for PySide6/qmlmathplot before its own target even started.
+    """
+    events = run_script(
+        r"""
+        import json
+        import sys
+        import main
+        print(json.dumps({
+            "pyside": any(name.startswith("PySide6") for name in sys.modules),
+            "sympy": "sympy" in sys.modules,
+            "qmlmathplot": any(name.startswith("qmlmathplot") for name in sys.modules),
+        }))
+        """
+    )
+    assert events == {"pyside": False, "sympy": False, "qmlmathplot": False}
+
+
+def test_variable_writes_cross_a_real_worker():
+    """The Variables page's writes use their own spawned worker.
+
+    A successful add only reaches the model when the worker answers, and the
+    row carries the canonical expression — the UI process never parsed it.
+    """
+    events = run_script(
+        r"""
+        import json
+        from PySide6.QtCore import QCoreApplication, QTimer
+        from python.model.variable import VariableManager
+        from python.viewmodel.calculation_backend import ProcessBackend
+        from python.viewmodel.variables_viewmodel import VariablesModel
+
+        def main():
+            app = QCoreApplication([])
+            backend = ProcessBackend(timeout_seconds=30.0)
+            model = VariablesModel(VariableManager(), backend=backend)
+            events = []
+
+            def added(name, ok):
+                events.append([name, ok, model.cellAt(0, 1),
+                               model.cellAt(1, 1) if model.rowCount() > 1 else ""])
+                if len(events) == 1:
+                    model.add("b", "3")
+                else:
+                    app.quit()
+
+            model.variableAdded.connect(added)
+            model.add("a", "2")
+            QTimer.singleShot(15000, app.quit)
+            app.exec()
+            backend.shutdown()
+            print(json.dumps(events))
+
+        if __name__ == "__main__":
+            main()
+        """
+    )
+    assert events == [["a", True, "2", ""], ["b", True, "2", "3"]]
+
+
+def test_the_keyboard_target_uses_the_windows_active_focus_item():
+    """The on-screen keyboard must find the focused editor without walking the tree.
+
+    `InputPane.keyboardTarget()` used to recurse over every child (the 200+ keys
+    included) on each virtual key press. It now takes `Window.activeFocusItem`
+    and keeps the two rules the walk encoded: the input must belong to the pane,
+    and it must be a text control. `T.TextArea`/`T.TextField` are the template
+    bases, so RinUI's TextArea and the Basic-derived CodeField both match (the
+    unqualified style names shadow each other and made a Basic field fall back to
+    the wrong editor).
+
+    The window has to be real for `activeFocusItem` to be populated; that is why
+    this runs in a child interpreter with a QGuiApplication, like the process
+    tests beside it.
+    """
+    events = run_script(
+        r"""
+        import json
+        import os
+        import tempfile
+        from pathlib import Path
+
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+        from PySide6.QtCore import QObject, QTimer, QUrl, Slot
+        from PySide6.QtGui import QGuiApplication
+        from PySide6.QtQml import QQmlComponent, QQmlEngine
+        from RinUI.core.config import RINUI_PATH
+
+        from python.settings import SettingsStore
+        from python.viewmodel.main_viewmodel import MainViewModel
+
+        class Probe(QObject):
+            def __init__(self):
+                super().__init__()
+                self.events = []
+
+            @Slot(str, bool)
+            def record(self, name, ok):
+                self.events.append([name, ok])
+
+            @Slot()
+            def finish(self):
+                print(json.dumps(self.events))
+                QGuiApplication.instance().quit()
+
+        def main():
+            app = QGuiApplication([])
+            store = SettingsStore(Path(tempfile.mkdtemp()) / "config.yaml")
+            store.load()
+            vm = MainViewModel(store)
+            engine = QQmlEngine()
+            engine.addImportPath(str(RINUI_PATH))
+            ctx = engine.rootContext()
+            for name, obj in {
+                "vm": vm,
+                "calcVM": vm.calculator,
+                "varsVM": vm.variables,
+                "variablesModel": vm.variables.model,
+                "variablesFilter": vm.variablesFilter,
+                "historyVM": vm.history,
+                "historyFilter": vm.historyFilter,
+                "historyWindow": vm.historyWindow,
+                "logVM": vm.log,
+                "settingsVM": vm.settings,
+            }.items():
+                ctx.setContextProperty(name, obj)
+            probe = Probe()
+            ctx.setContextProperty("probe", probe)
+            component = QQmlComponent(engine)
+            component.setData(b'''import QtQuick
+        import QtQuick.Window 2.15
+        import QtQuick.Controls
+        import "components"
+
+        Window {
+            width: 900
+            height: 600
+            visible: true
+
+            InputPane { id: pane; anchors.fill: parent }
+            TextField { id: outsideField; objectName: "outsideField" }
+
+            Timer {
+                id: first
+                interval: 120
+                running: true
+                onTriggered: {
+                    probe.record("own input", pane.editableInPane(pane.codeInput) === pane.codeInput)
+                    probe.record("outside field", pane.editableInPane(outsideField) === null)
+                    probe.record("nothing", pane.editableInPane(null) === null)
+
+                    calcVM.inputMode = 1
+                    pane.focusAssignName()
+                    second.start()
+                }
+            }
+            Timer {
+                id: second
+                interval: 120
+                onTriggered: {
+                    probe.record("focused name", pane.keyboardTarget().placeholderText === "name")
+                    outsideField.forceActiveFocus()
+                    third.start()
+                }
+            }
+            Timer {
+                id: third
+                interval: 120
+                onTriggered: {
+                    probe.record("mode fallback", pane.keyboardTarget().placeholderText === "expression")
+                    probe.finish()
+                }
+            }
+        }''', QUrl.fromLocalFile(str(Path("qml/harness.qml").resolve())))
+            obj = component.create(ctx)
+            assert obj is not None, component.errorString()
+            obj.requestActivate()
+            QTimer.singleShot(5000, app.quit)
+            app.exec()
+
+        if __name__ == "__main__":
+            main()
+        """
+    )
+    assert events == [
+        ["own input", True],
+        ["outside field", True],
+        ["nothing", True],
+        ["focused name", True],
+        ["mode fallback", True],
+    ]
 
 
 def test_variant_timeout_does_not_fail_the_result():
@@ -190,9 +409,7 @@ def test_language_catalogue_loads_and_switches():
     events = run_script(
         r"""
         import json
-        import shutil
         import subprocess
-        import sys
         import tempfile
         from pathlib import Path
 
@@ -212,7 +429,7 @@ def test_language_catalogue_loads_and_switches():
                 encoding="utf-8",
             )
             subprocess.run(
-                [shutil.which("pyside6-lrelease"),
+                [lrelease(),
                  str(root / "symplify_zh_CN.ts"),
                  "-qm", str(root / "symplify_zh_CN.qm")],
                 check=True, capture_output=True,
@@ -241,7 +458,6 @@ def test_english_catalogue_can_override_source_copy():
     events = run_script(
         r"""
         import json
-        import shutil
         import subprocess
         import tempfile
         from pathlib import Path
@@ -263,7 +479,7 @@ def test_english_catalogue_can_override_source_copy():
                 encoding="utf-8",
             )
             subprocess.run(
-                [shutil.which("pyside6-lrelease"),
+                [lrelease(),
                  str(root / "symplify_en.ts"),
                  "-qm", str(root / "symplify_en.qm")],
                 check=True, capture_output=True,
@@ -281,6 +497,33 @@ def test_english_catalogue_can_override_source_copy():
         """
     )
     assert events == ["Interface language"]
+
+
+def test_a_render_past_its_deadline_fails_instead_of_hanging():
+    """A render that never comes back must not leave the UI waiting forever.
+
+    The renderer runs in a separate process, so a pathological layout (or a
+    wedged ziamath) used to leave the token pending forever: the pipe stayed open,
+    the poll timer kept running and the artwork never arrived. The service now
+    treats a missed deadline as a dead renderer: every pending token fails and the
+    child is retired, so the next request starts fresh. This exercises the expiry
+    branch directly — a real 10 s wait is not a unit test.
+    """
+    import time
+
+    from python.latex_render import LatexStyle
+    from python.viewmodel.latex_service import LatexRenderService
+
+    service = LatexRenderService()
+    failures = []
+    service.failed.connect(lambda token, message: failures.append((token, message)))
+    service._pending["expired"] = (("x", LatexStyle()), 0)
+    service._deadline = time.monotonic() - 1
+
+    service._poll()
+
+    assert failures and "exceeded" in failures[0][1]
+    assert not service._pending
 
 
 def main() -> int:

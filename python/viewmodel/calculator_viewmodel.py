@@ -15,12 +15,13 @@ from qmlmathplot.model import func_glsl
 
 from ..latex_render import LatexStyle, svg_data_url
 from ..model.calculator import Assignment, ErrorKind, Failure, Result, Success
-from ..model.plotting import is_plot_variable, plot_series, plot_variable_warning
-from ..model.variable import VariableManager
+from ..model.plotting import plot_series
+from ..model.variable import VariableManager, reserved_name_warning
 from ..model.variants import Variant
 from .calculation_backend import InlineBackend
 from .history_viewmodel import HistoryModel
 from .input_mode import InputMode
+from .latex_jobs import LatexJobs
 from .latex_service import LatexRenderService
 from .log_viewmodel import LogViewModel
 
@@ -126,11 +127,6 @@ class CalculatorViewModel(QObject):
         #: the renderer as each request completes.
         self._variants: tuple[Variant, ...] = ()
         self._variant_items: list[dict] = []
-        #: Tokens handed to `LatexRenderService`, mapped to their display target
-        #: (`("result", -1)` or `("variant", row)`). A new result or style
-        #: clears the map, which makes late completions stale.
-        self._latex_pending: dict[str, tuple[str, int]] = {}
-        self._latex_seq = 0
         #: Calculation crosses a backend boundary. The default is synchronous
         #: (tests, headless callers); the application passes a process backend
         #: with a timeout. The viewmodel allocates request ids, so both take the
@@ -156,8 +152,12 @@ class CalculatorViewModel(QObject):
         self._latex_service = (
             latex_service if latex_service is not None else LatexRenderService(self)
         )
-        self._latex_service.rendered.connect(self._on_latex_rendered)
-        self._latex_service.failed.connect(self._on_latex_failed)
+        #: The result, variant and watermark artwork, keyed by display target
+        #: (`("result", -1)`, `("variant", row)`, `("watermark", -1)`). A new
+        #: result or style calls `reset`, which makes late completions stale.
+        self._latex_jobs = LatexJobs(self._latex_service, "calculator", self)
+        self._latex_jobs.rendered.connect(self._on_latex_rendered)
+        self._latex_jobs.failed.connect(self._on_latex_failed)
         #: Source markup, not a URL: the fill is the theme's ink, so the artwork
         #: is built per theme rather than shipped pre-tinted.
         self._icon_svg = icon_svg
@@ -274,10 +274,9 @@ class CalculatorViewModel(QObject):
         self._clear_latex()
         if not self._result_latex:
             return
-        self._latex_seq += 1
-        token = f"{self._latex_seq}:result"
-        self._latex_pending[token] = ("result", -1)
-        self._latex_service.request(token, self._result_latex, self._latex_style)
+        self._latex_jobs.request(
+            ("result", -1), self._result_latex, self._latex_style
+        )
 
     def _refresh_strip(self) -> None:
         """Decide what the formula area holds, and request its artwork.
@@ -318,12 +317,16 @@ class CalculatorViewModel(QObject):
     def _refresh_watermark(self) -> None:
         """Prepare the watermark for the current empty visit.
 
-        A non-empty result leaves the pool as it was and marks this visit dirty,
-        so the next empty state re-rolls. A configuration change re-rolls as
-        well (`set_watermark` clears the pick). Everything else re-renders the
-        rolled item — a style change or a completed result's cleared artwork.
+        "Empty" is the pane's own rule, shared with QML's `watermark.empty`: no
+        value *and* no failure. A failure's prose stands where the mark would go,
+        so preparing — or re-rendering — artwork then is work nobody ever sees.
+
+        The random item is rolled once per configuration: `set_watermark` clears
+        the pick, and nothing else does. Leaving and re-entering the empty state
+        therefore re-renders the same item, and a style change re-renders the
+        artwork in the new ink.
         """
-        self._watermark_dirty = not self._result_text
+        self._watermark_dirty = not self._result_text and not self._is_error
         if not self._watermark_dirty:
             return
         if self._watermark_kind == "icon":
@@ -331,11 +334,8 @@ class CalculatorViewModel(QObject):
             return
         if self._watermark_pick is None:
             self._watermark_pick = random.choice(self._watermark_pool)
-        self._latex_seq += 1
-        token = f"{self._latex_seq}:watermark"
-        self._latex_pending[token] = ("watermark", -1)
-        self._latex_service.request(
-            token, self._watermark_pick, self._watermark_style()
+        self._latex_jobs.request(
+            ("watermark", -1), self._watermark_pick, self._watermark_style()
         )
 
     def _watermark_style(self) -> LatexStyle:
@@ -418,18 +418,14 @@ class CalculatorViewModel(QObject):
         for index, variant in enumerate(self._variants):
             if not variant.latex:
                 continue
-            self._latex_seq += 1
-            token = f"{self._latex_seq}:variant:{index}"
-            self._latex_pending[token] = ("variant", index)
-            self._latex_service.request(token, variant.latex, self._latex_style)
+            self._latex_jobs.request(
+                ("variant", index), variant.latex, self._latex_style
+            )
 
     def _on_latex_rendered(
-        self, token: str, url: str, width: int, height: int
+        self, target: tuple[str, int], url: str, width: int, height: int
     ) -> None:
         """Fill the result strip or one variant row when its SVG is ready."""
-        target = self._latex_pending.pop(token, None)
-        if target is None:
-            return
         kind, index = target
         if kind == "result":
             self._latex_svg_url = url
@@ -449,10 +445,9 @@ class CalculatorViewModel(QObject):
             row["naturalHeight"] = height
             self.variantsChanged.emit()
 
-    def _on_latex_failed(self, token: str, message: str) -> None:
+    def _on_latex_failed(self, target: tuple[str, int], message: str) -> None:
         """Log an unexpected renderer failure; the text surfaces still work."""
-        if self._latex_pending.pop(token, None) is not None:
-            self._log.add_warning(f"LaTeX render failed: {message}", "Calculator")
+        self._log.add_warning(f"LaTeX render failed: {message}", "Calculator")
 
     def _on_latex_warning(self, message: str) -> None:
         """Write a renderer warning on the UI thread, where the log lives."""
@@ -461,20 +456,23 @@ class CalculatorViewModel(QObject):
     def _get_variants(self) -> list[dict]:
         return self._variant_items
 
-    def set_latex_style(self, style: LatexStyle) -> None:
-        """Re-render the current result in a new style.
+    def set_latex_style(self, style: LatexStyle, rerender: bool = True) -> None:
+        """Take a new style, and re-render now unless a burst is in progress.
 
-        One entry point for the three knobs: they all mean "draw it again", and
-        they now arrive together — the theme owns the ink, the settings store the
-        size and the font file, and `MainViewModel` assembles both into one
-        `LatexStyle`. A new style invalidates every token; old renders may finish
-        but cannot overwrite the new artwork.
+        A single change (a font pick, one size) asks for the artwork at once;
+        later steps of a spin-box drag only move the style, and
+        `refresh_latex_artwork` runs once when the burst ends — otherwise every
+        step re-rendered the result and every variant.
         """
         if style == self._latex_style:
             return
         self._latex_style = style
-        self._latex_service.begin_generation("calculator")
-        self._latex_pending.clear()
+        if rerender:
+            self.refresh_latex_artwork()
+
+    def refresh_latex_artwork(self) -> None:
+        """Re-request the current result and variants in the current style."""
+        self._latex_jobs.reset()
         self._refresh_strip()
         self._render_variants()
         self.resultChanged.emit()
@@ -647,8 +645,7 @@ class CalculatorViewModel(QObject):
         self._active_request = None
         self._pending = None
         self._last_completed_request = None
-        self._latex_service.begin_generation("calculator")
-        self._latex_pending.clear()
+        self._latex_jobs.reset()
         self._plot_token += 1
         self._set_backend_state(False, "ready")
         self._result_text = ""
@@ -664,8 +661,7 @@ class CalculatorViewModel(QObject):
         """Apply a request's outcome, then schedule its plot separately."""
         # A new outcome invalidates every render from the previous one, even if
         # it is still in the renderer's queue.
-        self._latex_service.begin_generation("calculator")
-        self._latex_pending.clear()
+        self._latex_jobs.reset()
         self._clear_variants()
         if isinstance(result, Success):
             self._result_text = str(result.value)
@@ -917,9 +913,6 @@ class CalculatorViewModel(QObject):
         except Exception as e:
             self._log.add_warning(f"Failed to save variable: {e}", "Calculator")
 
-        if VariableManager.is_sympy_builtin(name):
-            self.warningOccurred.emit(
-                name, f"{name} is a SymPy built-in. You asked for it."
-            )
-        elif is_plot_variable(name):
-            self.warningOccurred.emit(name, plot_variable_warning(name))
+        warning = reserved_name_warning(name)
+        if warning is not None:
+            self.warningOccurred.emit(name, warning)

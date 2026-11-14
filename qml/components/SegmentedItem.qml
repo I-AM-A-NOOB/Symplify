@@ -1,5 +1,4 @@
 import QtQuick
-import RinUI
 import RinUI as Rin
 
 //: Project-local SegmentedItem: same as RinUI's, but with a visible focus

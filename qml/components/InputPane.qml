@@ -1,0 +1,426 @@
+import QtQuick
+import QtQuick as QQ
+import QtQuick.Controls
+import QtQuick.Layouts
+import QtQuick.Templates as T
+import QtQuick.Window 2.15
+import RinUI
+
+//: The Calculator's input half: the Code / Assign stage, both editors and the
+//: on-screen keyboard, plus the focus and cursor helpers the keyboard drives.
+//:
+//: A component because it is one stateful little machine (mode slide, focus
+//: target, selection-aware insertion) sitting beside the result and the plot;
+//: the page owns the toolbar and the split and calls into this. The mode itself
+//: stays `calcVM.inputMode` — this only renders it and keeps the editors in step.
+Item {
+    id: root
+
+    objectName: "inputPane"
+
+    clip: true
+    visible: !vm.zenMode
+
+    //: The shared code-input dressing: surface ink, placeholder and code font.
+    CodeInputLook { id: look }
+
+    //: The inner text item of the Code box; the helpers below address it.
+    readonly property Item codeInput: codeArea.textArea
+
+    Component.onCompleted: {
+        // Code colouring on the input. The item hands over its document, and the
+        // palette follows the ACTIVE theme — RinUI resolves Auto against the OS,
+        // so ask it rather than the setting.
+        vm.attachCodeHighlighting(codeArea.textArea.textDocument, Theme.isDark())
+        codeInput.forceActiveFocus()
+    }
+
+    //: The focused text input *inside this pane*, if any.
+    //:
+    //: `Window.activeFocusItem` is the item Qt already tracks. The recursive
+    //: walk this replaces scanned every child — the 200+ on-screen keys
+    //: included — on every virtual key press to answer the same question.
+    //: `isAncestorOf` keeps the rule the walk encoded: a text input on another
+    //: surface must not become this keyboard's target, so focus outside the pane
+    //: falls back to the current mode's editor.
+    //: Does `item` live under this pane? `isAncestorOf` is C++-only (not a QML
+    //: method), so the check walks the parent chain instead — a handful of
+    //: steps, versus the old full-tree recursion.
+    function belongsToPane(item) {
+        let node = item
+        while (node && node !== root)
+            node = node.parent
+        return node === root
+    }
+
+    function editableInPane(focused) {
+        if (!focused || !belongsToPane(focused))
+            return null
+        // The template bases, not the style types: RinUI's TextArea derives from
+        // Controls.Basic, while CodeField/CodeArea use Basic directly. Checking
+        // the shadowing `TextArea`/`TextField` names made a Basic field fail the
+        // test and the keyboard fall back to the wrong editor.
+        if (focused instanceof T.TextArea
+                || focused instanceof T.TextField
+                || focused instanceof QQ.TextInput)
+            return focused
+        return null
+    }
+
+    function fallbackTarget() {
+        return calcVM.inputMode === 0 ? codeInput : assignValueField
+    }
+
+    function keyboardTarget() {
+        return editableInPane(Window.activeFocusItem) || fallbackTarget()
+    }
+
+    //: Typing over a selection replaces it, like a physical keyboard. QML's
+    //: `insert` only inserts at the cursor, so the selection has to go first.
+    function removeSelection(target) {
+        if (!target || !target.selectedText)
+            return false
+        const start = Math.min(target.selectionStart, target.selectionEnd)
+        const end = Math.max(target.selectionStart, target.selectionEnd)
+        target.remove(start, end)
+        target.cursorPosition = start
+        return true
+    }
+
+    function insertToInput(text) {
+        const target = keyboardTarget()
+        if (!target || !target.insert)
+            return
+        removeSelection(target)
+        target.insert(target.cursorPosition, text)
+    }
+
+    function backspaceInput() {
+        const target = keyboardTarget()
+        if (!target)
+            return
+        if (removeSelection(target))
+            return
+        if (target.cursorPosition > 0)
+            target.remove(target.cursorPosition - 1, target.cursorPosition)
+    }
+
+    function moveInputCursor(delta) {
+        const target = keyboardTarget()
+        if (!target)
+            return
+        target.forceActiveFocus()
+        let position = target.cursorPosition
+        if (target.selectedText) {
+            position = delta < 0
+                ? Math.min(target.selectionStart, target.selectionEnd)
+                : Math.max(target.selectionStart, target.selectionEnd)
+            if (target.deselect)
+                target.deselect()
+        } else {
+            position = Math.max(0, Math.min(target.length, position + delta))
+        }
+        target.cursorPosition = position
+    }
+
+    function clearInput() {
+        const target = keyboardTarget()
+        if (target && target.clear)
+            target.clear()
+    }
+
+    function undoInput() {
+        const target = keyboardTarget()
+        if (target && target.undo)
+            target.undo()
+    }
+
+    function redoInput() {
+        const target = keyboardTarget()
+        if (target && target.redo)
+            target.redo()
+    }
+
+    function beginModeTransition() {
+        inputStage.beginModeTransition()
+    }
+
+    function focusCode() {
+        codeInput.forceActiveFocus()
+    }
+
+    function focusAssignName() {
+        assignNameField.forceActiveFocus()
+    }
+
+    function switchToCode() {
+        beginModeTransition()
+        calcVM.inputMode = 0
+        focusCode()
+    }
+
+    function switchToAssign() {
+        beginModeTransition()
+        calcVM.inputMode = 1
+        focusAssignName()
+    }
+
+    function runCalculation() {
+        if (calcVM.inputMode === 0) {
+            const expr = calcVM.inputText.trim()
+            if (expr) {
+                calcVM.calculate(expr)
+                codeInput.selectAll()
+                codeInput.forceActiveFocus()
+            }
+        } else {
+            const name = calcVM.assignName.trim()
+            const value = calcVM.assignValue.trim()
+            if (name && value) {
+                calcVM.calculateAssign(name, calcVM.assignOperator, value)
+                assignValueField.forceActiveFocus()
+            }
+        }
+    }
+
+    function setExample(expression) {
+        switchToCode()
+        calcVM.inputText = expression
+        runCalculation()
+    }
+
+    ColumnLayout {
+        anchors.fill: parent
+        anchors.margins: 12
+        spacing: 10
+
+        // Input area: Code / Assign. Both live side by side in a clipped stage
+        // and slide in opposite directions when the mode changes; the off-screen
+        // one is disabled, so the hidden input never takes focus or keystrokes.
+        Item {
+            id: inputStage
+
+            objectName: "inputStage"
+            clip: true
+            //: The first binding of `x` must not animate: a page rebuilt while
+            //: the VM is in Assign mode would otherwise slide both rows in from
+            //: the left.
+            property bool slideReady: false
+            //: Both editors must be visible while the mode slide runs. Once it
+            //: ends, the hidden one disappears so a sidebar width animation
+            //: cannot expose it: its `x` offset shrinks with the stage otherwise.
+            property bool modeSwitching: false
+
+            function beginModeTransition() {
+                modeSwitching = true
+                modeSwitchTimer.restart()
+            }
+
+            Component.onCompleted: slideReady = true
+
+            Timer {
+                id: modeSwitchTimer
+                interval: 180
+                onTriggered: inputStage.modeSwitching = false
+            }
+
+            Layout.fillWidth: true
+            // The Code box keeps its 110px footprint; Assign grows only as far
+            // as its wrapping value needs. The spacer after the keyboard takes
+            // the sidebar's spare height, so the keys stay above it instead of
+            // floating.
+            Layout.minimumHeight: 110
+            Layout.preferredHeight: calcVM.inputMode === 0
+                    ? 110
+                    : Math.min(240, Math.max(110, assignRow.implicitHeight + 8))
+
+            ScrollableTextArea {
+                id: codeArea
+
+                objectName: "codeInput"
+                // The stage's two panes are siblings of its width; the inactive
+                // one sits fully outside the clip.
+                width: parent.width
+                height: parent.height
+                x: calcVM.inputMode === 0 ? 0 : -width
+                enabled: calcVM.inputMode === 0
+                visible: calcVM.inputMode === 0 || inputStage.modeSwitching
+                //: Code leaves to the left, Assign arrives from the right; going
+                //: back reverses both. Eased, not a paginated SwipeView: the two
+                //: panes cross the stage together.
+                Behavior on x {
+                    enabled: inputStage.slideReady
+                    NumberAnimation {
+                        duration: 180
+                        easing.type: Easing.OutCubic
+                    }
+                }
+                text: calcVM.inputText
+                placeholderText: qsTr("Enter expression...")
+                wrapMode: TextEdit.Wrap
+                onTextChanged: calcVM.inputText = text
+                // The box takes the code theme's own surface, and the inner
+                // area's background has to go or it would cover it. Text the
+                // palette leaves unpainted (a free symbol) then reads in the
+                // theme's ink rather than the UI's, which is what keeps it
+                // legible there.
+                background: CodeSurface {
+                    focused: codeArea.textArea.activeFocus
+                }
+                textArea.background: null
+                textArea.color: look.ink
+                // The theme's own placeholder colour, which the family states or
+                // VSCode derives from its foreground. "" keeps RinUI's, for a
+                // family with no surface of its own.
+                textArea.placeholderTextColor: look.placeholder
+                // The inner area is the text item: it draws the glyphs, so the
+                // code font has to reach it, and it holds the keystrokes, so the
+                // '=' shortcut does too.
+                textArea.font: look.font
+                textArea.Keys.onPressed: (event) => {
+                    if (event.key === Qt.Key_Equal
+                            && !event.modifiers
+                            && calcVM.inputText.trim().length === 0) {
+                        root.switchToAssign()
+                        event.accepted = true
+                    }
+                }
+            }
+
+            //: The app's context menu for the Code box (see `CodeContextMenu`):
+            //: a sibling of the box rather than a child, because the box is
+            //: RinUI's `ScrollableTextArea` and this has to sit *over* it — ahead
+            //: of the menu its own inner `TextArea` opens from a vendored
+            //: `MouseArea`. It covers what the box covers, and shows when the
+            //: box does.
+            CodeContextMenu {
+                editor: codeArea.textArea
+                anchors.fill: codeArea
+                visible: calcVM.inputMode === 0
+            }
+
+            ColumnLayout {
+                id: assignRow
+
+                objectName: "assignInput"
+                width: parent.width
+                height: parent.height
+                x: calcVM.inputMode === 1 ? 0 : width
+                enabled: calcVM.inputMode === 1
+                visible: calcVM.inputMode === 1 || inputStage.modeSwitching
+                Behavior on x {
+                    enabled: inputStage.slideReady
+                    NumberAnimation {
+                        duration: 180
+                        easing.type: Easing.OutCubic
+                    }
+                }
+                spacing: 8
+
+                //: Name and operator on the first line; the value gets the full
+                //: width and the remaining height on the second. A single row
+                //: made the value field the narrow leftover between two fixed
+                //: controls.
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+
+                    // The shared code field (surface, ink, code font), the same
+                    // one the Variables page renames with.
+                    CodeField {
+                        id: assignNameField
+
+                        Layout.preferredWidth: 130
+                        Layout.alignment: Qt.AlignVCenter
+                        text: calcVM.assignName
+                        placeholderText: qsTr("name")
+                        onTextChanged: calcVM.assignName = text
+
+                        // Smart navigation: an operator typed at the end of the
+                        // name sets the combo and jumps to the value; backspace at
+                        // position 0 returns to Code mode.
+                        Keys.onPressed: (event) => {
+                            const opMap = { "=": 0, "+": 1, "-": 2,
+                                            "*": 3, "/": 4, "%": 5 }
+                            const opIndex = opMap[event.text]
+                            const mods = event.modifiers & ~Qt.ShiftModifier
+                            if (opIndex !== undefined && mods === 0
+                                    && cursorPosition === length) {
+                                calcVM.assignOperator = operatorCombo.model[opIndex]
+                                assignValueField.forceActiveFocus()
+                                event.accepted = true
+                            } else if (event.key === Qt.Key_Backspace
+                                       && cursorPosition === 0
+                                       && selectedText === "") {
+                                root.switchToCode()
+                                event.accepted = true
+                            }
+                        }
+                    }
+
+                    ComboBox {
+                        id: operatorCombo
+
+                        Layout.preferredWidth: 96
+                        Layout.alignment: Qt.AlignVCenter
+                        model: ["=", "+=", "-=", "*=", "/=", "%="]
+                        currentIndex: {
+                            const i = model.indexOf(calcVM.assignOperator)
+                            return i >= 0 ? i : 0
+                        }
+                        onActivated: (index) => calcVM.assignOperator = model[index]
+                    }
+
+                    Item { Layout.fillWidth: true }
+                }
+
+                // The shared highlighted code area — full width on the second
+                // line; it fills the Assign stage's spare height.
+                CodeArea {
+                    id: assignValueField
+
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    Layout.minimumHeight: 44
+                    Layout.fillHeight: true
+                    text: calcVM.assignValue
+                    placeholderText: qsTr("expression")
+                    wrapMode: TextEdit.Wrap
+                    onTextChanged: calcVM.assignValue = text
+
+                    Keys.onPressed: (event) => {
+                        // Enter calculates, never inserts a newline.
+                        if (event.key === Qt.Key_Return
+                                || event.key === Qt.Key_Enter) {
+                            root.runCalculation()
+                            event.accepted = true
+                        } else if (event.key === Qt.Key_Backspace
+                                   && cursorPosition === 0
+                                   && length === 0) {
+                            // Backspace in an empty value -> focus the name
+                            assignNameField.forceActiveFocus()
+                            event.accepted = true
+                        }
+                    }
+                }
+            }
+        }
+
+        KeyboardPanel {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 282
+            Layout.minimumHeight: 242
+            onKeyPressed: (key) => root.insertToInput(key)
+            onBackspacePressed: root.backspaceInput()
+            onCursorLeftPressed: root.moveInputCursor(-1)
+            onCursorRightPressed: root.moveInputCursor(1)
+            onUndoPressed: root.undoInput()
+            onRedoPressed: root.redoInput()
+        }
+
+        //: The mock-up's spacer: the input and the keyboard keep their sizes,
+        //: and the empty rest of the sidebar belongs below the keys rather than
+        //: inside the editor.
+        Item { Layout.fillHeight: true }
+    }
+}

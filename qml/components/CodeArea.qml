@@ -22,19 +22,16 @@ QQC2.TextArea {
     //: (see `CodeContextMenu`).
     CodeContextMenu { editor: area }
 
-    readonly property var surface: settingsVM.codeSurface(Theme.isDark())
+    CodeInputLook { id: look }
 
-    font: settingsVM.codeFont
-    color: surface.ink || Theme.currentTheme.colors.textColor
-    placeholderTextColor: surface.placeholder
-        || Theme.currentTheme.colors.textSecondaryColor
-    // As in `CodeField`: equal insets, centre alignment, so the text lands where
-    // the read-only cell's does.
-    topPadding: 6
-    bottomPadding: 6
-    leftPadding: 8
-    rightPadding: 8
-    verticalAlignment: TextEdit.AlignVCenter
+    font: look.font
+    color: look.ink
+    placeholderTextColor: look.placeholder
+    topPadding: look.topPadding
+    bottomPadding: look.bottomPadding
+    leftPadding: look.leftPadding
+    rightPadding: look.rightPadding
+    verticalAlignment: look.verticalAlignment
     textFormat: TextEdit.PlainText
     background: CodeSurface { focused: area.activeFocus }
 

@@ -24,7 +24,6 @@ from PySide6.QtCore import (
     Slot,
 )
 
-from ..latex_render import LatexStyle, render_data_url
 from .history_viewmodel import HistoryModel
 
 
@@ -119,26 +118,10 @@ class SearchFilterModel(QSortFilterProxyModel):
 class VariablesFilterModel(SearchFilterModel):
     """Visible variables for the Variables page search box.
 
-    Columns are name / value / type, so the modes map straight onto them.
-
-    It also owns the `LatexStyle` its page renders with — the details panel asks
-    for one row's artwork and takes it as given, rather than being handed the
-    colour, size and font on every call. `latexStyleChanged` is how the panel
-    learns to ask again: a call in a binding creates no dependency of its own.
+    Columns are name / value / type, so the modes map straight onto them. It
+    only filters and maps rows: the selected row's artwork is the viewmodel's
+    (see ``VariablesViewModel.latexFor``), so a proxy never typesets.
     """
-
-    #: Emitted when the style changes, so the page re-reads what it is showing.
-    latexStyleChanged = Signal()
-
-    #: Theme ink, font size and font file; set once by `MainViewModel`.
-    _latex_style: LatexStyle = LatexStyle()
-
-    def set_latex_style(self, style: LatexStyle) -> None:
-        """Take a new style and tell the page it has to ask again."""
-        if style == self._latex_style:
-            return
-        self._latex_style = style
-        self.latexStyleChanged.emit()
 
     def fields(self, source_row: int) -> list:
         """The column(s) the current mode searches."""
@@ -178,18 +161,6 @@ class VariablesFilterModel(SearchFilterModel):
             return ""
         return self.sourceModel().latexAt(self.mapToSource(self.index(row, 0)).row())
 
-    @Slot(int, result="QVariantMap")
-    def latexFor(self, row: int) -> dict:
-        """Return ``{url, width, height}`` for the visible row's expression.
-
-        Rendered on demand and not cached: the details panel shows one row, and
-        asks again whenever the selection or the style changes, so there is
-        nothing to invalidate. The calculator and the history keep caches because
-        they render a *list*, each entry lazily and once.
-        """
-        url, width, height = render_data_url(self.latexAt(row), self._latex_style)
-        return {"url": url, "width": width, "height": height}
-
 
 class HistoryFilterModel(SearchFilterModel):
     """Visible history cards for the History page search box."""
@@ -216,3 +187,17 @@ class HistoryFilterModel(SearchFilterModel):
         if mode is HistorySearchMode.RESULT:
             return [result, error]
         return [statement, result, error]
+
+    @Slot(int)
+    def requestLatex(self, row: int) -> None:
+        """Queue the visible row's artwork on the *source* model.
+
+        The cards address rows as this proxy shows them; with a search active
+        that is not the source row, so the mapping happens here rather than in
+        the card.
+        """
+        if not 0 <= row < self.rowCount():
+            return
+        source_row = self.mapToSource(self.index(row, 0)).row()
+        if source_row >= 0:
+            self.sourceModel().requestLatex(source_row)

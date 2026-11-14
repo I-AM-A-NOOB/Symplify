@@ -5,54 +5,39 @@ persistence is taken over at import time by ``python/rinui_bootstrap.py``. This
 viewmodel is the **only** writer of settings: every setter stores the value and
 applies it live, so the file and the running UI cannot disagree.
 
+The methods are grouped by domain into mixins — ``AppearanceSettings`` (theme,
+accent, code colours, watermarks), ``FontSettings`` (the three faces, their
+fallback chains and coverage), ``WindowSettings`` (the remembered geometry) and
+``KeyboardSettings`` (the custom keyboard folder) — while every ``Property``,
+``Signal`` and piece of shared state stays on this ``QObject`` subclass, so
+shiboken registers them and QML sees one object.
+
+Each domain has its own notify signal (``appearanceChanged``, ``fontsChanged``,
+``windowChanged``, ``keyboardChanged``, ``configChanged``); every setter emits
+its domain signal **and** ``changed``, which remains the "some setting moved"
+signal ``MainViewModel`` listens on.
+
 Appearance is applied through RinUI's ``ThemeManager`` QObject (the QML ``Theme``
 singleton is a thin wrapper around it), which is why the window's theme manager is
 passed in rather than reached for globally. Rendering settings are applied by
 ``MainViewModel``, which owns the viewmodels that render.
 """
 
-import sys
-from functools import lru_cache
+import time
 from pathlib import Path
 
 from PySide6.QtCore import (
     Property,
     QCoreApplication,
     QObject,
-    QPoint,
-    Qt,
     QTimer,
     QTranslator,
     QUrl,
     Signal,
     Slot,
 )
-from PySide6.QtGui import (
-    QColor,
-    QDesktopServices,
-    QFont,
-    QFontDatabase,
-    QGuiApplication,
-    QPalette,
-)
+from PySide6.QtGui import QDesktopServices, QFont, QGuiApplication
 
-from ..accent import for_scheme, variants
-from ..code_style import surface as code_surface
-from ..code_themes import label as family_label
-from ..fonts import (
-    CODE_GLYPHS,
-    expand_keyword,
-    math_font_choices,
-    math_font_path,
-    math_font_typesets,
-    split_families,
-)
-from ..keyboard_config import (
-    keyboard_dir,
-    keyboard_files,
-    label_glyphs,
-    new_keyboard_file,
-)
 from ..localization import (
     RINUI_TRANSLATION_PREFIX,
     SYSTEM_LANGUAGE,
@@ -61,85 +46,40 @@ from ..localization import (
     resolve_language,
     translation_file,
 )
-from ..settings import DEFAULTS, SettingsStore
+from ..settings import SettingsStore
+from ..system_accent import SystemAccent
+from .settings_appearance import AppearanceSettings
+from .settings_fonts import FontSettings
+from .settings_keyboard import KeyboardSettings
+from .settings_window import WindowSettings
 
 
-@lru_cache(maxsize=128)
-def _family_missing_glyphs(family: str, glyphs: str) -> str:
-    """Which of ``glyphs`` one family cannot draw, via ``QRawFont``.
-
-    ``glyphIndexesForString`` returns glyph 0 (.notdef) for a character the
-    typeface has no glyph for, which is the honest question for a font family.
-    The obvious ``QFontMetrics.inFont()`` is unusable instead: it answers ``True``
-    for every character of every family (Qt's substitution hides the gap). Cached
-    because building a ``QRawFont`` reads the font file.
-    """
-    from PySide6.QtGui import QFont, QRawFont
-
-    raw = QRawFont.fromFont(QFont(family))
-    if not raw.isValid():
-        return glyphs
-    return "".join(
-        char for char in glyphs if raw.glyphIndexesForString(char)[0] == 0
-    )
-
-
-def _chain_missing_glyphs(families: str, glyphs: str) -> str:
-    """Glyphs **no** family in the preference list can draw.
-
-    The list is a real Qt fallback chain, so a glyph missing from the first face
-    is drawn by a later one; only a glyph no entry has would show as a tofu box.
-    Without a running application there is nothing to measure, so the answer is
-    "nothing missing" rather than a false accusation.
-
-    One `QRawFont` per family, not one per (family, character): the per-family
-    answer is already the *set* of glyphs it cannot draw, so asking it about one
-    character at a time threw that away and rebuilt the font for every pair —
-    measured at 216 ms for the code chain (about 1.8 ms a build, and the chain
-    reports nothing missing), which is what the dropdown's row waits for. Asking
-    once per family keeps the same answer and makes the cache in
-    `_family_missing_glyphs` — keyed by (family, glyphs) for exactly this reason —
-    do its job.
-    """
-    if not glyphs or QGuiApplication.instance() is None:
-        return ""
-    chain = installed_chain(families)
-    if not chain:
-        return glyphs
-    unwritable = [_family_missing_glyphs(family, glyphs) for family in chain]
-    return "".join(
-        char for char in glyphs if all(char in missing for missing in unwritable)
-    )
-
-
-def installed_chain(families: str) -> list:
-    """The installed families of a preference list, in order, keywords expanded.
-
-    This is exactly the chain Qt resolves characters against when the list is
-    handed to ``QFont.setFamilies``, so it is also what :func:`_chain_missing_glyphs`
-    has to walk. Empty without a running application —
-    ``QFontDatabase.families()`` aborts the process rather than raising.
-    """
-    if QGuiApplication.instance() is None:
-        return []
-    installed = {name.casefold() for name in QFontDatabase.families()}
-    return list(dict.fromkeys(
-        candidate
-        for name in split_families(families)
-        for candidate in expand_keyword(name)
-        if candidate.casefold() in installed
-    ))
-
-
-class SettingsViewModel(QObject):
+class SettingsViewModel(
+    AppearanceSettings,
+    FontSettings,
+    WindowSettings,
+    KeyboardSettings,
+    QObject,
+):
     """Applies and persists the user settings.
 
     Signals:
         changed: Any setting changed, including the config-write status.
+        appearanceChanged: Theme, backdrop, accent, code theme, brackets or the
+            result watermark changed.
+        fontsChanged: One of the fonts, its size or its chain/coverage changed.
+        windowChanged: The remembered window geometry changed.
+        keyboardChanged: The selected custom keyboard layout changed.
+        configChanged: The config-write status (its warning) changed.
         latexSizeChanged: The result font size changed (renderers must re-render).
     """
 
     changed = Signal()
+    appearanceChanged = Signal()
+    fontsChanged = Signal()
+    windowChanged = Signal()
+    keyboardChanged = Signal()
+    configChanged = Signal()
     latexSizeChanged = Signal()
     latexFontErrorChanged = Signal()
     accentChanged = Signal()
@@ -170,12 +110,9 @@ class SettingsViewModel(QObject):
         self._latex_font_error = ""
         #: Why creating/opening the custom keyboard folder failed, if it did.
         self._keyboard_error = ""
-        #: OS accent per colour scheme ({False: light, True: dark}); empty when
-        #: the platform cannot be asked for both (see _capture_system_accents).
-        self._system_accents: dict = {}
-        #: Re-entrancy guard: capturing switches the colour scheme, which emits
-        #: paletteChanged, which would call back into the capture.
-        self._capturing_accents = False
+        #: OS accent per colour scheme, plus the base (see SystemAccent.capture);
+        #: ``_system_accents`` below is a view of its dict.
+        self._system_accent = SystemAccent()
         self._theme_manager = theme_manager
         self._translation_dir = (
             Path(translation_dir) if translation_dir is not None
@@ -205,6 +142,17 @@ class SettingsViewModel(QObject):
         self._accent_timer.setSingleShot(True)
         self._accent_timer.setInterval(400)
         self._accent_timer.timeout.connect(self._flush_pending_accent)
+        #: The three size setters fire once per spin-box step. Their values must
+        #: be live immediately, but the YAML write is coalesced: the first step
+        #: writes at once, the rest of the burst once when the cooldown ends.
+        self._size_save_timer = QTimer(self)
+        self._size_save_timer.setSingleShot(True)
+        self._size_save_timer.setInterval(300)
+        self._size_save_timer.timeout.connect(self._flush_size_save)
+        self._size_dirty = False
+        #: Monotonic end of the current write cooldown; the timer is only the
+        #: live-app flush (a headless caller has no event loop to fire it).
+        self._size_cooldown_until = 0.0
         # Appearance is NOT re-applied here: the bootstrap already injected it into
         # RinUI's config before the window existed, and applying a backdrop needs a
         # window handle (RinUI warns and refuses without one). _apply_appearance is
@@ -217,11 +165,56 @@ class SettingsViewModel(QObject):
         if app is not None and hasattr(app, "styleHints"):
             # Capture before connecting: the switch below would otherwise emit
             # paletteChanged and re-enter this object.
-            self._capture_system_accents()
+            self._system_accent.capture()
             app.paletteChanged.connect(self._on_palette_changed)
+            app.aboutToQuit.connect(self._flush_size_save)
         self._apply_language()
 
-    # --- appearance -------------------------------------------------------
+    def _stage_size(self, key: str, value: int) -> None:
+        """Store a size live, coalescing the file write.
+
+        A spin box reports every step. The first write lands immediately (a
+        single change is on disk at once, as every setter must be), and further
+        steps inside the cooldown are written once when it ends.
+        """
+        self._store.stage(key, value)
+        now = time.monotonic()
+        if now < self._size_cooldown_until:
+            self._size_dirty = True
+            return
+        self._store.save()
+        self._size_cooldown_until = now + 0.3
+        if QCoreApplication.instance() is not None:
+            self._size_save_timer.start()
+
+    def _flush_size_save(self, *_args) -> None:
+        """Write the last staged size (cooldown end, or application quit)."""
+        if QCoreApplication.instance() is not None:
+            self._size_save_timer.stop()
+        self._size_cooldown_until = 0.0
+        if not self._size_dirty:
+            return
+        self._size_dirty = False
+        if not self._store.save():
+            # The warning row reads `warning`, which notifies on `changed`.
+            self.changed.emit()
+
+    @property
+    def _system_accents(self) -> dict:
+        """The captured OS accents, owned by ``SystemAccent``.
+
+        Exposed as a view of the capture object rather than a second copy: the
+        settings row reads ``light``/``dark`` straight from here (see
+        ``_get_accent_os_shading_available``), and the base/variants come from
+        the same dict.
+        """
+        return self._system_accent.accents
+
+    @_system_accents.setter
+    def _system_accents(self, accents: dict) -> None:
+        self._system_accent.accents = accents
+
+    # --- language ---------------------------------------------------------
 
     def _get_language(self) -> str:
         """The stored language choice (``system`` or a concrete code)."""
@@ -309,799 +302,11 @@ class SettingsViewModel(QObject):
             app.installTranslator(translator)
             self._rinui_translator = translator
 
-    language = Property(str, _get_language, _set_language, notify=changed)
+    language = Property(str, _get_language, _set_language, notify=languageChanged)
     languages = Property("QVariantList", _get_languages, constant=True)
     systemLanguageName = Property(
         str, _get_system_language_name, constant=True
     )
-
-    def _get_result_watermark(self) -> str:
-        """The empty result pane's watermark: 'icon' (default) or 'random'."""
-        return str(self._store.get("workspace.result_watermark") or "icon")
-
-    def _get_result_watermark_pool(self) -> list:
-        """The random watermark's LaTeX pool; the store validates and ships it."""
-        pool = self._store.get("workspace.result_watermark_pool")
-        return list(pool) if isinstance(pool, (list, tuple)) else []
-
-    def _set_result_watermark(self, kind: str) -> None:
-        """Write the watermark kind through the store (and persist + notify)."""
-        self._store.set("workspace.result_watermark", kind)
-        # PySide does not emit the NOTIFY signal for a Python-side write, and
-        # every consumer (the calc VM's re-roll, the QML source switch) hangs
-        # off ``changed`` rather than off a property read, so emit it here.
-        self.changed.emit()
-
-    def _set_result_watermark_pool(self, items: object) -> None:
-        """Write the watermark pool through the store.
-
-        No coercion here: a string would silently explode into its characters,
-        and the store's own validator owns the list-only contract.
-        """
-        self._store.set("workspace.result_watermark_pool", items)
-        self.changed.emit()
-
-    resultWatermark = Property(
-        str, _get_result_watermark, _set_result_watermark, notify=changed
-    )
-    resultWatermarkPool = Property(
-        "QVariantList", _get_result_watermark_pool, _set_result_watermark_pool,
-        notify=changed,
-    )
-
-    def _apply_appearance(self) -> None:
-        """Push the stored appearance into RinUI (no-op without a theme manager).
-
-        The accent colour is *not* applied here: RinUI's own
-        ``Theme.setThemeColor`` also sets ``Utils.primaryColor``, which is what
-        actually re-colours the UI, so it has to run on the QML side (see the
-        ``accentChanged`` handler in SettingsPage.qml). This method is for theme
-        and backdrop, which apply fine through the Python slots.
-        """
-        if self._theme_manager is None:
-            return
-        self._theme_manager.toggle_theme(self._get_theme())
-        self._theme_manager.apply_backdrop_effect(self._get_backdrop())
-
-    def _get_theme(self) -> str:
-        return self._store.get("appearance.theme")
-
-    def _set_theme(self, theme: str) -> None:
-        theme = self._store.set("appearance.theme", theme)
-        if self._theme_manager is not None and self._theme_manager.get_theme_name() != theme:
-            self._theme_manager.toggle_theme(theme)
-        self.changed.emit()
-
-    def _get_backdrop(self) -> str:
-        return self._store.get("appearance.backdrop")
-
-    def _set_backdrop(self, backdrop: str) -> None:
-        backdrop = self._store.set("appearance.backdrop", backdrop)
-        if self._theme_manager is not None:
-            self._theme_manager.apply_backdrop_effect(backdrop)
-        self.changed.emit()
-
-    def _get_accent_mode(self) -> str:
-        """Which accent the UI uses: ``default`` / ``system`` / ``custom``."""
-        return self._store.get("appearance.accent_mode")
-
-    def _set_accent_mode(self, mode: str) -> None:
-        self._store.set("appearance.accent_mode", mode)
-        self.accentChanged.emit()
-        self.changed.emit()
-
-    def _get_custom_accent(self) -> str:
-        """The colour the user picked, kept while another mode is active.
-
-        A pending write wins: the picker changes the colour on every mouse move
-        while it is dragged, and reading straight from the store would show the
-        last *persisted* value, so the colour would visibly snap back mid-drag.
-        """
-        if self._pending_accent is not None:
-            return self._pending_accent
-        return self._store.get("appearance.accent")
-
-    def _set_custom_accent(self, accent: str) -> None:
-        """Take a picked colour (invalid input is ignored) and persist it lazily.
-
-        The write is debounced because a picker drag emits a change per mouse
-        move, and each one would otherwise rewrite the config file. The value in
-        effect updates immediately — the accent applies live and the preview
-        follows — so only the disk write waits.
-        """
-        color = QColor(accent)
-        if not color.isValid():
-            return
-        self._pending_accent = color.name()
-        self._accent_timer.start()
-        if self._get_accent_mode() == "custom":
-            self.accentChanged.emit()
-        self.changed.emit()
-
-    def _flush_pending_accent(self, *_) -> None:
-        """Write the debounced colour, if there is one."""
-        if self._pending_accent is None:
-            return
-        pending, self._pending_accent = self._pending_accent, None
-        self._store.set("appearance.accent", pending)
-
-    def _get_accent(self) -> str:
-        """The accent colour that is actually in effect, mode resolved.
-
-        This is what the QML side hands to RinUI's ``Theme.setThemeColor``.
-        """
-        mode = self._get_accent_mode()
-        if mode == "system":
-            return self._system_accent()
-        if mode == "custom":
-            return self._get_custom_accent()
-        return DEFAULTS["appearance"]["accent"]
-
-    def _system_accent(self) -> str:
-        """The system accent: the OS's **base** accent, not a scheme's variant.
-
-        The shading below derives both scheme variants from this, so feeding it a
-        value that is already tuned for a scheme would darken or lighten twice.
-        ``QPalette.Highlight`` under the **dark** scheme is the base — checked
-        against the OS itself on two accents (`#258292` and `#0078d4`), where it
-        matched `DWM\\AccentColor` and differed from `Accent`, which carries the
-        per-scheme value.
-
-        The captured value is preferred so the base does not move with the OS
-        theme; the live palette is the fallback for a platform that cannot be
-        asked to switch schemes, and RinUI's own colour when there is no palette
-        at all (headless tests).
-        """
-        if "base" in self._system_accents:
-            return self._system_accents["base"]
-        app = QGuiApplication.instance()
-        if app is None:
-            return DEFAULTS["appearance"]["accent"]
-        return QColor(app.palette().color(QPalette.ColorRole.Highlight)).name()
-
-    def _capture_system_accents(self) -> None:
-        """Record what the OS reports about the accent, once, at startup.
-
-        Three values, all read before the QML tree is loaded so the temporary
-        scheme switches are never visible:
-
-        * ``base`` — ``Highlight`` under the **dark** scheme, the OS's untuned
-          accent. Both shades derive from this, so it must not be a
-          scheme-specific value or the result would be tuned twice.
-        * ``light`` / ``dark`` — ``Accent`` under each scheme, i.e. the OS's own
-          tuned accents. On Windows these are what the shell itself uses, so
-          ``system`` mode prefers them (see ``_system_scheme_accent``).
-
-        The previous scheme is always restored, even if a switch fails: leaving
-        the application in the wrong colour scheme would be far worse than a
-        missing accent.
-        """
-        app = QGuiApplication.instance()
-        if app is None or self._capturing_accents:
-            return
-        hints = app.styleHints()
-        self._capturing_accents = True
-        original = hints.colorScheme()
-        captured: dict[str, str] = {}
-        try:
-            for scheme, keys in (
-                (Qt.ColorScheme.Dark, ("base", "dark")),
-                (Qt.ColorScheme.Light, ("light",)),
-            ):
-                hints.setColorScheme(scheme)
-                palette = app.palette()
-                for key in keys:
-                    role = (QPalette.ColorRole.Highlight if key == "base"
-                            else QPalette.ColorRole.Accent)
-                    captured[key] = QColor(palette.color(role)).name()
-        except Exception:
-            captured = {}          # no usable scheme switching: fall back to live
-        finally:
-            try:
-                hints.setColorScheme(original)
-            except Exception:
-                pass
-            self._capturing_accents = False
-        self._system_accents = captured
-
-    def _system_scheme_accent(self, dark: bool) -> str:
-        """The OS's own accent for that scheme, or ``''`` when there is none.
-
-        Windows ships a tuned accent per colour scheme and uses it itself, so for
-        ``system`` mode that value beats our own derivation of it. Restricted to
-        Windows on purpose: elsewhere the palette's accent is not scheme-specific
-        (or not the user's theme colour at all), and the derivation stays
-        predictable.
-        Also off when ``appearance.accent_os_shading`` is off, which is how the
-        behaviour is opted out of.
-        """
-        if sys.platform != "win32":
-            return ""
-        if not self._get_accent_os_shading():
-            return ""
-        return self._system_accents.get("dark" if dark else "light", "")
-
-    @Slot(bool, result=str)
-    def accentForScheme(self, dark: bool) -> str:
-        """The accent to apply for a theme of the given lightness.
-
-        ``default`` and ``custom`` are colours the OS knows nothing about, so they
-        take the derivation (``for_scheme``: the shell's own shade for the scheme
-        — the darker ``dark1`` on light, the lighter ``light2`` on dark) — the
-        same on every platform. ``system`` on Windows uses the value the OS
-        reports for the scheme instead: our derivation reproduces the shell's ramp
-        to within a unit, but the shell is the one that wrote it, so its own value
-        wins when the OS-shading option is on; with it off, ``system`` derives
-        like everything else.
-
-        Shading off means no per-scheme finetuning at all: the base verbatim.
-        """
-        base = self._get_accent()
-        if not self._get_accent_shading():
-            return base
-        if self._get_accent_mode() == "system":
-            from_os = self._system_scheme_accent(bool(dark))
-            if from_os:
-                return from_os
-        return for_scheme(base, bool(dark))
-
-    def _get_accent_preview(self) -> list:
-        """The swatches the settings page shows beside the colour control.
-
-        A preview, not a control: it follows the accent the UI is using (not the
-        stored custom colour the dropdown next to it edits), and it shows the
-        palette actually in play — the OS's dark/base/light trio in ``system``
-        mode on Windows, our derived trio otherwise, and a single flat swatch
-        when shading is off.
-        """
-        base = self._get_accent()
-        if not self._get_accent_shading():
-            return [base]
-        if self._get_accent_mode() == "system" and self._get_accent_os_shading():
-            dark = self._system_scheme_accent(True)
-            light = self._system_scheme_accent(False)
-            if dark and light:
-                return [light, base, dark]      # darkest to lightest
-        return list(variants(base))
-
-    def _on_palette_changed(self, *_) -> None:
-        """Follow the OS accent while the ``system`` mode is active."""
-        self._capture_system_accents()
-        if self._get_accent_mode() == "system":
-            self.accentChanged.emit()
-            self.changed.emit()
-
-    # --- fonts ------------------------------------------------------------
-
-    def _get_code_family(self) -> str:
-        return self._store.get("workspace.code_family")
-
-    def _set_code_family(self, families: str) -> None:
-        self._store.set("workspace.code_family", families)
-        self.changed.emit()
-
-    def _get_code_size(self) -> int:
-        return int(self._store.get("workspace.code_size"))
-
-    def _set_code_size(self, size: int) -> None:
-        self._store.set("workspace.code_size", size)
-        self.changed.emit()
-
-    def _get_keyboard_family(self) -> str:
-        return self._store.get("workspace.keyboard_family")
-
-    def _set_keyboard_family(self, families: str) -> None:
-        self._store.set("workspace.keyboard_family", families)
-        self.changed.emit()
-
-    def _get_keyboard_size(self) -> int:
-        return int(self._store.get("workspace.keyboard_size"))
-
-    def _set_keyboard_size(self, size: int) -> None:
-        self._store.set("workspace.keyboard_size", size)
-        self.changed.emit()
-
-    def _get_accent_shading(self) -> bool:
-        return bool(self._store.get("appearance.accent_shading"))
-
-    def _set_accent_shading(self, enabled: bool) -> None:
-        """Toggle the WinUI-style per-scheme finetuning of the accent."""
-        self._store.set("appearance.accent_shading", bool(enabled))
-        # The applied colour changes with it, so announce the accent too.
-        self.accentChanged.emit()
-        self.changed.emit()
-
-    def _get_accent_os_shading(self) -> bool:
-        return bool(self._store.get("appearance.accent_os_shading"))
-
-    def _set_accent_os_shading(self, enabled: bool) -> None:
-        """Prefer the OS's own per-scheme accent over our blend."""
-        self._store.set("appearance.accent_os_shading", bool(enabled))
-        self.accentChanged.emit()
-        self.changed.emit()
-
-    def _get_accent_os_shading_supported(self) -> bool:
-        """Whether this platform has OS accents at all — Windows, and only it.
-
-        The row is hidden entirely elsewhere rather than shown permanently
-        disabled: on a platform with no per-scheme accent it could never be
-        turned on, and a dead control is worse than an absent one.
-        """
-        return sys.platform == "win32"
-
-    def _get_accent_os_shading_available(self) -> bool:
-        """Whether the option would actually take effect right now.
-
-        Three conditions, all required: Windows, the **system** accent selected
-        (the OS only has an opinion about its own colour), and per-theme shading
-        on (with it off nothing is finetuned at all). The settings row states
-        these, since a disabled switch otherwise looks broken. The OS values must
-        also have been captured, or there is nothing to prefer.
-
-        The captured values are read straight out of ``self._system_accents`` and
-        never through ``_system_scheme_accent``: that one answers ``""`` while
-        this very option is *off* — it is where the opt-out lives — so asking it
-        here made the row's availability depend on the switch already being on.
-        Turning the option off disabled the row that turns it back on, and the
-        option became one-way.
-        """
-        if not self._get_accent_os_shading_supported():
-            return False
-        if self._get_accent_mode() != "system":
-            return False
-        if not self._get_accent_shading():
-            return False
-        return bool(self._system_accents.get("light") and self._system_accents.get("dark"))
-
-    def _get_latex_font(self) -> str:
-        return self._store.get("workspace.latex_font")
-
-    def _set_latex_font(self, family: str) -> None:
-        self._store.set("workspace.latex_font", family)
-        # `changed` is this property's notify and the signal `MainViewModel`
-        # re-assembles the shared `LatexStyle` on, so the emit is what makes a pick
-        # take effect: without it the family is stored while every surface goes on
-        # rendering the previous font (and the row's own "In use: …" note stays
-        # stale) until some unrelated setting happens to move.
-        self.changed.emit()
-
-    @Slot(str, result=bool)
-    def trySetLatexFont(self, family: str) -> bool:
-        """Apply ``family``, but only if ziamath can actually typeset with it.
-
-        The scan behind the dropdown is cheap on purpose, so a font whose MATH table
-        is present but unreadable can be in it. Proving it costs a real layout, which
-        is why it happens here — on the one font the user picked — rather than for
-        every candidate. A refusal stores the family for the page's dialog and leaves
-        the setting alone.
-        """
-        if not math_font_typesets(family):
-            self._latex_font_error = family
-            self.latexFontErrorChanged.emit()
-            return False
-        self._latex_font_error = ""
-        self.latexFontErrorChanged.emit()
-        self.latexFont = family
-        return True
-
-    def _get_code_font_family(self) -> str:
-        """The primary family of the code list (for display: "In use: …")."""
-        return self._first_installed(self._get_code_family())
-
-    def _get_keyboard_font_family(self) -> str:
-        """The primary family of the keyboard list (for display)."""
-        return self._first_installed(self._get_keyboard_family())
-
-    def _get_code_font(self) -> QFont:
-        """The code font, as a real Qt font with the whole family list.
-
-        ``QFont.setFamilies`` is what makes a *fallback* a fallback: Qt then
-        resolves each character against the families in order, so a glyph the
-        first face lacks is drawn from the next one that has it. QML cannot
-        express this — its ``font`` value type has no ``families``, only a single
-        ``family`` — so the font is built here and the pages bind
-        ``font: settingsVM.codeFont``. Passing the list through unmodified also
-        means an uninstalled name is simply skipped by Qt, exactly as the user
-        would expect.
-        """
-        return self._build_font(self._get_code_family(), self._get_code_size())
-
-    def _get_keyboard_font(self) -> QFont:
-        """The keyboard font, as a real Qt font with the whole family list."""
-        return self._build_font(
-            self._get_keyboard_family(), self._get_keyboard_size()
-        )
-
-    def _build_font(self, families: str, size: int) -> QFont:
-        """A ``QFont`` carrying ``families`` (keywords expanded) and ``size``.
-
-        The names go in unmodified — a name Qt cannot find is simply skipped
-        during lookup, so the user sees exactly the fallback behaviour they
-        wrote. Generic keywords are expanded first, because ``"monospace"`` is
-        not a family Qt can look up, and the result is de-duplicated while
-        keeping order (a keyword's candidates routinely repeat a family the user
-        also named, and repeating it in the chain buys nothing).
-        """
-        font = QFont()
-        names = [
-            candidate
-            for name in split_families(families)
-            for candidate in expand_keyword(name)
-        ]
-        if names:
-            font.setFamilies(list(dict.fromkeys(names)))
-        font.setPixelSize(int(size))
-        return font
-
-    def _installed_chain(self, families: str) -> list:
-        """The installed families of a list, in order (keywords expanded).
-
-        This is the chain Qt resolves characters against, so it is also what the
-        coverage report walks. See ``installed_chain`` at module level.
-        """
-        return installed_chain(families)
-
-    def _first_installed(self, families: str) -> str:
-        """The first installed family of a list (for display only).
-
-        The list is what the user types; a missing family is skipped so the note
-        names something that exists. With no application (headless tests) the
-        first name is returned unchanged — ``QFontDatabase.families()`` aborts
-        the process rather than raising when there is none.
-        """
-        names = split_families(families)
-        if not names:
-            return ""
-        if QGuiApplication.instance() is None:
-            return names[0]
-        chain = self._installed_chain(families)
-        return chain[0] if chain else names[0]
-
-    def _get_code_fallback_count(self) -> int:
-        """How many further installed faces back up the code font's primary one."""
-        return max(0, len(self._installed_chain(self._get_code_family())) - 1)
-
-    def _get_keyboard_fallback_count(self) -> int:
-        """How many further installed faces back up the keyboard font's primary."""
-        return max(0, len(self._installed_chain(self._get_keyboard_family())) - 1)
-
-    def _get_code_missing_glyphs(self) -> str:
-        """Glyphs no family in the code chain can draw ('' when the chain covers all).
-
-        Fallback-aware: a glyph is only reported when *every* family in the list
-        lacks it, because that is the case Qt cannot rescue.
-        """
-        return _chain_missing_glyphs(self._get_code_family(), CODE_GLYPHS)
-
-    def _get_keyboard_missing_glyphs(self) -> str:
-        """Glyphs no family in the keyboard chain can draw.
-
-        Measured against the glyphs the layout actually shows
-        (`keyboard_config.label_glyphs`), which is the only place a missing
-        character would be visible.
-        """
-        return _chain_missing_glyphs(
-            self._get_keyboard_family(), label_glyphs(self._keyboard_layout_path())
-        )
-
-    def _get_latex_font_error(self) -> str:
-        return self._latex_font_error
-
-    #: The family a refused pick named, so the page can say which font it was.
-    latexFontError = Property(
-        str, _get_latex_font_error, notify=latexFontErrorChanged
-    )
-
-    def _get_latex_font_path(self) -> str:
-        """The font *file* to hand ziamath ('' = its bundled STIX Two Math).
-
-        Resolved on read: turning a family into a path is a filesystem lookup
-        (and, for a font inside a collection, a one-off extraction).
-        """
-        return math_font_path(self._get_latex_font()) or ""
-
-    def _get_math_fonts(self) -> list:
-        """Names of the installed fonts that can render math, for the dropdown.
-
-        Read once per page build; the underlying scan is cached in
-        ``python/fonts.py``. The page prepends its own "Default" entry.
-        """
-        return [choice["family"] for choice in math_font_choices()]
-
-    # --- rendering --------------------------------------------------------
-
-    def _get_latex_size(self) -> int:
-        return int(self._store.get("workspace.latex_size"))
-
-    def _set_latex_size(self, size: int) -> None:
-        self._store.set("workspace.latex_size", size)
-        self.latexSizeChanged.emit()
-        self.changed.emit()
-
-    # --- window geometry --------------------------------------------------
-
-    def _get_zen_fullscreen(self) -> bool:
-        return bool(self._store.get("workspace.zen_fullscreen"))
-
-    def _set_zen_fullscreen(self, enabled: bool) -> None:
-        self._store.set("workspace.zen_fullscreen", bool(enabled))
-        self.changed.emit()
-
-    @Slot(bool)
-    def setGeometryTracking(self, enabled: bool) -> None:
-        """Suspend geometry persistence around a fullscreen Zen transition."""
-        enabled = bool(enabled)
-        if enabled == self._geometry_tracking_enabled:
-            return
-        if not enabled:
-            self._geometry_timer.stop()
-            self._save_geometry()
-        self._geometry_tracking_enabled = enabled
-        if enabled:
-            self._geometry_timer.start()
-
-    def _get_remember_window(self) -> bool:
-        return bool(self._store.get("window.remember"))
-
-    def _set_remember_window(self, remember: bool) -> None:
-        self._store.set("window.remember", remember)
-        if remember:
-            # Start remembering the current geometry AND wire the tracking
-            # signals: turning the toggle on mid-session must behave exactly
-            # like starting with it on (attachWindow skips the wiring when the
-            # toggle was off at startup).
-            self._save_geometry()
-            self._wire_geometry()
-        self.changed.emit()
-
-    @Slot(QObject)
-    def attachWindow(self, window: QObject) -> None:
-        """Restore and then remember the window geometry (called by MainWindow.qml).
-
-        Position is only restored when the saved point still falls on a screen —
-        otherwise a window remembered on a monitor that is now gone would open
-        off-screen.
-        """
-        self._window = window
-        if not self._get_remember_window():
-            return
-        self._restore_geometry()
-        self._wire_geometry()
-
-    def _wire_geometry(self) -> None:
-        """Connect the geometry-tracking signals once (idempotent)."""
-        window = self._window
-        if window is None or self._geometry_wired:
-            return
-        self._geometry_wired = True
-        for signal_name in ("widthChanged", "heightChanged", "xChanged", "yChanged"):
-            getattr(window, signal_name).connect(self._on_geometry_changed)
-        window.closing.connect(self._save_geometry)
-
-    def _on_geometry_changed(self, *_) -> None:
-        """Restart the debounce (window signals carry the new value as an int)."""
-        if self._geometry_tracking_enabled:
-            self._geometry_timer.start()
-
-    def _restore_geometry(self) -> None:
-        """Move the window to its remembered position, then maximize if it was.
-
-        The *size* is not set here on purpose: it comes from
-        ``MainWindow.qml``'s ``width``/``height`` bindings (see
-        :attr:`startupWidth`). Resizing the window at this point — while it is
-        still being created — and then maximizing it leaves the presentation
-        stale on Windows: the window fills the screen and Qt reports the right
-        sizes, but what is drawn stays in the old rectangle with a white border,
-        and later resizes do not repair it. Verified against RinUI 0.4.4.1; the window base is
-        unchanged in 0.5.0.
-
-        The *position* is applied even when the window starts maximized, because
-        Qt hands the window's declared x/y to the platform as its normal
-        geometry — the rect a maximized window returns to when it is restored
-        rather than dragged out. Left unset (the QML default is 0, 0) that rect
-        is the screen's corner, so a window that started maximized dropped there
-        on the first restore instead of where it had been.
-        """
-        window = self._window
-        if window is None:
-            return
-        x, y = self._store.get("window.x"), self._store.get("window.y")
-        if x is not None and y is not None and self._is_on_a_screen(int(x), int(y)):
-            window.setProperty("x", int(x))
-            window.setProperty("y", int(y))
-        if not bool(self._store.get("window.maximized")):
-            return
-        # Maximizing before the window is shown has the same stale-surface
-        # effect as resizing it, so the state is applied once the window is
-        # actually shown. MainWindow.qml declares `visible: true`, so at this
-        # point it usually already is — hence the timer fallback rather than
-        # only the signal.
-        if window.property("visible"):
-            QTimer.singleShot(0, self._apply_maximized_once)
-        else:
-            window.visibleChanged.connect(self._apply_maximized_once)
-            self._maximized_connected = True
-
-    def _apply_maximized_once(self, *_) -> None:
-        """Maximize after the window is shown, then stop listening."""
-        window = self._window
-        if window is None or not window.property("visible"):
-            return
-        if self._maximized_connected:
-            self._maximized_connected = False
-            try:
-                window.visibleChanged.disconnect(self._apply_maximized_once)
-            except (RuntimeError, TypeError):
-                pass
-        window.showMaximized()
-
-    def _startup_size(self) -> tuple[int, int]:
-        """The size the window should be *created* with.
-
-        Never larger than the screen the window will open on — a geometry saved
-        on a bigger monitor must not produce a window that cannot be reached.
-        """
-        width = int(self._store.get("window.width"))
-        height = int(self._store.get("window.height"))
-        app = QGuiApplication.instance()
-        screen = app.primaryScreen() if app is not None else None
-        if screen is not None:
-            available = screen.availableGeometry()
-            width = min(width, available.width())
-            height = min(height, available.height())
-        return width, height
-
-    def _get_startup_width(self) -> int:
-        if not self._get_remember_window():
-            return int(DEFAULTS["window"]["width"])
-        return self._startup_size()[0]
-
-    def _get_startup_height(self) -> int:
-        if not self._get_remember_window():
-            return int(DEFAULTS["window"]["height"])
-        return self._startup_size()[1]
-
-
-    def _is_on_a_screen(self, x: int, y: int) -> bool:
-        """Whether the point is still inside a connected screen's work area."""
-        screens = QGuiApplication.screens()
-        if not screens:
-            return True                      # headless (tests): do not block
-        point = QPoint(x, y)
-        return any(screen.availableGeometry().contains(point) for screen in screens)
-
-    def _save_geometry(self, *_) -> None:
-        """Persist the window geometry (debounced while dragging/resizing).
-
-        Accepts and ignores arguments: connected both to the debounce timer and
-        to ``Window.closing``, which passes a close event.
-        """
-        window = self._window
-        if (window is None or not self._geometry_tracking_enabled
-                or not self._get_remember_window()):
-            return
-        maximized = window.windowState() == Qt.WindowState.WindowMaximized
-        values: dict = {"window.maximized": maximized}
-        if not maximized:
-            # While maximized keep the last normal geometry, so un-maximizing
-            # after a restart lands somewhere sensible.
-            for key, name in (("window.width", "width"), ("window.height", "height"),
-                              ("window.x", "x"), ("window.y", "y")):
-                values[key] = int(window.property(name))
-        self._store.update(values)
-        self.changed.emit()
-
-    @Slot()
-    def resetWindow(self) -> None:
-        """Forget the remembered window geometry (the window itself stays put)."""
-        defaults = DEFAULTS["window"]
-        self._store.update({
-            "window.width": defaults["width"],
-            "window.height": defaults["height"],
-            "window.x": None,
-            "window.y": None,
-            "window.maximized": False,
-        })
-        self.changed.emit()
-
-    # --- custom keyboard --------------------------------------------------
-
-    def _keyboard_folder(self) -> Path:
-        return keyboard_dir(self._store.path.parent)
-
-    def _keyboard_layout_path(self) -> Path | None:
-        name = self._get_keyboard_layout()
-        return self._keyboard_folder() / name if name else None
-
-    def _get_keyboard_folder(self) -> str:
-        return str(self._keyboard_folder())
-
-    def _get_keyboard_layouts(self) -> list:
-        return [path.name for path in keyboard_files(self._keyboard_folder())]
-
-    def _get_keyboard_layout(self) -> str:
-        return self._store.get("workspace.keyboard_layout")
-
-    def _set_keyboard_layout(self, name: str) -> None:
-        name = name.strip() if isinstance(name, str) else ""
-        if name and name not in self._get_keyboard_layouts():
-            name = ""
-        self._store.set("workspace.keyboard_layout", name)
-        self.changed.emit()
-
-    def _get_keyboard_error(self) -> str:
-        return self._keyboard_error
-
-    @Slot(result=str)
-    def suggestKeyboardName(self) -> str:
-        """The next free ``myboard-N`` name, counted like a new variable."""
-        taken = {
-            Path(name).stem.casefold()
-            for name in self._get_keyboard_layouts()
-        }
-        counter = 1
-        while f"myboard-{counter}".casefold() in taken:
-            counter += 1
-        return f"myboard-{counter}"
-
-    @Slot()
-    def refreshKeyboardLayouts(self) -> None:
-        """Re-list the folder; reset a selection whose file has disappeared."""
-        names = self._get_keyboard_layouts()
-        self.keyboardLayoutsChanged.emit()
-        if self._get_keyboard_layout() not in [""] + names:
-            self._set_keyboard_layout("")
-
-    @Slot(str, str, result=str)
-    def newKeyboardLayout(self, name: str, source: str) -> str:
-        """Copy a layout into the settings folder under ``name`` and select it.
-
-        ``source`` is ``""`` for the shipped layout or a filename currently in
-        the keyboard folder. Returns the created filename, or ``""`` after
-        putting the reason in ``keyboardError``.
-        """
-        source_path: Path | None = None
-        if source:
-            if source not in self._get_keyboard_layouts():
-                self._keyboard_error = f"{source} is not in the keyboard folder"
-                self.keyboardErrorChanged.emit()
-                return ""
-            source_path = self._keyboard_folder() / source
-        try:
-            path = new_keyboard_file(
-                self._keyboard_folder(), source=source_path, name=name
-            )
-        except (OSError, ValueError) as exc:
-            self._keyboard_error = str(exc)
-            self.keyboardErrorChanged.emit()
-            return ""
-        self._keyboard_error = ""
-        self.keyboardErrorChanged.emit()
-        self.keyboardLayoutsChanged.emit()
-        self._set_keyboard_layout(path.name)
-        return path.name
-
-    @Slot()
-    def clearKeyboardError(self) -> None:
-        if not self._keyboard_error:
-            return
-        self._keyboard_error = ""
-        self.keyboardErrorChanged.emit()
-
-    @Slot()
-    def openKeyboardFolder(self) -> None:
-        """Open the settings-folder keyboards directory, creating it if needed."""
-        folder = self._keyboard_folder()
-        try:
-            folder.mkdir(parents=True, exist_ok=True)
-        except OSError as exc:
-            self._keyboard_error = str(exc)
-            self.keyboardErrorChanged.emit()
-            return
-        if self._keyboard_error:
-            self._keyboard_error = ""
-            self.keyboardErrorChanged.emit()
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
 
     # --- config file ------------------------------------------------------
 
@@ -1136,158 +341,180 @@ class SettingsViewModel(QObject):
             self.languageChanged.emit()
         self.accentChanged.emit()
         self.latexSizeChanged.emit()
+        # The reset touches every group, so every domain announces itself.
+        self.appearanceChanged.emit()
+        self.fontsChanged.emit()
+        self.windowChanged.emit()
+        self.keyboardChanged.emit()
+        self.configChanged.emit()
         self.changed.emit()
 
     # --- properties -------------------------------------------------------
 
-    theme = Property(str, _get_theme, _set_theme, notify=changed)
-    backdrop = Property(str, _get_backdrop, _set_backdrop, notify=changed)
-
-    def _get_code_theme(self) -> str:
-        return self._store.get("workspace.code_theme")
-
-    def _set_code_theme(self, family: str) -> None:
-        self._store.set("workspace.code_theme", family)
-        self.changed.emit()
-
-    @Slot(str, result=str)
-    def codeThemeLabel(self, family: str) -> str:
-        """A family's display name.
-
-        The ids and their labels live in ``python/code_themes.py``, so the page
-        does not repeat them — it only lists which id each row sets.
-        """
-        return family_label(family)
-
-    @Slot(bool, result="QVariantMap")
-    def codeSurface(self, dark: bool) -> dict[str, str]:
-        """The code theme's ``background``, ``ink`` and ``placeholder`` for a code input.
-
-        The page passes the *effective* theme, as it does for the highlighter
-        (RinUI resolves ``Auto``, so the setting is not the authority). An empty
-        value means the family has no opinion on that part and the control keeps
-        the UI theme's own colour.
-        """
-        background, ink, placeholder = code_surface(self._store.get("workspace.code_theme"), dark)
-        return {"background": background, "ink": ink, "placeholder": placeholder}
-
-    codeTheme = Property(str, _get_code_theme, _set_code_theme, notify=changed)
-
-    def _get_bracket_mode(self) -> str:
-        return self._store.get("workspace.bracket_mode")
-
-    def _set_bracket_mode(self, mode: str) -> None:
-        if mode == self._get_bracket_mode():
-            return
-        self._store.set("workspace.bracket_mode", mode)
-        self.changed.emit()
-
-    def _get_bracket_colors(self) -> str:
-        """The custom palette, as stored (normalised by the store)."""
-        return self._store.get("workspace.bracket_colors")
-
-    def _set_bracket_colors(self, colors: str) -> None:
-        """Store a custom palette; unusable entries are dropped, not rejected.
-
-        The field binds back to this, so what it shows after a commit is what
-        will actually be painted.
-        """
-        if colors == self._get_bracket_colors():
-            return
-        self._store.set("workspace.bracket_colors", colors)
-        self.changed.emit()
-
-    bracketMode = Property(str, _get_bracket_mode, _set_bracket_mode, notify=changed)
-    bracketColors = Property(str, _get_bracket_colors, _set_bracket_colors, notify=changed)
+    theme = Property(
+        str, AppearanceSettings._get_theme, AppearanceSettings._set_theme,
+        notify=appearanceChanged,
+    )
+    backdrop = Property(
+        str, AppearanceSettings._get_backdrop, AppearanceSettings._set_backdrop,
+        notify=appearanceChanged,
+    )
+    resultWatermark = Property(
+        str, AppearanceSettings._get_result_watermark,
+        AppearanceSettings._set_result_watermark, notify=appearanceChanged,
+    )
+    resultWatermarkPool = Property(
+        "QVariantList", AppearanceSettings._get_result_watermark_pool,
+        AppearanceSettings._set_result_watermark_pool, notify=appearanceChanged,
+    )
+    codeTheme = Property(
+        str, AppearanceSettings._get_code_theme, AppearanceSettings._set_code_theme,
+        notify=appearanceChanged,
+    )
+    bracketMode = Property(
+        str, AppearanceSettings._get_bracket_mode,
+        AppearanceSettings._set_bracket_mode, notify=appearanceChanged,
+    )
+    bracketColors = Property(
+        str, AppearanceSettings._get_bracket_colors,
+        AppearanceSettings._set_bracket_colors, notify=appearanceChanged,
+    )
     # `accent` is the colour in effect (mode resolved) and read-only: the modes
     # above decide it, `customAccent` is the only part the user picks directly.
-    accent = Property(str, _get_accent, notify=changed)
+    accent = Property(str, AppearanceSettings._get_accent, notify=appearanceChanged)
     accentMode = Property(
-        str, _get_accent_mode, _set_accent_mode, notify=changed
+        str, AppearanceSettings._get_accent_mode,
+        AppearanceSettings._set_accent_mode, notify=appearanceChanged,
     )
     accentShading = Property(
-        bool, _get_accent_shading, _set_accent_shading, notify=changed
+        bool, AppearanceSettings._get_accent_shading,
+        AppearanceSettings._set_accent_shading, notify=appearanceChanged,
     )
     # Whether the OS's own accents may be used instead of our blend, whether the
     # option exists on this platform at all, and whether it would take effect.
     accentOsShading = Property(
-        bool, _get_accent_os_shading, _set_accent_os_shading, notify=changed
+        bool, AppearanceSettings._get_accent_os_shading,
+        AppearanceSettings._set_accent_os_shading, notify=appearanceChanged,
     )
     accentOsShadingSupported = Property(
-        bool, _get_accent_os_shading_supported, notify=changed
+        bool, AppearanceSettings._get_accent_os_shading_supported,
+        notify=appearanceChanged,
     )
     accentOsShadingAvailable = Property(
-        bool, _get_accent_os_shading_available, notify=changed
+        bool, AppearanceSettings._get_accent_os_shading_available,
+        notify=appearanceChanged,
     )
     customAccent = Property(
-        str, _get_custom_accent, _set_custom_accent, notify=changed
-    )
-    latexSize = Property(int, _get_latex_size, _set_latex_size, notify=changed)
-    # Typography. `*Family` is the preference list the user typed (read back
-    # verbatim, so a fallback chain survives an edit); `*FontFamily` is the one
-    # family QML can use, resolved to the first installed entry. `latexFontPath`
-    # is a font FILE for ziamath, not a family.
-    codeFamily = Property(str, _get_code_family, _set_code_family, notify=changed)
-    codeFontFamily = Property(str, _get_code_font_family, notify=changed)
-    codeSize = Property(int, _get_code_size, _set_code_size, notify=changed)
-    keyboardFamily = Property(
-        str, _get_keyboard_family, _set_keyboard_family, notify=changed
-    )
-    keyboardFontFamily = Property(str, _get_keyboard_font_family, notify=changed)
-    # Glyphs that *no* family in the chain can draw ('' = the chain covers them
-    # all). Reported per chain, not per family: a gap in the primary face is not
-    # a problem when Qt falls back for it — see _chain_missing_glyphs.
-    codeMissingGlyphs = Property(str, _get_code_missing_glyphs, notify=changed)
-    keyboardMissingGlyphs = Property(
-        str, _get_keyboard_missing_glyphs, notify=changed
-    )
-    # The fonts themselves, as QFont values carrying the whole family list so Qt
-    # performs real per-character fallback. QML's `font` group cannot express a
-    # list, so pages bind `font: settingsVM.codeFont` instead of setting a family.
-    codeFont = Property(QFont, _get_code_font, notify=changed)
-    keyboardFont = Property(QFont, _get_keyboard_font, notify=changed)
-    # How many further installed faces back up the primary one — shown as
-    # "fallbacks: N" so the chain is visible without opening the config file.
-    codeFallbackCount = Property(int, _get_code_fallback_count, notify=changed)
-    keyboardFallbackCount = Property(
-        int, _get_keyboard_fallback_count, notify=changed
-    )
-    keyboardSize = Property(
-        int, _get_keyboard_size, _set_keyboard_size, notify=changed
+        str, AppearanceSettings._get_custom_accent,
+        AppearanceSettings._set_custom_accent, notify=appearanceChanged,
     )
     # The swatch strip beside the colour control: the WinUI variant family when
     # shading is on, the single flat colour when it is off. Read-only, and it
     # follows the accent in use rather than the stored custom colour.
-    accentPreview = Property("QVariantList", _get_accent_preview, notify=changed)
-    latexFont = Property(str, _get_latex_font, _set_latex_font, notify=changed)
-    latexFontPath = Property(str, _get_latex_font_path, notify=changed)
+    accentPreview = Property(
+        "QVariantList", AppearanceSettings._get_accent_preview,
+        notify=appearanceChanged,
+    )
+    latexSize = Property(
+        int, FontSettings._get_latex_size, FontSettings._set_latex_size,
+        notify=fontsChanged,
+    )
+    # Typography. `*Family` is the preference list the user typed (read back
+    # verbatim, so a fallback chain survives an edit); `*FontFamily` is the one
+    # family QML can use, resolved to the first installed entry. `latexFontPath`
+    # is a font FILE for ziamath, not a family.
+    codeFamily = Property(
+        str, FontSettings._get_code_family, FontSettings._set_code_family,
+        notify=fontsChanged,
+    )
+    codeFontFamily = Property(
+        str, FontSettings._get_code_font_family, notify=fontsChanged
+    )
+    codeSize = Property(
+        int, FontSettings._get_code_size, FontSettings._set_code_size,
+        notify=fontsChanged,
+    )
+    keyboardFamily = Property(
+        str, FontSettings._get_keyboard_family, FontSettings._set_keyboard_family,
+        notify=fontsChanged,
+    )
+    keyboardFontFamily = Property(
+        str, FontSettings._get_keyboard_font_family, notify=fontsChanged
+    )
+    # Glyphs that *no* family in the chain can draw ('' = the chain covers them
+    # all). Reported per chain, not per family: a gap in the primary face is not
+    # a problem when Qt falls back for it — see font_report.missing_glyphs.
+    codeMissingGlyphs = Property(
+        str, FontSettings._get_code_missing_glyphs, notify=fontsChanged
+    )
+    keyboardMissingGlyphs = Property(
+        str, FontSettings._get_keyboard_missing_glyphs, notify=fontsChanged
+    )
+    # The fonts themselves, as QFont values carrying the whole family list so Qt
+    # performs real per-character fallback. QML's `font` group cannot express a
+    # list, so pages bind `font: settingsVM.codeFont` instead of setting a family.
+    codeFont = Property(QFont, FontSettings._get_code_font, notify=fontsChanged)
+    keyboardFont = Property(
+        QFont, FontSettings._get_keyboard_font, notify=fontsChanged
+    )
+    # How many further installed faces back up the primary one — shown as
+    # "fallbacks: N" so the chain is visible without opening the config file.
+    codeFallbackCount = Property(
+        int, FontSettings._get_code_fallback_count, notify=fontsChanged
+    )
+    keyboardFallbackCount = Property(
+        int, FontSettings._get_keyboard_fallback_count, notify=fontsChanged
+    )
+    keyboardSize = Property(
+        int, FontSettings._get_keyboard_size, FontSettings._set_keyboard_size,
+        notify=fontsChanged,
+    )
+    latexFont = Property(
+        str, FontSettings._get_latex_font, FontSettings._set_latex_font,
+        notify=fontsChanged,
+    )
+    latexFontPath = Property(
+        str, FontSettings._get_latex_font_path, notify=fontsChanged
+    )
+    # The family a refused pick named, so the page can say which font it was.
+    latexFontError = Property(
+        str, FontSettings._get_latex_font_error, notify=latexFontErrorChanged
+    )
     # The system fonts that can render math, for the LaTeX font dropdown. Read
     # once per page build (the scan behind it is cached); it only changes when
     # the user installs a font, which a restart picks up.
-    mathFonts = Property("QVariantList", _get_math_fonts, constant=True)
+    mathFonts = Property("QVariantList", FontSettings._get_math_fonts, constant=True)
     rememberWindow = Property(
-        bool, _get_remember_window, _set_remember_window, notify=changed
+        bool, WindowSettings._get_remember_window,
+        WindowSettings._set_remember_window, notify=windowChanged,
     )
     zenFullscreen = Property(
-        bool, _get_zen_fullscreen, _set_zen_fullscreen, notify=changed
+        bool, WindowSettings._get_zen_fullscreen,
+        WindowSettings._set_zen_fullscreen, notify=windowChanged,
     )
     # Read once by MainWindow.qml to size the window at creation (see
     # _restore_geometry for why the size must not be assigned later).
-    startupWidth = Property(int, _get_startup_width, constant=True)
-    startupHeight = Property(int, _get_startup_height, constant=True)
+    startupWidth = Property(int, WindowSettings._get_startup_width, constant=True)
+    startupHeight = Property(int, WindowSettings._get_startup_height, constant=True)
     configPath = Property(str, _get_config_path, constant=True)
     configMode = Property(str, _get_config_mode, constant=True)
+    # `warning` notifies on `changed`, not on `configChanged`: the store raises it
+    # from inside a *write*, and every setter emits `changed`, so the row appears
+    # the moment a save fails. `configChanged` is the reset's announcement of the
+    # config-write status.
     warning = Property(str, _get_warning, notify=changed)
     #: The folder holding user keyboard copies, and the filenames it offers.
-    keyboardFolder = Property(str, _get_keyboard_folder, constant=True)
+    keyboardFolder = Property(
+        str, KeyboardSettings._get_keyboard_folder, constant=True
+    )
     keyboardLayouts = Property(
-        "QVariantList", _get_keyboard_layouts, notify=keyboardLayoutsChanged
+        "QVariantList", KeyboardSettings._get_keyboard_layouts,
+        notify=keyboardLayoutsChanged,
     )
     keyboardLayout = Property(
-        str, _get_keyboard_layout, _set_keyboard_layout, notify=changed
+        str, KeyboardSettings._get_keyboard_layout,
+        KeyboardSettings._set_keyboard_layout, notify=keyboardChanged,
     )
     keyboardError = Property(
-        str, _get_keyboard_error, notify=keyboardErrorChanged
+        str, KeyboardSettings._get_keyboard_error, notify=keyboardErrorChanged
     )
-
-

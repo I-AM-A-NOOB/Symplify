@@ -22,9 +22,10 @@ the Model decides nothing about display.
 ### 1.1 运行时执行域：主线程、渲染进程、worker 进程
 
 这张图回答“代码在哪跑”，而不是“数据长什么样”。`ProcessBackend` 仍在 Qt 主线程；
-计算 worker 和 LaTeX 渲染器都是独立进程。Calculator 的结果/变体与 History 的卡片
-共用渲染进程；键盘 keycap 和 Variables 详情仍在主线程同步渲染（短任务，且由
-`render_data_url` 的内部锁串行化）。
+计算 worker、Variables worker 和 LaTeX 渲染器都是独立进程。Calculator 的结果/变体、
+History 的卡片和键盘 keycap 共用渲染进程；Variables 详情面板仍在主线程同步渲染
+（短任务，且由 `render_data_url` 的内部锁串行化）。Variables worker 只在 Variables
+页打开时启动，空闲 60 s 或离开页面且无写入时回收，下一次编辑再重启。
 
 ```mermaid
 flowchart LR
@@ -36,10 +37,11 @@ flowchart LR
             VM["ViewModels<br/>状态与 Qt 信号"]
             STATE["VariableManager · HistoryModel · LogViewModel<br/>内存状态，UI 持有"]
             PLOT["qmlmathplot<br/>Plot / PlotView（GPU）"]
-            PB["ProcessBackend<br/>2 ms 轮询 · 超时 · 取消"]
+            PB["ProcessBackend<br/>Calculator · 2 ms 轮询 · 超时 · 取消"]
+            VPB["Variables ProcessBackend<br/>独立 worker · 队列 · 超时"]
             IB["InlineBackend<br/>测试 / headless"]
-            LOCAL["Calculator<br/>Variables 页同步调用"]
             TEXS["LatexRenderService<br/>LRU 缓存 · token 映射"]
+            VARDET["Variables 详情<br/>latexFor 同步渲染"]
         end
     end
 
@@ -47,12 +49,18 @@ flowchart LR
         TEXW["render_worker_main<br/>ziamath"]
     end
 
-    subgraph WORK["计算 worker 进程（零 Qt）"]
+    subgraph WORK["Calculator worker 进程（零 Qt）"]
         W["worker_main<br/>Calculator"]
-        P["safe AST parser<br/>空 __builtins__"]
+        P["safe AST parser<br/>方法/属性白名单"]
         S["SymPy"]
         V["variants()<br/>simplify / doit / N / expand / factor"]
         L["Job Object / rlimits<br/>资源与进程限制"]
+    end
+
+    subgraph VARWORK["Variables worker 进程（零 Qt）"]
+        VW["worker_main<br/>Calculator"]
+        VP["safe AST parser<br/>方法/属性白名单"]
+        VS["SymPy"]
     end
 
     STORE["SettingsStore<br/>YAML，持久化"]
@@ -61,12 +69,13 @@ flowchart LR
     VM <-->|"读写"| STATE
     VM <-->|"设置"| STORE
 
-    VM -->|"请求：id, kind, payload,<br/>scope 快照"| PB
+    VM -->|"Calculator 请求：id, kind,<br/>payload, scope 快照"| PB
     PB -->|"① 结果 finished"| VM
     PB -->|"② variantsReady<br/>（可选，2 s）"| VM
     VM -.->|"仅测试"| IB
-    VM -->|"Variables 页编辑"| LOCAL
-    LOCAL <-->|"同进程 scope"| STATE
+
+    VM -->|"Variables add/update<br/>排队后逐个提交"| VPB
+    VPB -->|"结果 / 超时 / 失败"| VM
 
     PB <-->|"pickled duplex pipe<br/>result / variants"| W
     W --> P
@@ -74,17 +83,22 @@ flowchart LR
     S --> V
     L -.->|"资源限制"| W
 
-    VM -->|"结果/变体/History LaTeX + style"| TEXS
+    VPB <-->|"pickled duplex pipe<br/>assign 结果"| VW
+    VW --> VP
+    VP --> VS
+
+    VM -->|"结果/变体/History/keycap<br/>LaTeX + style"| TEXS
     TEXS <-->|"pickled pipe"| TEXW
     TEXS -->|"token: SVG + 尺寸"| VM
+    VM -->|"Variables 详情"| VARDET
     VM -->|"曲线 / 主题 / 交互"| PLOT
 ```
 
 ### 1.2 逻辑数据流：Model 语义
 
-> 这一张是**逻辑数据流**，不表示线程位置。实际执行域以 1.1 为准：`C1`–`C4` 在 app 的
-> worker 进程里运行；`C6`、输出和 Qt 对象在主线程；`B3`/`B4` 的 Variables 页路径仍是
-> 主线程内的同步调用。
+> 这一张是**逻辑数据流**，不表示线程位置。实际执行域以 1.1 为准：`C1`–`C4` 在对应
+> worker（Calculator 或 Variables）里运行；`C6`、输出和 Qt 对象在主线程；`B3`/`B4`
+> 经 Variables 的独立 worker。
 
 ```mermaid
 flowchart TB
@@ -99,13 +113,13 @@ flowchart TB
     subgraph VML["② ViewModel 入口（Qt 边界）"]
         B1["CalculatorViewModel.calculate"]
         B2["calculateAssign<br/>构造 Assignment(name, op, 原文)"]
-        B3["VariablesViewModel._assign<br/>Assignment(name, '=', 原文)"]
-        B4["VariablesModel.setData → _parse"]
-        B5["CalculationBackend<br/>InlineBackend (tests) / ProcessBackend (app)<br/>timeout · cancel · stale request ids"]
-        C7["Calculator.evaluate / Calculator.assign<br/>Variables 页同步路径（主线程）"]
+        B3["VariablesViewModel.addVariable / updateVariable<br/>VariablesModel 队列"]
+        B4["VariablesModel.setData → add/update<br/>第 0 列改名 / 第 1 列改表达式"]
+        B5["Calculator ProcessBackend<br/>InlineBackend (tests) / ProcessBackend (app)<br/>timeout · cancel · stale request ids"]
+        B6["Variables ProcessBackend<br/>独立 worker · 队列 · timeout"]
     end
 
-    subgraph MOD["③ Model（纯 Python · 零 Qt）<br/>app 中在 worker 进程"]
+    subgraph MOD["③ Model（纯 Python · 零 Qt）<br/>app 中在对应 worker 进程"]
         C1["Calculator.evaluate / Calculator.assign<br/>两个请求，共用一个解析器"]
         C2["unknown_calls 审计<br/>未知调用 → UNKNOWN_NAME<br/>否则 parse_expr（隐式乘法 + convert_xor）"]
         C3["sympy 值"]
@@ -136,8 +150,9 @@ flowchart TB
     B1 --> B5
     B2 --> B5
     B5 -->|"evaluate / assign + scope"| C1
-    B3 --> C7
-    B4 -->|"只读求值"| C7
+    B3 --> B6
+    B4 --> B6
+    B6 -->|"assign + scope"| C1
     C1 --> C2
     C2 --> C3
     C3 --> C4
@@ -146,9 +161,8 @@ flowchart TB
 
     C3 -->|"赋值：写回（跨进程）"| C6
     C6 -.->|"list_all() 作为 scope 快照"| C1
-    C6 -.->|"同进程 scope"| C7
     C6 -.->|"is_sympy_builtin(name)"| D6
-    C7 -->|"同步返回"| R["ViewModel 分发"]
+    B6 -->|"异步 finished / timedOut / failed"| R["ViewModel 分发"]
 
     C5 -->|"返回给调用它的 VM"| R
     R --> D1
@@ -161,8 +175,9 @@ flowchart TB
 What the diagram is saying:
 
 - **执行域看 1.1，数据语义看 1.2。** Calculator 的 Code/Assign 请求穿过
-  `ProcessBackend`，在 worker 进程里调用 `Calculator`；Variables 页的 B3/B4 仍走
-  主线程的 `C7`；Calculator 和 History 的 LaTeX SVG 由独立渲染进程生成。
+  `ProcessBackend`，在 worker 进程里调用 `Calculator`；Variables 页的 B3/B4 经
+  Variables 的独立 worker（B6）；Calculator、Variables、History 和 keycap 的
+  LaTeX SVG 由独立渲染进程生成。
 - **Four UI routes, two model requests.** Code mode, Assign mode, the Variables
   toolbar and the table's inline edit all end in `evaluate` (read) or `assign`
   (write); no route assembles an expression string of its own any more.
@@ -180,8 +195,10 @@ What the diagram is saying:
   their LaTeX from an isolated renderer process; the result and variant images
   arrive by token. History uses the same process and cache. Timeouts become `Failure(ErrorKind.TIMEOUT)` and are recorded like any
   other failure; the result header shows the backend status. The Variables
-  page's own routes (B3/B4) still call the in-process `Calculator` synchronously
-  — the next slice of the separation.
+  page's own routes (B3/B4) cross a second backend (B6): `VariablesModel` queues
+  one `assign` at a time, applies the answer when it arrives, and
+  `variableAdded(name, ok)` drives the page's selection. The in-process
+  `Calculator` remains only for tests/headless.
 - **`scope` is the second input channel.** `VariableManager.list_all()` (valid
   entries only) is handed to `parse_expr` as `local_dict`, so saved variables
   resolve as symbols; names that resolve to nothing stay symbolic.

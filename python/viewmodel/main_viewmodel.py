@@ -4,6 +4,7 @@ Aggregates the sub-viewmodels and is exposed to QML as the ``vm``
 context property.
 """
 
+import time
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,7 @@ from PySide6.QtCore import (
     QEvent,
     QObject,
     Qt,
+    QTimer,
     Signal,
     Slot,
 )
@@ -23,13 +25,14 @@ from .. import log_capture
 from ..brackets import parse_colors
 from ..code_style import Style, theme, to_rich_text
 from ..keyboard_config import load_keyboard_layout
-from ..latex_render import LatexStyle, render_data_url
+from ..latex_render import LatexStyle
 from ..model.calculator import Calculator
 from ..model.variable import VariableManager
 from ..settings import SettingsStore
 from .calculator_viewmodel import CalculatorViewModel
 from .highlighter import attach
-from .history_viewmodel import HistoryModel
+from .history_viewmodel import HistoryModel, HistoryWindowModel
+from .latex_jobs import LatexJobs
 from .latex_service import LatexRenderService
 from .log_viewmodel import LogViewModel
 from .search import HistoryFilterModel, VariablesFilterModel
@@ -52,6 +55,9 @@ class MainViewModel(QObject):
     sendToAssign = Signal(str, str, str)
     #: `keyboardRevision` changed: LaTeX keycaps must ask for new artwork.
     keyboardStyleChanged = Signal()
+    #: A batch of keycap artwork arrived (a QML binding dependency: the cache
+    #: changed without any property the binding already named).
+    keycapArtChanged = Signal()
     #: The selected custom keyboard file (or the shipped default) changed.
     keyboardTabsChanged = Signal()
     keyboardLoadErrorChanged = Signal()
@@ -66,6 +72,7 @@ class MainViewModel(QObject):
         parent: QObject | None = None,
         initial_variables: Mapping[str, Any] | None = None,
         calculation_backend: QObject | None = None,
+        variables_backend: QObject | None = None,
         translation_dir: Path | None = None,
         icon_dir: Path | None = None,
     ):
@@ -85,6 +92,11 @@ class MainViewModel(QObject):
             calculation_backend: How calculation requests leave the UI. None
                 keeps the synchronous in-process backend (tests/headless); the
                 application passes a ``ProcessBackend`` with a timeout.
+            variables_backend: The dedicated worker for the Variables page's
+                add/update writes. None keeps those writes in-process
+                (tests/headless); the application passes a second
+                ``ProcessBackend`` so variable edits also have a deadline and
+                never run on the UI thread.
             translation_dir: Folder with compiled ``symplify_<code>.qm`` files
                 (and the ``rinui_<code>.qm`` fragments); defaults to the
                 repository's ``i18n/``.
@@ -105,7 +117,11 @@ class MainViewModel(QObject):
         self._history = HistoryModel(parent=self, latex_service=self._latex_service)
         self._log = LogViewModel(parent=self)
         self._variables_vm = VariablesViewModel(
-            self._variable_manager, self._log, self._calculator, parent=self
+            self._variable_manager,
+            self._log,
+            self._calculator,
+            backend=variables_backend,
+            parent=self,
         )
         self._calculator_vm = CalculatorViewModel(
             self._variable_manager,
@@ -122,8 +138,14 @@ class MainViewModel(QObject):
         # source models keep every entry regardless of an active query.
         self._variables_filter = VariablesFilterModel(parent=self)
         self._variables_filter.setSourceModel(self._variables_vm.model)
+        self._variables_vm.attach_filter(self._variables_filter)
         self._history_filter = HistoryFilterModel(parent=self)
         self._history_filter.setSourceModel(self._history)
+        #: The revealed slice of the filtered history; the page's `Repeater`
+        #: builds one card per row, so this is what keeps a long history from
+        #: building every card when the page opens.
+        self._history_window = HistoryWindowModel(parent=self)
+        self._history_window.setSourceModel(self._history_filter)
 
         #: The theme's ink for rendered LaTeX, pushed from QML: the theme colours
         #: are translucent QColors, and turning one into the string the renderer
@@ -135,23 +157,69 @@ class MainViewModel(QObject):
         self._keycap_style: LatexStyle | None = None
         self._keycap_revision = 0
         self._keycap_cache: dict = {}
+        #: Keycap artwork is rendered by the shared renderer process: the QML
+        #: binding asks for a key and gets a cache hit or `{}` (the plain label),
+        #: and `keycapArtRevision` re-evaluates it once a batch has arrived.
+        self._keycap_jobs = LatexJobs(self._latex_service, "keycaps", self)
+        self._keycap_jobs.rendered.connect(self._on_keycap_rendered)
+        self._keycap_jobs.failed.connect(self._on_keycap_failed)
+        self._keycap_pending: set[tuple[str, int]] = set()
+        self._keycap_art_revision = 0
+        self._keycap_art_timer = QTimer(self)
+        self._keycap_art_timer.setSingleShot(True)
+        self._keycap_art_timer.setInterval(16)
+        self._keycap_art_timer.timeout.connect(self._flush_keycap_art)
+        #: A size/font burst: the first change applies at once, later steps only
+        #: move the style, and one artwork refresh runs when the cooldown ends.
+        self._style_timer = QTimer(self)
+        self._style_timer.setSingleShot(True)
+        self._style_timer.setInterval(180)
+        self._style_timer.timeout.connect(self._flush_latex_style)
+        self._style_pending = False
+        #: Monotonic end of the current burst window; the timer is the live-app
+        #: flush (a headless caller calls `_flush_latex_style` itself).
+        self._style_cooldown_until = 0.0
+        #: The `LatexStyle` currently handed to the renderers (the last one built).
+        self._active_latex_style: LatexStyle | None = None
         #: Attached code highlighters, by their QTextDocument. A theme switch
         #: changes the palette in place instead of rebuilding the page, so the
         #: C++ highlighter needs an explicit recolour (see
         #: `refreshCodeHighlighting`). The document owns the highlighter; the
         #: destroyed hook only drops the dictionary entry.
         self._code_highlighters: dict = {}
+        #: Rich-text markup memo for the read-only labels: `(plain text, dark,
+        #: scope revision) -> markup`. A table cell's binding is re-evaluated on
+        #: every resize frame while the details panel animates, and each call used
+        #: to re-tokenize the same text and rebuild the same palette dict. Cleared
+        #: by `_invalidate_scope` (a variable moved) and by any appearance change.
+        self._markup_cache: dict[tuple, str] = {}
+        self._scope_revision = 0
+        #: The palette is two dicts built per code family; the same pair is asked
+        #: for by every cell and every card, so it is kept per theme side until an
+        #: appearance setting moves.
+        self._palette_cache: dict[bool, tuple] = {}
+        #: The code font's metrics, built once per font change: constructing it per
+        #: cell per frame was the largest part of the elided-label cost.
+        self._code_font_metrics: QFontMetricsF | None = None
 
         self._settings = SettingsViewModel(
             settings, theme_manager, parent=self, translation_dir=translation_dir
         )
-        self._settings.latexSizeChanged.connect(self._apply_latex_style)
-        # `changed` rather than a font-specific signal: `latexFontPath` is a
-        # filesystem path resolved by `python/fonts.py`, so it is re-read on every
-        # settings change rather than only when the family name changes.
-        self._settings.changed.connect(self._apply_latex_style)
-        self._settings.changed.connect(self._apply_watermark)
-        self._settings.changed.connect(self._refresh_keyboard_layout)
+        # Fonts: the assembled `LatexStyle` is re-read when a face or its size
+        # changes (the path is resolved from the font name, so it moves with it).
+        self._settings.fontsChanged.connect(self._on_fonts_changed)
+        # The watermark's kind and pool are appearance; the keyboard selection
+        # reloads the layout model on its own channel. Neither needs a window
+        # resize or an unrelated setting to have moved.
+        self._settings.appearanceChanged.connect(self._apply_watermark)
+        self._settings.appearanceChanged.connect(self._invalidate_palette)
+        self._settings.keyboardChanged.connect(self._refresh_keyboard_layout)
+        #: Any variable write changes what a name resolves to, so the markup memo
+        #: and the highlighters' scope provider must see the new snapshot.
+        model = self._variables_vm.model
+        for signal in (model.rowsInserted, model.rowsRemoved, model.modelReset,
+                       model.dataChanged, model.layoutChanged):
+            signal.connect(self._invalidate_scope)
         self._keyboard_layout = self._settings.keyboardLayout
         self._zen_mode = False
         self._keyboard_load_error = ""
@@ -204,7 +272,7 @@ class MainViewModel(QObject):
             self._settings.resultWatermark, self._settings.resultWatermarkPool
         )
 
-    def _apply_latex_style(self) -> None:
+    def _apply_latex_style(self, rerender: bool = True) -> bool:
         """Hand the assembled `LatexStyle` to every surface that renders LaTeX.
 
         One place owns it — the ink comes from the theme, the size and the font
@@ -212,15 +280,26 @@ class MainViewModel(QObject):
         Each keeps its own cache, because their policies differ: the calculator
         holds one result, the history renders each entry once, and the details
         panel renders one row and keeps nothing.
+
+        Returns True when the *LaTeX* style actually moved (a code-font change
+        emits `fontsChanged` too, and must not re-render every formula). The
+        keycap style is checked independently: its size can change without the
+        result style changing.
         """
+        # The code font's metrics belong to the same font settings; the elided
+        # labels are the only consumer, and they must not keep the old face.
+        self._code_font_metrics = None
         style = LatexStyle(
             color=self._latex_color,
             size=self._settings.latexSize,
             font=self._settings.latexFontPath,
         )
-        self._calculator_vm.set_latex_style(style)
-        self._history.set_latex_style(style)
-        self._variables_filter.set_latex_style(style)
+        changed = style != self._active_latex_style
+        self._active_latex_style = style
+        if changed:
+            self._calculator_vm.set_latex_style(style, rerender=rerender)
+            self._history.set_latex_style(style, invalidate=rerender)
+            self._variables_vm.set_latex_style(style)
 
         # Keycaps share the ink and the LaTeX font, but use the keyboard font
         # size: changing the result size must not resize the keyboard, and
@@ -235,8 +314,41 @@ class MainViewModel(QObject):
         if keycap_style != self._keycap_style:
             self._keycap_style = keycap_style
             self._keycap_revision += 1
+            self._keycap_jobs.reset()
+            self._keycap_pending.clear()
             self._keycap_cache.clear()
             self.keyboardStyleChanged.emit()
+        return changed
+
+    def _on_fonts_changed(self) -> None:
+        """Apply a font/size change now; coalesce a burst's re-render.
+
+        A single change (one pick, one size) must be visible at once; a spin
+        box's steps within the cooldown only move the style, and one refresh
+        runs when it ends. A change that does not move the LaTeX style (a code
+        font family, say) returns False and schedules nothing.
+        """
+        burst = time.monotonic() < self._style_cooldown_until
+        changed = self._apply_latex_style(rerender=not burst)
+        if not changed:
+            return
+        if burst:
+            self._style_pending = True
+            return
+        self._style_cooldown_until = time.monotonic() + 0.18
+        if QCoreApplication.instance() is not None:
+            self._style_timer.start()
+
+    def _flush_latex_style(self) -> None:
+        """Re-render the result and history once, at the end of a burst."""
+        if QCoreApplication.instance() is not None:
+            self._style_timer.stop()
+        self._style_cooldown_until = 0.0
+        if not self._style_pending:
+            return
+        self._style_pending = False
+        self._calculator_vm.refresh_latex_artwork()
+        self._history.refresh_latex_artwork()
 
     def _keyboard_layout_path(self) -> Path | None:
         """The chosen custom file, or None for the shipped layout."""
@@ -343,13 +455,27 @@ class MainViewModel(QObject):
         """
         return self._keycap_revision
 
+    @Property(int, notify=keycapArtChanged)
+    def keycapArtRevision(self) -> int:
+        """Bumped when a batch of keycap artwork arrived.
+
+        The cache is not a QML property, so this is the dependency the key grid
+        names to re-read it; completions are coalesced into one bump per 16 ms.
+        """
+        return self._keycap_art_revision
+
     @Slot(str, int, result="QVariantMap")
     def latexKeycap(self, latex: str, revision: int) -> dict:
-        """Rendered LaTeX keycap for one key, as ``{url, width, height}``.
+        """Keycap artwork for one key, as ``{url, width, height}``.
 
-        Rendered lazily, only for the visible tab, and cached per revision; an
-        empty ``url`` means ziamath refused the source and the QML key falls
-        back to its plain ``label``. The size/font are the keycap style built in
+        Asynchronous: the first call asks the shared renderer and answers ``{}``
+        so QML draws the plain ``label``; `keycapArtRevision` re-evaluates the
+        binding when the batch lands. With no QCoreApplication the service
+        renders inline, and the cache is filled before this method returns, so
+        headless callers get the artwork on the first call.
+
+        An empty ``url`` means ziamath refused the source, and the QML key falls
+        back to its label. The size/font are the keycap style built in
         `_apply_latex_style` (LaTeX font, keyboard size), not the result style.
         """
         if not latex:
@@ -358,10 +484,41 @@ class MainViewModel(QObject):
         cached = self._keycap_cache.get(key)
         if cached is not None:
             return cached
-        url, width, height = render_data_url(latex, self._keycap_style or LatexStyle())
-        cached = {"url": url, "width": width, "height": height}
-        self._keycap_cache[key] = cached
-        return cached
+        if key not in self._keycap_pending:
+            self._keycap_pending.add(key)
+            self._keycap_jobs.request(
+                key, latex, self._keycap_style or LatexStyle()
+            )
+        cached = self._keycap_cache.get(key)
+        if cached is not None:
+            return cached
+        # Not rendered yet: the same shape as a refused source, so QML's
+        # `cap.url === ""` fallback and its Image.source stay well-typed.
+        return {"url": "", "width": 0, "height": 0}
+
+    def _on_keycap_rendered(
+        self, target: tuple[str, int], url: str, width: int, height: int
+    ) -> None:
+        self._keycap_pending.discard(target)
+        self._keycap_cache[target] = {
+            "url": url, "width": width, "height": height,
+        }
+        self._schedule_keycap_art()
+
+    def _on_keycap_failed(self, target: tuple[str, int], message: str) -> None:
+        self._keycap_pending.discard(target)
+        self._keycap_cache[target] = {"url": "", "width": 0, "height": 0}
+        self._log.add_warning(f"LaTeX keycap render failed: {message}", "Keyboard")
+        self._schedule_keycap_art()
+
+    def _schedule_keycap_art(self) -> None:
+        if (QCoreApplication.instance() is not None
+                and not self._keycap_art_timer.isActive()):
+            self._keycap_art_timer.start()
+
+    def _flush_keycap_art(self) -> None:
+        self._keycap_art_revision += 1
+        self.keycapArtChanged.emit()
 
     @Property(QObject, constant=True)
     def calculator(self) -> CalculatorViewModel:
@@ -394,6 +551,11 @@ class MainViewModel(QObject):
         return self._history_filter
 
     @Property(QObject, constant=True)
+    def historyWindow(self) -> HistoryWindowModel:
+        """The revealed slice of the filtered history (the page's card model)."""
+        return self._history_window
+
+    @Property(QObject, constant=True)
     def settings(self) -> SettingsViewModel:
         """The settings viewmodel (appearance, workspace, window, config path)."""
         return self._settings
@@ -414,10 +576,45 @@ class MainViewModel(QObject):
         falls back to for a palette it is handed none of, so the two agree even
         if one ever arrived empty.
         """
+        cached = self._palette_cache.get(dark)
+        if cached is not None:
+            return cached
         styles, brackets = theme(self._settings.codeTheme, dark)
         if self._settings.bracketMode == "custom":
-            return styles, parse_colors(self._settings.bracketColors)
+            brackets = parse_colors(self._settings.bracketColors)
+        self._palette_cache[dark] = (styles, brackets)
         return styles, brackets
+
+    def _invalidate_scope(self, *_args) -> None:
+        """A variable was written: markup classified names against the old scope."""
+        self._scope_revision += 1
+        self._markup_cache.clear()
+
+    def _invalidate_palette(self, *_args) -> None:
+        """An appearance setting moved: the palette and every markup it painted."""
+        self._palette_cache.clear()
+        self._markup_cache.clear()
+
+    def _code_metrics(self) -> QFontMetricsF:
+        """The code font's metrics, built once per font change."""
+        if self._code_font_metrics is None:
+            self._code_font_metrics = QFontMetricsF(self._settings.codeFont)
+        return self._code_font_metrics
+
+    def _markup(self, text: str, dark: bool) -> str:
+        """``text`` as markup, memoized by text, theme side and scope revision."""
+        key = (text, dark, self._scope_revision)
+        cached = self._markup_cache.get(key)
+        if cached is not None:
+            return cached
+        styles, bracket_colors = self._palette(dark)
+        markup = to_rich_text(
+            text, self._variable_manager.list_all(), styles, bracket_colors
+        )
+        if len(self._markup_cache) >= 512:
+            self._markup_cache.clear()
+        self._markup_cache[key] = markup
+        return markup
 
     @Slot(QObject, bool)
     def attachCodeHighlighting(self, text_document: QObject, dark: bool) -> None:
@@ -480,9 +677,10 @@ class MainViewModel(QObject):
 
         The scope is resolved here, once: ``to_rich_text`` takes a mapping, where
         the highlighter takes the *provider* so it can ask again on every keystroke.
+        The result is memoized (see `_markup`): a table cell is re-evaluated on
+        every resize frame while the details panel animates.
         """
-        styles, bracket_colors = self._palette(dark)
-        return to_rich_text(text, self._variable_manager.list_all(), styles, bracket_colors)
+        return self._markup(text, dark)
 
     @Slot(str, float, bool, result=str)
     def highlightedElided(self, text: str, width: float, dark: bool) -> str:
@@ -505,18 +703,17 @@ class MainViewModel(QObject):
         """
         if width <= 0 or not text:
             return ""
-        plain = QFontMetricsF(self._settings.codeFont).elidedText(
+        plain = self._code_metrics().elidedText(
             text, Qt.TextElideMode.ElideRight, width
         )
-        styles, bracket_colors = self._palette(dark)
         # The elision mark stays *outside* the spans, so it inherits the label's
         # own colour instead of the last token's — a truncated number would
-        # otherwise end in a pink/red `…` whatever it truncates.
+        # otherwise end in a pink/red `…` whatever it truncates. `_markup` is the
+        # same memo the unelided labels use, so a frame that elides to the same
+        # text costs a dictionary lookup.
         if plain.endswith("\u2026"):
-            body = to_rich_text(plain[:-1], self._variable_manager.list_all(),
-                                styles, bracket_colors)
-            return body + "\u2026"
-        return to_rich_text(plain, self._variable_manager.list_all(), styles, bracket_colors)
+            return self._markup(plain[:-1], dark) + "\u2026"
+        return self._markup(plain, dark)
 
     @Slot()
     def focusNext(self) -> None:

@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
 
+from .plotting import is_plot_variable, plot_variable_warning
+
 #: Names sympy already defines, which a variable would shadow. User input is
 #: resolved against sympy's namespace, so these are exactly the names that can
 #: silently change what an expression means.
@@ -46,6 +48,23 @@ def sympy_callables() -> frozenset:
 def is_sympy_name(name: str) -> bool:
     """True when ``name`` is a sympy constant or callable the parser resolves."""
     return name in SYMPY_CONSTANTS or name in sympy_callables()
+
+
+def reserved_name_warning(name: str) -> str | None:
+    """Why ``name`` changes what input means, or None for an ordinary name.
+
+    Two kinds exist: a SymPy built-in (the expression language already defines
+    the name, so assigning it rewrites what every later expression means) and a
+    plotting variable (the plot reads it). Every write route asks this one
+    function — the table's inline edit, the Variables page's CRUD and the
+    calculator's assignment — so the wording and the precedence cannot drift
+    apart again.
+    """
+    if is_sympy_name(name):
+        return f"{name} is a SymPy built-in. You asked for it."
+    if is_plot_variable(name):
+        return plot_variable_warning(name)
+    return None
 
 
 def validate_name(name: str) -> bool:

@@ -8,21 +8,8 @@ import RinUI
 //: (`i18n/symplify_<code>.qm`); the source language is English. "System default"
 //: follows the OS locale and falls back to English when no matching catalogue
 //: exists.
-ColumnLayout {
-    //: What the page's sticky bar shows once this subtitle reaches it, and where
-    //: the subtitle sits inside the scrolling column, so the bar can tell when
-    //: that happened (both are plain `y`/`text` bindings: layouts notify).
-    readonly property string sectionTitle: subtitle.text
-    readonly property real subtitleOffset: subtitle.y
-
-    Layout.fillWidth: true
-    spacing: 3
-
-    Text {
-        id: subtitle
-        typography: Typography.BodyStrong
-        text: qsTr("Language")
-    }
+SettingsSection {
+    label: qsTr("Language")
 
     SettingCard {
         Layout.fillWidth: true

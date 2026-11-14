@@ -1,5 +1,4 @@
 import QtQuick
-import RinUI
 
 // The one place a rendered formula is laid out: a horizontal scroller holding a
 // single `LatexImage` at the artwork's natural size, with the room its own

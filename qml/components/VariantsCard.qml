@@ -49,27 +49,15 @@ QQC2.Control {
         vm.copyText(lines.join("\n"))
     }
 
-    //: The re-open hand-off (see `openMenu` below), as in `HistoryCard`.
-    property var pendingPoint: null
-
     function openMenu(variant, point) {
-        entryMenu.variant = variant
-        if (entryMenu.visible) {
-            pendingPoint = point
-            entryMenu.close()
-            return
-        }
-        entryMenu.posX = point.x
-        entryMenu.posY = point.y
-        entryMenu.popup()
+        entryMenu.openAt(variant, point)
     }
 
     //: The keyboard route, which has no pointer: centred just under the focused
     //: row — the History card's own default place. The menu then uses Qt's
     //: normal key handling (arrows, Enter, Escape).
     function openMenuDefault(row) {
-        openMenu(row.modelData, root.mapFromItem(
-            row, (row.width - entryMenu.width) / 2, row.height + 5))
+        entryMenu.openBelow(root, row, row.modelData)
     }
 
     visible: variants.length > 0
@@ -228,31 +216,20 @@ QQC2.Control {
         }
     }
 
-    Menu {
+    CardMenu {
         id: entryMenu
 
         objectName: "variantsMenu"
-        property var variant: null
-
-        //: See `openMenu`: only after the close has finished can `popup()`
-        //: open the same popup again.
-        onClosed: {
-            if (root.pendingPoint) {
-                const point = root.pendingPoint
-                root.pendingPoint = null
-                root.openMenu(entryMenu.variant, point)
-            }
-        }
 
         MenuItem {
             text: qsTr("Copy expression")
-            onTriggered: vm.copyText(entryMenu.variant.expression)
+            onTriggered: vm.copyText(entryMenu.target.expression)
         }
         MenuItem {
             text: qsTr("Copy LaTeX")
-            enabled: entryMenu.variant !== null
-                && entryMenu.variant.latex !== ""
-            onTriggered: vm.copyText(entryMenu.variant.latex)
+            enabled: entryMenu.target !== null
+                && entryMenu.target.latex !== ""
+            onTriggered: vm.copyText(entryMenu.target.latex)
         }
     }
 }

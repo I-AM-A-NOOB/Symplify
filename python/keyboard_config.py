@@ -11,6 +11,7 @@ The label and insert differ where the glyph and the function do (``√`` shows,
 ``sqrt`` types); ``latex`` is a third, optional rendering hint.
 """
 
+from functools import lru_cache
 from itertools import count
 from pathlib import Path
 from typing import Any
@@ -237,6 +238,22 @@ def new_keyboard_file(
     raise RuntimeError("could not allocate a keyboard filename")
 
 
+@lru_cache(maxsize=8)
+def _label_glyphs_cached(path: Path, mtime_ns: int, size: int) -> str:
+    """`label_glyphs` for one on-disk layout revision.
+
+    ``mtime_ns``/``size`` are part of the cache key only; they are what makes a
+    settings row's repeated read free while an edited layout still re-reads.
+    """
+    characters = {
+        char
+        for tab in load_keyboard_tabs(path)
+        for key in tab["keys"] + tab.get("shiftKeys", [])
+        for char in key["label"]
+    }
+    return "".join(sorted(characters))
+
+
 def label_glyphs(path: Path | None = None) -> str:
     """Every character the keys can *show*, as a string to test fonts against.
 
@@ -247,11 +264,15 @@ def label_glyphs(path: Path | None = None) -> str:
     which are exactly what a general-purpose face can be missing. LaTeX keys
     keep their labels in this set: the label is the fallback if rendering fails,
     so the keyboard font still needs it.
+
+    The result is cached by the layout file's path, mtime and size. Reading the
+    Settings page's keyboard-coverage hint used to re-parse the YAML on every
+    read (measured ~8 ms); an edit or a different selected layout changes the
+    key and recomputes.
     """
-    characters = {
-        char
-        for tab in load_keyboard_tabs(path)
-        for key in tab["keys"] + tab.get("shiftKeys", [])
-        for char in key["label"]
-    }
-    return "".join(sorted(characters))
+    target = Path(path) if path is not None else KEYBOARD_CONFIG_PATH
+    try:
+        stat = target.stat()
+    except OSError:
+        return _label_glyphs_cached(target, 0, 0)
+    return _label_glyphs_cached(target, stat.st_mtime_ns, stat.st_size)

@@ -172,7 +172,6 @@ FocusScope {
         }
         //: Return is the delegate's `Shortcut`; nothing to do here
         //: (the editor's `pendingText` is what gets written).
-        readOnly: false
     }
 
     // Column 1 re-parses the expression, so it edits in the

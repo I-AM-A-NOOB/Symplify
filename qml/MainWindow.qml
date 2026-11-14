@@ -1,6 +1,5 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
-import QtQuick.Layouts 2.15
 import RinUI
 import "components"
 
@@ -450,7 +449,7 @@ FluentWindow {
         //: Settings page normally owns the screen while it happens, but this
         //: keeps a future live settings surface (and programmatic changes)
         //: correct; `set_palette` is a no-op when nothing actually changed.
-        function onChanged() {
+        function onAppearanceChanged() {
             vm.refreshCodeHighlighting(Theme.isDark())
         }
     }
@@ -558,66 +557,12 @@ FluentWindow {
     //: right edge is the window's and nothing lays it out as a cell.
     //: On macOS the window controls are native and live on the left, so the
     //: right edge is free and the old 8px inset stays.
-    ToolButton {
-        id: titleZenButton
-        objectName: "titleZenButton"
-
-        parent: window.titleBarHost ? window.titleBarHost.parent.parent : null
-        anchors.right: parent ? parent.right : undefined
-        anchors.verticalCenter: parent ? parent.verticalCenter : undefined
-        //: 4px of air between Zen and the minimize control, and the same 4px is
-        //: a spacer in the fullscreen strip so the two slots stay identical.
-        anchors.rightMargin: window.isMacOS ? 8
-            : 4 + 48 * ((window.minimizeVisible ? 1 : 0)
-                        + (window.maximizeVisible ? 1 : 0)
-                        + (window.closeVisible ? 1 : 0))
-        width: 32
-        height: 32
-        flat: true
-        visible: !window.fullscreenApplied
-            && String(navigationView.currentPage).endsWith("CalculatorPage.qml")
-        z: 1
-        icon.name: vm.zenMode
-            ? "ic_fluent_full_screen_minimize_20_regular"
-            : "ic_fluent_full_screen_maximize_20_regular"
-        icon.color: Theme.currentTheme.colors.textColor
-        Accessible.name: vm.zenMode
-            ? qsTr("Exit Zen mode") : qsTr("Zen mode")
-        Tip {
-            text: vm.zenMode ? qsTr("Exit Zen mode") : qsTr("Zen mode")
-        }
-        onClicked: vm.toggleZen()
-    }
-
-    //: Windowed Zen has no strip, so F11 was its only way into full screen,
-    //: while the full-screen strip can come back to a window with a button. This
-    //: is that missing half, and it exists only in Zen: normal mode already has
-    //: the maximize control and F11. The full screen it starts belongs to Zen
-    //: (the same rule as `workspace.zen_fullscreen`), so leaving Zen restores the
-    //: window instead of leaving the user in a fullscreen without a title bar.
-    ToolButton {
-        id: titleFullscreenButton
-        objectName: "titleFullscreenButton"
-
-        parent: window.titleBarHost ? window.titleBarHost.parent.parent : null
-        anchors.right: titleZenButton.left
-        anchors.rightMargin: 4
-        anchors.verticalCenter: parent ? parent.verticalCenter : undefined
-        width: 32
-        height: 32
-        flat: true
-        visible: titleZenButton.visible && vm.zenMode
-        z: 1
-        icon.name: "ic_fluent_arrow_maximize_20_regular"
-        icon.color: Theme.currentTheme.colors.textColor
-        Accessible.name: qsTr("Enter full screen")
-        Tip {
-            text: qsTr("Enter full screen")
-        }
-        onClicked: {
-            window.zenEnteredFullscreen = true
-            window.enterFullscreen()
-        }
+    //: Title-bar Zen controls: the toggle in a fixed slot immediately left of the
+    //: window controls, and (in Zen) its fullscreen companion. The component
+    //: owns the slot math; the window keeps the mode transitions.
+    TitleBarButtons {
+        host: window
+        nav: navigationView
     }
 
     Shortcut {
@@ -643,136 +588,11 @@ FluentWindow {
         onActivated: vm.toggleZen()
     }
 
-    //: In fullscreen Zen the real title bar is hidden, and this strip is the
-    //: way back. The zone is the strip's own 40px rectangle and the strip is its
-    //: child: a `MouseArea` because `containsMouse` is based on that rectangle
-    //: alone, it never moves (the slide is the child's transform), and it is a
-    //: **sibling of the page, not an ancestor** — it cannot take hover away from
-    //: the page. A `HoverHandler` at the window root did exactly that: an ancestor
-    //: hover handler silenced hover for the whole page (the result/plot splitters'
-    //: hover fills, every button) while the strip was hidden — the regression this
-    //: structure fixes.
-    MouseArea {
-        id: zenTopZone
-        objectName: "zenTopZone"
-        anchors.top: parent.top
-        anchors.left: parent.left
-        anchors.right: parent.right
-        height: window.zenChromeHeight
-        visible: window.fullscreenApplied && window.zenApplied
-        z: 100
-        hoverEnabled: true
-        acceptedButtons: Qt.NoButton
-
-        readonly property bool shown: containsMouse || window.zenChromePinned
-
-        //: Touch and pen have no hover (a pen may, but not reliably), so a tap
-        //: toggles the pin; the mouse path never consumes clicks here.
-        TapHandler {
-            acceptedDevices: PointerDevice.TouchScreen | PointerDevice.Pen
-            onTapped: window.zenChromePinned = !window.zenChromePinned
-        }
-
-        //: The strip itself, sliding and fading on `zenTopZone.shown`. It is a
-        //: child so the controls inside it keep the zone hovered (`containsMouse`)
-        //: while the pointer rests on them.
-        Rectangle {
-            id: zenChrome
-            objectName: "zenChrome"
-            anchors.fill: parent
-            visible: zenTopZone.shown || opacity > 0
-            //: A fading strip must not keep its controls clickable.
-            enabled: zenTopZone.shown
-            color: "transparent"
-            border.width: 0
-            opacity: zenTopZone.shown ? 1 : 0
-
-            transform: Translate {
-                id: zenChromeSlide
-                y: zenTopZone.shown ? 0 : -zenChrome.height
-
-                Behavior on y {
-                    NumberAnimation { duration: 200; easing.type: Easing.OutCubic }
-                }
-            }
-
-            Behavior on opacity {
-                NumberAnimation { duration: 150; easing.type: Easing.OutCubic }
-            }
-
-            //: Acrylic, like the other transient RinUI chrome. The page/nav
-            //: beneath is the source; the strip itself is not part of that source.
-            AcrylicBrush {
-                anchors.fill: parent
-                sourceItem: navigationView
-                radius: 0
-                live: zenChrome.visible
-            }
-
-            Rectangle {
-                anchors.fill: parent
-                color: "transparent"
-                border.width: Theme.currentTheme.appearance.borderWidth
-                border.color: Theme.currentTheme.colors.cardBorderColor
-            }
-
-            Row {
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                height: parent.height
-                spacing: 0
-
-                ToolButton {
-                    id: zenExitButton
-                    objectName: "zenExitButton"
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: 32
-                    height: 32
-                    flat: true
-                    icon.name: "ic_fluent_full_screen_minimize_20_regular"
-                    icon.color: Theme.currentTheme.colors.textColor
-                    Accessible.name: qsTr("Exit Zen mode")
-                    Tip { text: qsTr("Exit Zen mode") }
-                    onClicked: vm.setZenMode(false)
-                }
-                //: The 4px gap the windowed slot also applies (see `titleZenButton`).
-                Item {
-                    width: 4
-                    height: parent.height
-                }
-                CtrlBtn {
-                    id: zenMinimizeButton
-                    objectName: "zenMinimizeButton"
-                    mode: 1
-                    height: parent.height
-                }
-                CtrlBtn {
-                    id: zenWindowedButton
-                    objectName: "zenWindowedButton"
-                    mode: 0
-                    height: parent.height
-                    //: "Windowed" means leave fullscreen, not leave Zen. It wears the
-                    //: collapse arrow rather than `mode`'s single-square maximize (or
-                    //: the Windows restore-down pair): in the strip every other
-                    //: control undoes what it entered — Zen leaves Zen, fullscreen
-                    //: leaves fullscreen — and an arrow pointing back into the frame
-                    //: says that without needing the word.
-                    icon: "ic_fluent_arrow_minimize_20_regular"
-                    //: The stock CtrlBtn would maximize instead.
-                    MouseArea {
-                        anchors.fill: parent
-                        acceptedButtons: Qt.LeftButton
-                        onClicked: window.exitFullscreen()
-                    }
-                }
-                CtrlBtn {
-                    id: zenCloseButton
-                    objectName: "zenCloseButton"
-                    mode: 2
-                    height: parent.height
-                }
-            }
-        }
+    //: In fullscreen Zen the real title bar is hidden; this strip is the way back
+    //: (its geometry, hover rule and controls live in `ZenChrome`).
+    ZenChrome {
+        host: window
+        nav: navigationView
     }
 
     //: The exit instructions are their own top InfoBar, not text inside the

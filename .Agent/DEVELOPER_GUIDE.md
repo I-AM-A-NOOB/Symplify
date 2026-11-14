@@ -85,6 +85,10 @@ python/
   backend_worker.py             # The calculation backend's spawned child (zero Qt): a pickled
                                 # request loop over a pipe, one Calculator, disposable by design.
                                 # See Calculation backend.
+  child_process.py              # One spawned child behind a pickled pipe (zero Qt): spawn,
+                                # optional Job Object containment, terminate/reap, and the
+                                # daemon-thread retirement. Both long-lived workers use it; the
+                                # services keep their protocols and deadlines.
   viewmodel/                    # Qt bridge (QObject + models). The ONLY layer that imports Qt
                                 # (besides main.py). State that must survive page switches lives here.
     input_mode.py               #   InputMode (CODE=0 / ASSIGN=1) — UI state, not model state
@@ -94,18 +98,41 @@ python/
     main_viewmodel.py           #   Root VM; aggregates children; signals sendToCode/sendToAssign
     calculator_viewmodel.py      #   Result state, input persistence, clear_result, the `variants`
                                 #   rows, and the qmlmathplot.Plot (curves, legend, theme, error)
-    latex_service.py             #   LatexRenderService: one renderer process + LRU cache; result and
-                                #   history SVGs arrive by token (inline without QCoreApplication)
-    variables_viewmodel.py      #   VariablesModel (3-col: name/expr/type) + CRUD + Qt edit protocol
-    history_viewmodel.py        #   HistoryModel (QAbstractListModel, newest first, lazy LaTeX)
+    latex_service.py             #   LatexRenderService: one spawned renderer (sandboxed, with a
+                                #   10 s request deadline) + LRU cache; result and history SVGs
+                                #   arrive by token (inline without QCoreApplication)
+    latex_jobs.py                #   LatexJobs: one consumer's token/pending/generation
+                                #   bookkeeping over LatexRenderService — it hands a *target*
+                                #   back with the artwork, so calculator and history never
+                                #   juggle token strings.
+    variables_viewmodel.py      #   VariablesModel (3-col: name/expr/type) with the ONE write
+                                #   pipeline (add/update/rename/remove share parse, logging and
+                                #   the reserved-name rule) + thin QML CRUD slots; the details
+                                #   panel's artwork is `latexFor` here, not in the proxy
+    history_viewmodel.py        #   HistoryModel (QAbstractListModel, newest first, lazy LaTeX
+                                #   through LatexJobs) + HistoryWindowModel, the row-limited proxy
+                                #   the History page's Repeater is cut to
     search.py                   #   SearchFilterModel + Variables/HistoryFilterModel: the pages'
-                                #   search boxes (proxy over the models above)
-    settings_viewmodel.py       #   Settings: appearance/workspace/window, config path, the only writer
+                                #   search boxes (proxies only filter and map rows)
+    settings_viewmodel.py       #   Settings QObject: signals, properties, language, config path,
+                                #   reset. The domain methods are the four mixins below; each
+                                #   property notifies on its domain signal (appearanceChanged /
+                                #   fontsChanged / windowChanged / keyboardChanged / configChanged)
+                                #   while every setter also emits the catch-all `changed`.
+    settings_appearance.py      #   AppearanceSettings: theme/backdrop/accent, code colours,
+                                #   brackets and the result watermark
+    settings_fonts.py           #   FontSettings: the three faces, sizes, chains and coverage
+    settings_window.py          #   WindowSettings: remembered geometry and Zen-fullscreen
+    settings_keyboard.py        #   KeyboardSettings: the custom keyboard folder/layout
     log_viewmodel.py            #   LogViewModel (formattedLogs)
     highlighter.py              #   CodeHighlighter (QSyntaxHighlighter) for TextArea.textDocument;
                                 #   paints code_style spans, knows nothing about the rules
   accent.py                     # The accent shades Windows derives (Lab/HSL ramp), ported
                                 # from windowsthemefinetuner; zero Qt
+  system_accent.py              # The OS accent capture (QPalette Highlight/Accent under each
+                                # scheme) and the per-scheme value Windows ships; Qt, no QObject
+  font_report.py                # The installed-family chain and glyph-coverage report
+                                # (QFontDatabase/QRawFont), cached per family list
   latex_render.py               # LatexStyle + render_data_url(latex, style) — theme-aware ziamath
   latex_render_worker.py        # The renderer process child (zero Qt): tokenized LaTeX -> SVG
   fonts.py                      # Font discovery: preference-list resolution, the
@@ -132,6 +159,9 @@ qml/
   components/                   # Reusable pieces (+ qmldir, whose list is held to the
                                 # directory by `test_the_components_directory_and_its_qmldir_agree`):
                                 #   CodeSurface (a code input's box, in the code theme's colours),
+                                #   CodeInputLook (that input's dressing as values — surface ink,
+                                #     placeholder, code font and insets — shared by CodeField,
+                                #     CodeArea and the calculator's code box),
                                 #   CodeField / CodeArea (the two code inputs themselves — font,
                                 #     surface, ink, and the highlighter on the area's document — so
                                 #     the calculator's Assign row and the Variables editors cannot
@@ -140,8 +170,9 @@ qml/
                                 #     the press that opens it: one line per field, and the field's
                                 #     own Qt menu switched off with it — see the context-menu
                                 #     bullet under the trap list),
-                                #   ExpanderRow / ExpanderPanel (RinUI expanders that keep
-                                #     their content's text cursors),
+                                #   ExpanderRow (RinUI's SettingExpander with the fix that
+                                #     keeps its content's text cursors; a plain Expander
+                                #     would need the same one-liner),
                                 #   PageScaffold (the frame every page shares: title, actions and
                                 #     the floating bar they ride into) together with the two pieces
                                 #     it assembles — PageHeader (the bar that fades in as the
@@ -149,6 +180,10 @@ qml/
                                 #     plus the room the actions need) — and PageBody (the body
                                 #     under it: the inset read back off the scaffold, the attached
                                 #     scroll bar, and the height the page scrolls to),
+                                #   ZenChrome / TitleBarButtons (the window's Zen chrome: the
+                                #     fullscreen hover strip with its window controls, and the
+                                #     title-bar Zen/fullscreen slots; the window keeps the mode
+                                #     state machine and the transitions),
                                 #   MathStrip (the formula area: HScrollView + LatexImage + the
                                 #     room its overlay bar needs — the one place that geometry
                                 #     lives; HScrollView and LatexImage are its pieces),
@@ -156,6 +191,13 @@ qml/
                                 #     strip: one expression + one MathStrip per variant, the
                                 #     History card's right-click menu, Copy all; each variant
                                 #     row is its own ordinary Tab stop — see Rendering),
+                                #   ResultPane / PlotPane / InputPane (the Calculator's three
+                                #     halves under its toolbar: the result surface — backend
+                                #     state, outcome, formula, alternatives and watermark — the
+                                #     plot with its header and masked frame, and the Code/Assign
+                                #     stage with both editors, the on-screen keyboard and the
+                                #     focus/cursor helpers it drives. The page owns the split
+                                #     geometry and sizes all three),
                                 #   RadioSettingRow / RadioSettingGroup / SettingFieldRow (the
                                 #     settings-row shapes RinUI's own SettingItem cannot express;
                                 #     SettingRowBase is the SettingItem both rows are built on),
@@ -168,12 +210,18 @@ qml/
                                 #     `Repeater` builds, one per entry — the page hands it `host`
                                 #     and `scroller`; it is where the card's `= `-alignment, hover,
                                 #     accent bar, focus ring, context menu and keys live),
+                                #   CardMenu (the card context menu both HistoryCard and
+                                #     VariantsCard declare items in: it owns the target and the
+                                #     close-then-reopen rule a second gesture needs),
                                 #   VariableCellEditor (the Variables table's inline cell editor:
                                 #     the view opens it on the edited cell, and it feeds
                                 #     `cellDelegate.pendingText` — the delegate does the write),
                                 #   VariableDetailsPanel (the Variables page's details panel: the
                                 #     selected variable, its two fields and the row's actions — the
                                 #     page hands it `host`),
+                                #   SettingsSection (the subtitle + sticky-bar values every
+                                #     Settings section shares; the five sections below declare
+                                #     their rows inside it),
                                 #   Settings{Interface,Workspace,Language,File,About}Section (the
                                 #     Settings page's five sections, one component each: a section
                                 #     owns its state and its dialog, the page only its frame and
@@ -300,14 +348,22 @@ transparent corner, not `srgba(255,255,255,1)`.
    SymPy's `parse_expr` is `eval` on generated code (`parse_expr("__import__('os')")` runs it), so
    `_parse` no longer uses it: `_safe_parse_expr` runs the same `stringify_expr` transformations,
    gates the generated code through `_validate_safe_ast`, then evals with an empty `__builtins__`.
-   The gate allows arithmetic, comparisons, lists/tuples, subscripts and calls to **named** safe
-   callables; it rejects attribute access, lambdas, comprehensions, keyword expansion, dunder names
-   and all `_UNSAFE_CALLS` (`S`, `sympify`, `parse_expr`, `lambdify`, code generators, plotters,
-   printers). Strings are data only for `Symbol`/`Dummy`/`Wild`/`Function` and numeric `Float`
-   (the tokenizer's own `Symbol('z')`/`Float('0.5')`); arbitrary string expressions are refused.
+   The gate allows arithmetic, comparisons, lists/tuples/dicts, subscripts, calls to **named** safe
+   callables, calls to a whitelisted set of **SymPy methods** (`_SAFE_METHODS`: `subs`, `diff`,
+   `det`, `inv`, `replace`, `rewrite`, matrix/eigen helpers, …), and reads of a small, read-only
+   **property** set (`_SAFE_PROPERTIES`: `free_symbols`, `args`, `shape`, `T`, `H`, `is_real`, …).
+   Bare attribute access otherwise stays forbidden — `x.func`, `x.__class__` and
+   `x.subs.__globals__` are escapes, not syntax — and a method name must be in its set, so
+   `x.func(1)` and `x.free_symbols.pop()` are refused. It also rejects lambdas, comprehensions,
+   keyword expansion, dunder names and all `_UNSAFE_CALLS` (`S`, `sympify`, `parse_expr`,
+   `lambdify`, code generators, plotters, printers). Strings are data only for
+   `Symbol`/`Dummy`/`Wild`/`Function`, numeric `Float` and `symbols()`'s name list (a conservative
+   identifier/separator regex, not eval); arbitrary string expressions are refused.
    This closes the `().__class__...__globals__['system'](...)` escape. Conditional expressions
    (`a if c else b`) and `and` / `or` / `not` remain a hard `SYNTAX` failure, and Python builtins
-   (`sum`, `len`, `min`, …) are unknown functions by design.
+   (`sum`, `len`, `min`, …) are unknown functions by design. The method/property sets are the
+   extension point: add a name only with a test that pins the value it returns; never widen the
+   gate to general attribute access.
    **No ground-type accelerator is shipped, and this is the measurement that decided it.** sympy
    picks its arithmetic backend at import from what is installed (`SYMPY_GROUND_TYPES=python|gmpy|
    flint`; `auto` prefers flint, then gmpy2, then Python's own types), and that choice decides where
@@ -394,20 +450,22 @@ transparent corner, not `srgba(255,255,255,1)`.
    `CalculatorViewModel.calculate/calculateAssign` submit `(kind, payload, scope)` and return.
    The result arrives as `finished(request_id, result)`; the optional variant rows arrive
    later as `variantsReady(request_id, rows)` (or a timeout/crash/empty list). The default
-   `InlineBackend` is synchronous and is what tests/headless callers get; `main.py` passes
-   `ProcessBackend(10 s)`, which spawns `python/backend_worker.py` (zero Qt) and terminates it
-   at the deadline. **The result is applied before the variants are requested**, so the outcome
-   text never waits for `doit`/`expand`/`factor`. The VM allocates request ids before submitting
-   (so the synchronous and asynchronous backends share one path), ignores stale/cancelled ids,
-   cancels the previous request when a new one is submitted, and cancels again on `clear_result`.
-   A timeout becomes `Failure(ErrorKind.TIMEOUT)`, is recorded in History and Log, and must
-   **not** mark an Assign-mode value invalid. The QML status sits in the result header
-   (`backendStatus`: ready / calculating / timedout / failed). `multiprocessing.freeze_support()`
-   is the first statement in `main()`; Nuitka's always-on multiprocessing plugin routes the
-   spawned executable back to the worker. The Variables page's inline edits still call the
-   in-process `Calculator` synchronously — that is the next slice, not this boundary.
-10. **Variables, history and the log are UI-process state, not worker state.** The worker is
-    stateless between requests and receives a serialized scope snapshot with each one; the
+   `InlineBackend` is synchronous and is what tests/headless callers get; `main.py` passes a
+   `ProcessBackend(10 s)` for the Calculator and **a second** `ProcessBackend(10 s)` for the
+   Variables page (`variables_backend`), which spawns another `python/backend_worker.py` (zero Qt)
+   and terminates it at the deadline. **The result is applied before the variants are requested**,
+   so the outcome text never waits for `doit`/`expand`/`factor`. The VM allocates request ids
+   before submitting (so the synchronous and asynchronous backends share one path), ignores
+   stale/cancelled ids, cancels the previous request when a new one is submitted, and cancels
+   again on `clear_result`. A timeout becomes `Failure(ErrorKind.TIMEOUT)`, is recorded in History
+   and Log, and must **not** mark an Assign-mode value invalid. The QML status sits in the result
+   header (`backendStatus`: ready / calculating / timedout / failed).
+   `multiprocessing.freeze_support()` is the first statement in `main()`; Nuitka's always-on
+   multiprocessing plugin routes the spawned executable back to the worker. The Variables page's
+   add/update writes go through `VariablesModel` onto its own backend; the in-process
+   `Calculator` remains only for tests/headless (`backend=None`).
+10. **Variables, history and the log are UI-process state, not worker state.** The workers are
+    stateless between requests and receive a serialized scope snapshot with each one; the
     `VariableManager`, `HistoryModel` and `LogViewModel` live on the Qt main thread. A timeout,
     crash or EOF can therefore discard a pending assignment but cannot erase existing variables or
     history. None of the three is persisted across an app restart (settings are the only persisted
@@ -437,12 +495,14 @@ transparent corner, not `srgba(255,255,255,1)`.
   remain inside the request's timeout. The frontend only renders each row's LaTeX. The worker is
   disposable and must not import Qt.
 - **One request at a time.** A new submission cancels the old worker, including a worker that is
-  only waiting to deliver variants; `clear_result` does the same. The poll timer (2 ms) reads one
-  message at a time: the result first, then the matching variants. A reply for a cancelled id is
-  ignored by the VM, and a late `variantsReady` is ignored unless its id is the result currently
-  displayed. The old 20 ms interval was a fixed floor under every cheap calculation. `MainWindow`
-  calls `calcVM.warmUpBackend()` after the first frame, so the worker's SymPy import overlaps
-  startup instead of the user's first Enter.
+  only waiting to deliver variants; `clear_result` does the same. The poll timer (2 ms) drains every
+  ready message per tick (the renderer's queue is drained the same way), and a cancel that only
+  abandons optional variant rows retires the worker on a daemon thread instead of joining it on the
+  UI thread. The worker answers with two messages: the result first, then the matching variants. A
+  reply for a cancelled id is ignored by the VM, and a late `variantsReady` is ignored unless its id
+  is the result currently displayed. The old 20 ms interval was a fixed floor under every cheap
+  calculation. `MainWindow` calls `calcVM.warmUpBackend()` after the first frame, so the worker's
+  SymPy import overlaps startup instead of the user's first Enter.
 - **Timeout.** The request deadline is `time.monotonic() + timeout_seconds` and includes worker
   startup. On expiry the process is `terminate()`d, joined, and replaced on the next request; the
   VM reports `Calculation timed out after N s.` and sets `backendStatus = "timedout"`. There is no
@@ -457,13 +517,35 @@ transparent corner, not `srgba(255,255,255,1)`.
   input in history. The next request starts a fresh worker. If the result was already delivered
   and only its variants were pending, the same failure emits `variantsReady(id, ())` instead: the
   answer on screen is authoritative and must not become an error.
-- **Worker containment.** `python/sandbox.py` puts the spawned worker in a Win32 Job Object on
-  Windows (memory/CPU caps, one active process, UI/desktop isolation, kill-on-close) and applies
-  POSIX `resource` limits on Linux/macOS (CPU, address space, file size, descriptors, core dumps).
-  The worker also sheds non-system environment variables after its imports. This is *resource and
-  process containment*, not a filesystem/network capability sandbox; the safe parser is the primary
-  boundary. A true "no files, no network" worker needs AppContainer/Landlock/seccomp/sandbox-exec
-  or WASM/WASI and is deliberately not faked here.
+- **The Variables page has its own backend and queue.** `main.py` creates a second
+  `ProcessBackend` (`variables_backend`) so a variable edit never cancels a Calculator request.
+  The worker starts only when the Variables page opens, not with the app; it is stopped after
+  (`BACKEND_IDLE_MS`, 60 s) of no writes or when the page is left with nothing in flight, and the
+  next edit restarts it. That keeps a third SymPy process (~140 MB) off the idle app.
+  `VariablesModel` queues add/update requests and sends one `variable` assignment
+  at a time (the kind has no variant rows, so the worker is immediately free for
+  the next queued write), applying the answer when it arrives; `add` answers
+  "accepted" and `variableAdded(name, ok)` tells QML which row to select. A
+  timeout or backend failure keeps the raw input as Invalid for an update and
+  creates no row for an add; a late answer for a renamed/deleted name is
+  discarded. With `backend=None` the model keeps the synchronous in-process path
+  for tests/headless.
+- **The entry module is re-imported in every spawned worker.** `multiprocessing`'s
+  `spawn` loads `main.py` as `__mp_main__` before running the worker target. Keeping
+  PySide6/qmlmathplot/SymPy imports at module level therefore made the "zero Qt"
+  calculation and render workers pay for Qt anyway — measured **~140 MB** per worker
+  instead of **~55 MB** (SymPy included). The UI imports live inside `main()`;
+  `test_importing_the_entry_point_is_worker_safe` asserts that importing `main`
+  loads neither PySide6, SymPy nor qmlmathplot. Do not move them back to module level.
+- **Worker containment.** `python/sandbox.py` puts each spawned worker — the calculation backend,
+  the Variables backend *and* the LaTeX renderer — in a Win32 Job Object on Windows (memory/CPU
+  caps, one active process, UI/desktop isolation, kill-on-close) and applies POSIX `resource`
+  limits on Linux/macOS (CPU, address space, file size, descriptors, core dumps). The children
+  also shed non-system environment variables after their imports. `python/child_process.py` owns
+  that spawn/contain/reap lifecycle for all three. This is *resource and process containment*,
+  not a filesystem/network capability sandbox; the safe parser is the primary boundary. A true
+  "no files, no network" worker needs AppContainer/Landlock/seccomp/sandbox-exec or WASM/WASI and
+  is deliberately not faked here.
 - **Status UI.** The result header shows `Backend: ready`, a spinner + `Backend: busy`,
   `Backend: timed out`, or `Backend: failed`; the timeout/failure states use the critical theme
   colour. The outcome box carries the detailed failure text.
@@ -471,7 +553,8 @@ transparent corner, not `srgba(255,255,255,1)`.
   `variantsReady`) to lock busy/timeout/cancel/clear, result-before-variants, stale variant ids
   and data survival without spawning anything. `tests/test_process.py` runs the real process
   boundaries in fresh interpreters: result-before-variants, variant timeout without failure,
-  stale renderer generations, and renderer process SVG output.
+  variable writes through their own worker, stale renderer generations, and renderer process SVG
+  output.
 
 ## Known RinUI / Qt traps (learned the hard way)
 
@@ -530,9 +613,8 @@ transparent corner, not `srgba(255,255,255,1)`.
     first — otherwise it looks like the handler is broken when nothing has focus at all.)
   * **A second gesture on an open menu needs a close first, and the re-open has to wait for it.**
     Every context menu in this app is opened per gesture — "a right-click always lands a menu at the
-    pointer" — and the card's menu is the shape that gets there: one `openMenu(x, y)` door, and if
-    `entryMenu.visible` it remembers the point, calls `close()`, and re-opens from the menu's
-    `onClosed`. Both halves are measured. Setting `posX`/`posY` on an *open* menu moves nothing (its
+    pointer" — and `CardMenu` is the shape that gets there: one `openAt(target, point)` door, and
+    if the menu is open it remembers the point, calls `close()`, and re-opens from its `onClosed`. Both halves are measured. Setting `posX`/`posY` on an *open* menu moves nothing (its
     `x`/`y` are driven by the `enter` transition, which has already run): a second right-click at a
     new point left the menu exactly where the first had put it, and a third one moved it to
     `x=864, y=-150` — off the window, which is the flash the History page used to show. And
@@ -1421,20 +1503,26 @@ mode hides the input and most chrome, and the window-level side of it lives in
   up to the pane; only an item larger than the pane shrinks (keeping its aspect,
   `randomScale` in QML). The icon kind keeps its pane cap
   (`min(pane width, pane height*0.6, 140)`), and both fade at 0.2 opacity the
-  moment a result exists.
+  moment a result exists. A *failure* is not an empty visit either: the mark is
+  hidden then (`resultText === "" && !isError`, the page's `watermark.empty`)
+  and the viewmodel does not roll or render artwork behind it.
 - **PySide property setters must emit their NOTIFY signal by hand.** A Python
   side write through a `Property(getter, setter, notify=…)`, e.g. the watermark
-  settings, does *not* notify: the pattern here is every setter ends with
-  `self.changed.emit()` because all consumers hang off the `changed` signal.
+  settings, does *not* notify. Every setter ends with its domain signal
+  (`appearanceChanged`, `fontsChanged`, `windowChanged`, `keyboardChanged`,
+  `configChanged`) **and** the catch-all `changed`: QML binds a property to the
+  domain signal, while `MainViewModel`/`resetToDefaults` and the tests use
+  `changed` for "some setting moved". Adding a property means choosing its
+  domain signal, not `changed`.
 
 ## Rendering / display
 
 - **LaTeX is not typeset past `MAX_LATEX_CHARS` (1000 characters of source), on purpose.** The cost
   is linear in the glyph count but the numbers are large: measured on this machine, ~57 ms and
   0.84 MB of SVG at 1000 characters, and a `2**100000` result — 30103 digits — takes **3.9 s and
-  produces 27 MB**, once per history card and once per result/variant render (both in the
-  renderer process; only keycaps/Variables details remain synchronous on the UI thread), with
-  the data URL held per entry.
+  produces 27 MB**, once per history card and once per result/variant render (all in
+  the renderer process; only the Variables details panel still typesets on the UI thread, and only
+  while it is open), with the data URL held per entry.
   `latex_to_svg` returns `''` above the cap, which is the `('', 0, 0)` contract every surface
   already leans on (`test_latex_style_renders_and_reports_empty`): the strip takes no space and the
   outcome box above carries the value. The cap is what makes the raised
@@ -1453,13 +1541,14 @@ mode hides the input and most chrome, and the window-level side of it lives in
   out three times, and the details panel taking the three values as call arguments; the caches were
   the only part that genuinely differed, so they are the only part that stayed separate.
   **The Calculator's result and variant artwork does not render on the UI thread.**
-  `LatexRenderService` (`python/viewmodel/latex_service.py`) owns one renderer process and a
-  bounded `(latex, style)` cache. `CalculatorViewModel` registers a token for each request (result first,
-  then each variant), applies the result text and schedules the plot, and fills
-  `latexSvgUrl`/`variants` when `rendered(token, url, width, height)` arrives. A new result or a
-  style change starts a new generation for that owner, so a late SVG from the
-  previous result cannot overwrite the current one. With no `QCoreApplication`
-  (the headless model tests) the same service renders inline and emits
+  `LatexRenderService` (`python/viewmodel/latex_service.py`) owns one spawned renderer process
+  (sandboxed, with a 10 s request deadline) and a bounded `(latex, style)` cache. A `LatexJobs`
+  (`python/viewmodel/latex_jobs.py`) owns one consumer's token counter, pending map and
+  generation reset, and reports a *target* back with the artwork: the calculator's targets are
+  `("result", -1)`, `("variant", row)` and `("watermark", -1)`; the history's target is the
+  `HistoryItem` itself, because row indexes move. A new result or a style change calls `reset`,
+  so a late SVG from the previous result cannot overwrite the current one. With no
+  `QCoreApplication` (the headless model tests) the same service renders inline and emits
   synchronously. History requests the same service lazily per visible row.
 - **`MathStrip` is the one place a rendered formula is laid out** — the Calculator's result area,
   the History card's strip, and (when the Variables page grows one) any third caller. It is an
@@ -1510,15 +1599,40 @@ mode hides the input and most chrome, and the window-level side of it lives in
   `keyboard_config.yaml` keys carry `{label, latex, insert}`: `label` is still the plain
   fallback/accessibility text, `insert` is what the key types, and `latex` is optional artwork.
   `KeyboardPanel` asks `vm.latexKeycap(latex, vm.keyboardRevision)` only for the current tab
-  (`keyGrid.index === root.currentTabIndex`), so switching tabs renders that tab's handful of
-  symbols; `MainViewModel` caches `{url, width, height}` per revision, and a theme/font/size change
-  bumps `keyboardRevision` and clears the cache. Keycap style = **theme ink + LaTeX font
+  (`keyGrid.index === root.currentTabIndex`), so switching tabs requests that tab's handful of
+  symbols. The render is **asynchronous**: the first call registers the key with the shared
+  renderer and answers `{}`, QML draws the plain `label`, and `vm.keycapArtRevision` re-evaluates
+  the binding once a batch of artwork lands (completions are coalesced into one bump per 16 ms).
+  This used to be a synchronous ziamath layout per key (~1.9 ms × 20+ keys) inside a QML binding,
+  which froze a tab switch; the headless tests still get artwork on the first call because the
+  inline renderer fills the cache before the method returns. `MainViewModel` caches
+  `{url, width, height}` per revision, and a theme/font/size change bumps `keyboardRevision`,
+  resets the keycap jobs' generation and clears the cache. Keycap style = **theme ink + LaTeX font
   (`latexFontPath`) + keyboard size (`keyboardSize`)** — deliberately *not* `latexSize`, because
   resizing results must not resize the keyboard. The `Image` uses `PreserveAspectFit` at natural
   size, shrinking only when the key is smaller, and `sourceSize × devicePixelRatio` keeps the SVG
   crisp. An empty `url` (ziamath refused the source) falls back to the plain `label`, so a bad
   hand-edited `latex` cannot leave a blank key. The settings copy says which font/size each part
   uses: text keys use the keyboard font, LaTeX keys use the LaTeX font at the keyboard size.
+  The Greek tab follows GeoGebra's layout: every key **shows the Greek glyph** (`φ`, `ς`, …;
+  uppercase in `shiftGrid`) as plain keyboard-font text — the serif chain covers Greek, so there
+  is no `latex` keycap and switching to the tab costs no ziamath renders — and **types the ASCII
+  name** (`varphi`, `varsigma`, `Alpha`, …), which sympy turns into `\varphi`, `\varsigma`,
+  `\mathrm{A}` by itself. The names are ordinary variables unless sympy already defines them
+  (`beta`, `gamma`, `zeta`, `pi`, `Chi`, `Lambda`); defining that name in the variable list
+  shadows the built-in. `lambda` is a Python keyword, so that key types `lambda_` (a valid
+  identifier; sympy spells it `\lambda_{}`). Duplicated phi positions and the final sigma are the
+  reference layout's; `test_the_greek_tab_displays_greek_and_inserts_english_names` pins it.
+- **The on-screen keyboard types into the focused editor, or the current mode's.** `InputPane.keyboardTarget()`
+  reads `Window.activeFocusItem` and accepts it only when the parent chain reaches the pane
+  (`belongsToPane`, a handful of steps — `isAncestorOf` is C++-only) and it is a template
+  `T.TextArea` / `T.TextField` / `QtQuick.TextInput`. The template bases matter: RinUI's `TextArea`
+  derives from `Controls.Basic`, while `CodeField`/`CodeArea` use Basic directly, so checking the
+  shadowed style names made a Basic field fail the test and the keyboard fall back to the other
+  editor. This replaced a recursive scan of every child — the 200+ on-screen keys included — on
+  every virtual key press. `test_the_keyboard_target_uses_the_windows_active_focus_item` drives it
+  in a real offscreen window (focus works there): focused name field → outside field → mode
+  fallback.
 - **The keyboard's Shift is a per-tab layer, not an Alphabet special case.** A tab in
   `keyboard_config.yaml` may carry an optional `shiftGrid`; `load_keyboard_tabs()` exposes it as
   `shiftKeys`/`shiftColumns`, and `KeyboardPanel` picks `activeKeys` while `shiftActive` is on.
@@ -1601,21 +1715,25 @@ mode hides the input and most chrome, and the window-level side of it lives in
   `model.latexUrl` (there is no `model` object in a `Repeater` delegate) nor a `Loader`-wrapped
   sub-component (a `Component` inside a delegate does not inherit the model context, and every
   `required property` comes back uninitialised) can defer it. The render moved out of the read
-  instead: `data()` now only looks the SVG up, and the view calls `historyVM.requestLatex(index)`
-  while the card is near the viewport (`nearView`, one screen of slack) — and again when the cache
-  was dropped under it by a theme change, which shows up as the role going back to empty.
-- **The page loads in batches, and the `Column` makes that cheap.** Only `page.loaded` cards (12 to
-  start) are `visible`; the rest are skipped by the `Column`, so they occupy no space and the content
-  only ever spans what is loaded. `maybeLoadMore()` raises `loaded` by another batch when the reader
+  instead: `data()` now only looks the SVG up, and the view calls
+  `historyFilter.requestLatex(index)` (the filter maps the card's proxy row to the source row) while
+  the card is near the viewport (`nearView`, one screen of slack) — and again when the cache was
+  dropped under it by a theme change, which shows up as the role going back to empty.
+- **The page loads a window, not the whole history.** Only the revealed rows exist: the page wraps
+  the search proxy in `HistoryWindowModel`, a row-limited `QAbstractProxyModel` whose `limit` is
+  bound to `page.loaded` (12 to start), and the `Repeater` builds one card per model row. A plain
+  `QSortFilterProxyModel` cannot do this job: changing a filter that depends on a property made it
+  emit only `layoutChanged`, and the `Repeater` built no cards at all (measured). The window emits
+  `rowsInserted`/`rowsRemoved` when the limit moves and a reset when the search re-filters, so the
+  card count tracks the batch. `maybeLoadMore()` raises `loaded` by another batch when the reader
   is within 320px of the loaded bottom. It is a *single* step that re-queues itself with
   `Qt.callLater` after the new cards' layout, not a loop (a loop reads a stale `contentHeight` and
   pours everything in) and not a `contentHeightChanged` handler (Qt swallows the re-entrant emission,
   stalling the chain one batch after a resize). Beyond `onContentYChanged` it also runs on page
   completion and on flickable height changes, because a window too tall for one batch has nothing to
-  scroll — without those, the rest of the history is unreachable. One trap:
-  `nearView` has to test `visible` *first*, because a skipped card has no position of its own and `y`
-  reads 0 — which the geometry test otherwise takes for "at the top of the viewport", and every
-  unloaded card renders.
+  scroll — without those, the rest of the history is unreachable. `cardCount` stays the *filtered*
+  count (`historyFilter.rowCount()`), so the cards' arrow keys can reach an entry that has not been
+  revealed yet; `reveal` grows `loaded` and looks again on the next turn.
 - **Set the LaTeX colour before any page is built.** The pages used to do it in their own
   `Component.onCompleted`, which runs after their delegates exist: every entry rendered once in the
   default black, then the colour arrived, dropped the whole cache, and every entry rendered again.
@@ -1671,7 +1789,11 @@ One lexer, one span list, two renderers. Anything that colours code contributes 
   the escaping and the `=`-alignment padding. The elision therefore happens on
   the plain string, in `vm.highlightedElided(text, width, dark)` — the code
   font's `QFontMetricsF.elidedText` runs *before* the span list, and the elision
-  mark is just another character to the highlighter. Callers pass their label's
+  mark is just another character to the highlighter. The markup goes through the
+  same memo as `highlighted` (`_markup`, keyed by the plain text, theme side and
+  variable-scope revision) and the `QFontMetricsF` is built once per font change:
+  a Variables cell re-evaluates this on every resize frame while the details
+  panel animates, and both used to be rebuilt per cell per frame. Callers pass their label's
   own `width` (minus a measured prefix where one exists — `TextMetrics` with a
   no-break space, which advances like a plain one). Two consequences to keep:
   those labels sit in layouts, whose default minimum width is the item's
@@ -1955,7 +2077,16 @@ backdrop floats up from 10px below while fading in, and carries the page's own t
   `window.remember|width|height|x|y|maximized`. The page groups them under the subtitles
   **Language / Interface / Workspace / Settings file / About**, and a group is its section's: the
   code theme and the bracket colours moved into `workspace` when their rows moved out of Interface
-  (they had lived in `appearance`). Layout follows RinUI's own gallery
+  (they had lived in `appearance`).
+- **The size spin boxes are live, but their file write and their re-render are coalesced.** The
+  three sizes go through `SettingsStore.stage` (validated, in memory) and `SettingsViewModel._stage_size`:
+  the first change of a burst is saved at once (a single setter still lands on disk immediately),
+  steps inside the 300 ms cooldown are saved once at its end, and `aboutToQuit` flushes. The
+  `LatexStyle` object moves immediately, but the result/history artwork re-renders on the first
+  change and once when the burst ends (`MainViewModel._on_fonts_changed` / `_flush_latex_style`,
+  180 ms) — a code-font change returns `False` and re-renders nothing, because no formula uses that
+  face. A drag therefore no longer dumps YAML and redraws every surface per step, while
+  `settingsVM.latexSize` etc. still read live. Layout follows RinUI's own gallery
   (`examples/pages/Settings.qml`): a section is a `ColumnLayout { spacing: 3 }` holding a
   **`Typography.BodyStrong`** subtitle and then one card per row, and the sections are separated by
   the outer column's spacing. **Each section is its own component**
@@ -2313,9 +2444,11 @@ backdrop floats up from 10px below while fading in, and carries the page's own t
     with the same warm process); a second build is ~0.17 s. Per-property, first read in a fresh
     process: `codeMissingGlyphs` 216 ms (of which ~90 ms is the one-time `QFontDatabase.families()`
     population and ~125 ms the font builds), `mathFonts` 158 ms (the MATH-table scan, cached per
-    process in `fonts.py`), `keyboardMissingGlyphs` 9 ms — and 4.6 ms on *every* later read, because
-    `label_glyphs()` re-parses `keyboard_config.yaml` each time (`load_keyboard_tabs` is not
-    cached). Those costs now land when the corresponding row is opened.
+    process in `fonts.py`), `keyboardMissingGlyphs` 9 ms — later reads are ~0.003 ms because
+    `label_glyphs()` caches by layout path, mtime and size (an edited layout or a different selected
+    file changes the key and re-reads). `load_keyboard_tabs` itself still parses on a switch, but
+    `MainViewModel.keyboardTabs` holds the active tabs. Those costs land when the corresponding row
+    is opened.
   - **A font that claims coverage gets no fallback.** Qt falls back only when the earlier face
     *reports* it lacks the glyph. A broken or odd font can therefore defeat the chain: the installed
     `Fixedsys` is a bitmap face DirectWrite refuses to load (`CreateFontFaceFromHDC() failed`), yet
@@ -2349,12 +2482,11 @@ backdrop floats up from 10px below while fading in, and carries the page's own t
   is lost, which is what makes this so easy to misdiagnose. `SettingsPage` fixes it by showing the
   blocker only while it actually blocks (`visible: blocker.enabled`, i.e. only when the expander is
   disabled — its `enabled` is `!expander.enabled`), which leaves that behaviour intact and lets the
-  controls' own cursors through. That fix lives in the two components that wrap the bases
-  (**`ExpanderRow`** for `SettingExpander` — what settings rows must use — and **`ExpanderPanel`**
-  for the plain `Expander`): it is applied by each instance as it is created, so it also covers
-  expanders built at runtime and expanders on any page — a page-level sweep would miss both
-  (verified: an `ExpanderRow` and a RinUI `SettingExpander` created side by side after load differ,
-  text cursor vs arrow, and the same holds for `ExpanderPanel` against a bare `Expander`).
+  controls' own cursors through. That fix lives in the component that wraps the base
+  (**`ExpanderRow`** for `SettingExpander` — what settings rows must use): it is applied by each
+  instance as it is created, so it also covers expanders built at runtime and expanders on any
+  page — a page-level sweep would miss both (verified: an `ExpanderRow` and a RinUI
+  `SettingExpander` created side by side after load differ, text cursor vs arrow).
   **Do not "fix" this per control**: adding `cursorShape` MouseAreas
   over the fields does nothing while the blocker is up, and once it is gone they are dead weight —
   RinUI's `TextField`/`TextArea`/`SpinBox` already carry the right cursors (the text areas say
@@ -2853,8 +2985,12 @@ keeping:
   (`python/model/latex.py`'s `render_latex_definition`: `latex(Symbol(name)) = render_latex(obj)`)
   and answers `""` for an invalid entry or a value sympy cannot render, which is the panel's cue to
   show the raw entry instead (in the critical colour). The SVG is rendered on demand by
-  `VariablesFilterModel.latexFor(row, color, size, font)` — no cache: one row, re-asked whenever the
-  selection, the theme or the LaTeX settings change.
+  `VariablesViewModel.latexFor(row)`, memoized by the definition text and the `LatexStyle`, and the
+  page's `definition` binding returns nothing while the details panel is closed — a ziamath layout
+  is ~7 ms and a closed panel used to pay for it on every model change. Opening the panel names
+  `sidebarOpen` in the binding, so it re-renders then. The viewmodel owns the `LatexStyle` and
+  announces it with `latexStyleChanged`; the search proxy only maps rows (`latexAt`), it never
+  typesets.
 - **Its bindings name `page.dataRevision`.** The line is read through functions (`latexFor`,
   `cellAt`), and a call in a binding creates no dependency of its own, so without that the line kept
   showing the value an edit had replaced. The counter is bumped from the proxy's `dataChanged`.

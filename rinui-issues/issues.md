@@ -1,6 +1,7 @@
 # RinUI issues we patch
 
-Target: **RinUI 0.4.4.1** (PyPI, 2026-08-30).
+Target: **RinUI 0.5.x** (the range `pyproject.toml` pins). The list began at
+0.4.4.1; where 0.5 changed the upstream behaviour, the entry says so.
 
 This list is deliberately filtered: it contains only places where the behavior is
 clearly RinUI's responsibility — a bug, a broken contract, or a WinUI imitation
@@ -18,30 +19,30 @@ cache is a feature request), and test-harness-only page rendering.
 
 ## Runtime patches
 
-### 1. Import writes a config file into the current working directory
+### 1. RinUI keeps a second settings file
 
 **Upstream**
-`RinUI/core/config.py` computes `BASE_DIR = Path.cwd().resolve()` and creates
-`<cwd>/RinUI/config/rin_ui.json` while the package is being imported. There is no
-supported environment variable or argument to redirect or disable this write.
-Importing a UI library must not create a directory in the caller's working
-directory; this also affects build tools that merely import RinUI to analyze it.
+`RinUI/core/config.py` owns its own configuration. Up to 0.4.x it created
+`<cwd>/RinUI/config/rin_ui.json` while the package was being imported, with no
+supported way to redirect or disable the write. 0.5 resolves the location with
+`QStandardPaths` and no longer writes at import, but the file is still a second
+source of truth: `RinUIWindow.__init__` calls `init_config()` (which saves the
+defaults when the file is missing), `ThemeManager` reads the result immediately
+afterwards, and `RinConfig.save_config` persists later changes.
 
 **Local patch**
-- `python/rinui_bootstrap.py` changes the working directory to a temporary
-  directory for the duration of `import RinUI`, then removes it.
-- It injects our appearance values into `RinConfig.config` and replaces
+- `python/rinui_bootstrap.py` wraps the launcher's `init_config` so our mapping
+  lands after its load and before `ThemeManager` reads it, and replaces
   `RinConfig.save_config` with a no-op, so later theme changes cannot write a
   second source of truth.
 - It migrates a legacy `<app>/RinUI/config/rin_ui.json` into our settings file
   once, then removes the empty RinUI directory.
-- `scripts/build_windows.py` repeats the cleanup after Nuitka's own import.
 
 **Upstream fix**
-Make import side-effect free. Accept an explicit config path, or defer the
-directory/file creation until `RinConfig` is actually saved.
+Accept an explicit config path, or defer the file creation/save until the caller
+asks for it. A UI library should not persist settings it was not told to own.
 
-**Files**: `python/rinui_bootstrap.py`, `scripts/build_windows.py`
+**Files**: `python/rinui_bootstrap.py`
 
 ### 2. Title-bar drag moves the window twice
 
@@ -105,18 +106,18 @@ expander. The blocker's own `enabled` is only meant to cover the disabled
 expander, but its `visible` is always true.
 
 **Local patch**
-- `qml/components/ExpanderPanel.qml` (plain `Expander`)
 - `qml/components/ExpanderRow.qml` (`SettingExpander`)
 
-Both find the blocker after creation and bind
+It finds the blocker after creation and binds
 `blocker.visible = blocker.enabled`, preserving click blocking only while the
-expander is disabled.
+expander is disabled. A plain `Expander` would need the same one-liner; the app
+has no user for one today.
 
 **Upstream fix**
 Make the blocker visible only when the expander is disabled, or give it
 `cursorShape: Qt.ArrowCursor` without covering child controls' cursor logic.
 
-**Files**: `qml/components/ExpanderPanel.qml`, `qml/components/ExpanderRow.qml`
+**Files**: `qml/components/ExpanderRow.qml`
 
 ### 5. `ScrollableTextArea` cannot size or scroll correctly
 

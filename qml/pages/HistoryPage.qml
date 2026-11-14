@@ -2,7 +2,6 @@ import QtQuick
 import QtQuick.Layouts 2.15
 import QtQuick.Controls.Basic 2.15 as QQC2
 import RinUI
-import RinUI as Rin
 import "../components"
 
 Item {
@@ -33,9 +32,10 @@ Item {
     //: How far the cards sit from the page edge: the content is already inset
     //: 24px, and the cards add this much on each side, clear of the scroll bar.
     readonly property int cardInset: 4
-    //: How many cards exist — the `Repeater`'s count. `HistoryCard`'s arrow keys
-    //: clamp to it (the cards are the page's to count, not their own).
-    readonly property int cardCount: cards.count
+    //: How many cards the filtered history holds. `HistoryCard`'s arrow keys
+    //: clamp to it (the cards are the page's to count, not their own); the
+    //: Repeater only builds the revealed window of it.
+    readonly property int cardCount: historyFilter.rowCount()
     //: Load one more batch when the reader is already near the bottom of what
     //: is loaded. Deliberately a single step, never a loop: a batch's cards
     //: only join `contentHeight` after the next layout pass, so a loop reads a
@@ -48,10 +48,10 @@ Item {
     //: tall for one batch loading anyway: there is nothing to scroll, so
     //: `contentY` alone would never fire.
     function maybeLoadMore() {
-        if (loaded < cards.count
+        if (loaded < historyFilter.rowCount()
                 && historyScroll.contentY + historyScroll.height
                    > historyScroll.contentHeight - page.prefetchMargin) {
-            loaded = Math.min(cards.count, loaded + batch)
+            loaded = Math.min(historyFilter.rowCount(), loaded + batch)
             Qt.callLater(maybeLoadMore)
         }
     }
@@ -83,8 +83,15 @@ Item {
 
     //: Bring a card into view, which `ListView.positionViewAtIndex` did for us.
     function reveal(index) {
-        if (index >= loaded)                  // not loaded yet: load up to it
-            loaded = Math.min(cards.count, index + 1)
+        if (index < 0 || index >= cardCount)
+            return
+        if (index >= loaded) {              // not loaded yet: load up to it
+            loaded = Math.min(historyFilter.rowCount(), index + 1)
+            // The window proxy adds the row on its own turn; look again once the
+            // Repeater has built it rather than returning with nothing scrolled.
+            Qt.callLater(function() { page.reveal(index) })
+            return
+        }
         const card = cards.itemAt(index)
         if (!card)
             return
@@ -147,10 +154,19 @@ Item {
                 bottomGap: 12
                 }
 
+            //: The Repeater builds one card per model row; the window proxy is
+            //: cut to the revealed count, so a long history no longer builds
+            //: every card when the page opens.
+            Binding {
+                target: historyWindow
+                property: "limit"
+                value: page.loaded
+            }
+
             Repeater {
                 id: cards
 
-                model: historyFilter
+                model: historyWindow
 
                 delegate: HistoryCard {
                     host: page

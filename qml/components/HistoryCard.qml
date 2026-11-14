@@ -70,10 +70,12 @@ QQC2.ItemDelegate {
     //: Rendering is the view's to ask for (see `HistoryModel.requestLatex`).
     //: Both triggers end in a no-op once the entry has an SVG: `nearView`
     //: fires as the card approaches, and `latexUrl` changes back to empty
-    //: when the cache is dropped under us by a theme or font change.
+    //: when the cache is dropped under us by a theme or font change. The card's
+    //: `index` is a *proxy* row, so the request goes through the filter, which
+    //: maps it to the source row.
     function askForLatex() {
         if (nearView && latexUrl === "")
-            historyVM.requestLatex(card.index)
+            historyFilter.requestLatex(card.index)
     }
     onNearViewChanged: askForLatex()
     onLatexUrlChanged: askForLatex()
@@ -119,9 +121,6 @@ QQC2.ItemDelegate {
 
     width: parent.width
     height: cardBody.implicitHeight + 20
-    //: Not loaded yet? The `Column` skips it, so it costs nothing on screen
-    //: and nothing in the scroll extent.
-    visible: card.index < host.loaded
 
     // The card inset is the delegate's to apply, because the list is
     // full-bleed; then the content padding it always had, plus 8px so
@@ -211,7 +210,6 @@ QQC2.ItemDelegate {
                 id: sendBtn
                 objectName: "sendBtn"
 
-                visible: true
                 opacity: (cardHover.hovered || card.activeFocus
                           || sendBtn.activeFocus
                           || sendBtn.hovered) ? 1.0 : 0.0
@@ -420,44 +418,17 @@ QQC2.ItemDelegate {
 
     //: Open the menu at a point in the *card's* own coordinates.
     //:
-    //: A menu's position is relative to its parent item, and this menu's
-    //: parent is the delegate — it is declared here so its items can read
-    //: `card`. The pointer therefore has to arrive in this space: the
-    //: scene point the first attempt passed puts the menu a card's height
-    //: further down the page, and the lower the card, the further off.
+    //: A menu's position is relative to its parent item, and this menu's parent
+    //: is the delegate — it is declared here so its items can read `card`. The
+    //: pointer therefore has to arrive in this space (see `CardMenu` for the
+    //: close-then-reopen rule a second gesture needs).
     function openMenuAt(point) {
-        openMenu(point.x, point.y)
+        entryMenu.openAt(card, point)
     }
 
-    //: …and RinUI's own place for the keyboard routes, which have no
-    //: pointer: centred under the card, which is what its `Position.Bottom`
-    //: computes from the parent.
+    //: The keyboard routes, which have no pointer: centred under the card.
     function openMenuDefault() {
-        openMenu((width - entryMenu.width) / 2, height + 5)
-    }
-
-    //: One door for both routes, and the *second* gesture is why it is not a one-liner.
-    //: RinUI's `Menu` drives its `x`/`y` from `posX`/`posY` through its `enter`
-    //: transition, so setting the two on an *open* menu moves nothing: measured, a
-    //: second right-click at a new point left the menu exactly where the first had put
-    //: it, and a third one moved it to `x=864, y=-150` — off the window, which is the
-    //: flash the page used to show. Every gesture therefore closes what is open and
-    //: opens again, and the re-open waits for `onClosed`: a QQC2 `Popup` keeps
-    //: `visible` true until its exit transition has finished, so calling `popup()`
-    //: immediately after `close()` is silently swallowed (measured: the menu stayed
-    //: closed). `pendingPoint` is that hand-off — non-null only for a re-open, so a
-    //: close by clicking outside leaves it alone.
-    property var pendingPoint: null
-
-    function openMenu(x, y) {
-        if (entryMenu.visible) {
-            pendingPoint = Qt.point(x, y)
-            entryMenu.close()
-            return
-        }
-        entryMenu.posX = x
-        entryMenu.posY = y
-        entryMenu.popup()
+        entryMenu.openBelow(card, card, card)
     }
 
     // Left click (card body) selects the card — and ends any selection
@@ -508,18 +479,8 @@ QQC2.ItemDelegate {
         }
     }
 
-    Menu {
+    CardMenu {
         id: entryMenu
-
-        //: The re-open a second gesture asked for (see `openMenu`): a close has
-        //: really finished here, which is the moment `popup()` starts working again.
-        onClosed: {
-            if (card.pendingPoint) {
-                const p = card.pendingPoint
-                card.pendingPoint = null
-                card.openMenu(p.x, p.y)
-            }
-        }
 
         MenuItem {
             text: qsTr("Send to input")

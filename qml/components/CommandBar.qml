@@ -33,10 +33,6 @@ Item {
     default property list<QtObject> actions
     //: Gap between buttons, and between the last button and the overflow button.
     property int spacing: 8
-    //: Which edge the buttons hug. A page bar keeps them right, because the title
-    //: owns the left of that row; the Calculator's command bar reads left to right
-    //: from its own title.
-    property int contentAlignment: Qt.AlignRight
 
     //: Bumped when a delegate appears or goes away. The Repeater builds its items
     //: asynchronously, so the first evaluation of `fitted` sees `count` already
@@ -81,21 +77,18 @@ Item {
 
     implicitWidth: row.implicitWidth
     implicitHeight: row.implicitHeight
-    //: The bar spans the row it is put in, which is what `contentAlignment` needs
-    //: to hug the *row's* edge rather than its own width: three pages end their
-    //: header row with it and expect their buttons at the right, and a bar sized
-    //: to its buttons would compute `parent.width - width == 0` and sit left.
-    //: A page that wants something *after* the bar turns this off (the
-    //: calculator, whose examples button follows it).
+    //: The bar spans the row it is put in, so its buttons hug the *row's* right
+    //: edge: three pages end their header row with it and expect their buttons
+    //: there, and a bar sized to its buttons would compute `parent.width -
+    //: width == 0` and sit left.
     Layout.fillWidth: true
 
     RowLayout {
         id: row
 
-        //: Hugs the chosen edge, so the buttons sit against the same edge whether
-        //: or not anything was folded away. Positioned rather than anchored: the
-        //: edge is a property here, and QML cannot switch an anchor target.
-        x: root.contentAlignment === Qt.AlignRight ? parent.width - width : 0
+        //: Hugs the row's right edge, so the buttons sit against the same edge
+        //: whether or not anything was folded away.
+        x: parent.width - width
         y: (parent.height - height) / 2
         spacing: root.spacing
 

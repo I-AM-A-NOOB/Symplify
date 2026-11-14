@@ -8,6 +8,9 @@ module Symplify.Components
 
 # CodeSurface is the box behind a code input, in the code theme's own colours.
 CodeSurface 1.0 CodeSurface.qml
+# CodeInputLook is that input's dressing as values: surface ink, placeholder, code
+# font and insets, shared by CodeField, CodeArea and the calculator's code box.
+CodeInputLook 1.0 CodeInputLook.qml
 # CodeField / CodeArea are the two code inputs themselves — font, surface, ink, and the
 # highlighter on the area's document — so the calculator's Assign row and the Variables
 # editors cannot drift apart. Each page keeps its own keys.
@@ -20,13 +23,14 @@ CodeContextMenu 1.0 CodeContextMenu.qml
 # CommandBar is a row of `Action`s that folds what does not fit into an overflow menu
 # (see the toolbar bullet under Rendering).
 CommandBar 1.0 CommandBar.qml
+# CardMenu is the menu a card opens on right click or the menu keys: it owns the
+# target, the close-then-reopen rule and the keyboard placement.
+CardMenu 1.0 CardMenu.qml
 # CopyableLabel is the read-only, borderless text box that reports a result — the
 # calculator's outcome and a history card's lines. Selectable, never editable, and
 # whole: the text is never truncated, the outer item clips it.
 CopyableLabel 1.0 CopyableLabel.qml
-# ExpanderPanel has no in-tree user yet; kept deliberately as the plain-Expander
-# counterpart to ExpanderRow (same cursor fix) for future pages.
-ExpanderPanel 1.0 ExpanderPanel.qml
+# ExpanderRow is RinUI's SettingExpander with the cursor fix every settings row needs.
 ExpanderRow 1.0 ExpanderRow.qml
 HScrollView 1.0 HScrollView.qml
 # HistoryCard is one history card — the delegate the History page's Repeater builds
@@ -51,6 +55,18 @@ PageBody 1.0 PageBody.qml
 PageHeader 1.0 PageHeader.qml
 PageHeaderRow 1.0 PageHeaderRow.qml
 PageScaffold 1.0 PageScaffold.qml
+# ResultPane / PlotPane are the calculator's two halves below its toolbar: the result
+# surface (outcome, formula, alternatives, watermark) and the plot (header, masked
+# frame, Tab stop). The page owns the split geometry and sizes both.
+ResultPane 1.0 ResultPane.qml
+PlotPane 1.0 PlotPane.qml
+# InputPane is the calculator's input half: the Code/Assign stage, both editors and
+# the on-screen keyboard, with the focus/cursor helpers the keyboard drives.
+InputPane 1.0 InputPane.qml
+# ZenChrome / TitleBarButtons are the window's Zen chrome (the fullscreen strip and
+# the title-bar controls); the window keeps the mode state machine.
+ZenChrome 1.0 ZenChrome.qml
+TitleBarButtons 1.0 TitleBarButtons.qml
 # RadioSettingRow is a `SettingItem` whose radio leads its own label — the shape a short
 # list of choices takes, and the one bare `SettingItem` children cannot express (they
 # land in the right-hand slot). `SettingRowBase` is the `SettingItem` both row shapes
@@ -73,6 +89,9 @@ VariableCellEditor 1.0 VariableCellEditor.qml
 # VariableDetailsPanel is the Variables page's details panel (the selected variable,
 # its two fields and the row's actions); the page hands it `host`.
 VariableDetailsPanel 1.0 VariableDetailsPanel.qml
+# SettingsSection is the subtitle + sticky-bar values every Settings section shares;
+# the five sections below declare their rows inside it.
+SettingsSection 1.0 SettingsSection.qml
 # The Settings page's five sections, one component each: the page keeps the frame and
 # the order, and a section keeps its own state (its label/value pairs) and its own dialog.
 SettingsInterfaceSection 1.0 SettingsInterfaceSection.qml

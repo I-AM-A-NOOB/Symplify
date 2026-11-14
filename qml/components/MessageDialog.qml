@@ -30,7 +30,6 @@ Dialog {
     standardButtons: Dialog.Ok
 
     Text {
-        Layout.fillWidth: true
         width: root.bodyWidth
         wrapMode: Text.WordWrap
         typography: Typography.Body

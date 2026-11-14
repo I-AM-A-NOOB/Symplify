@@ -20,16 +20,14 @@ backend and an asynchronous one follow the same path. Stale ids are ignored by
 the caller.
 """
 
-import multiprocessing
-import threading
 import time
 from collections.abc import Mapping
 from typing import Any
 
 from PySide6.QtCore import QCoreApplication, QObject, QTimer, Signal
 
-from .. import sandbox
 from ..backend_worker import worker_main
+from ..child_process import ChildProcess
 from ..model.calculator import Calculator, Success
 from ..model.variants import variants
 
@@ -95,6 +93,9 @@ class ProcessBackend(QObject):
     timeout, a crash or a broken pipe terminates it; the next request starts a
     fresh one. One request may be in flight at a time — a new ``submit`` cancels
     the previous one, so typing a correction never waits for the old deadline.
+    A ``variable`` request is the Variables page's assign: the worker answers
+    with the result only, so the next queued write can reuse the same process
+    without waiting for optional variants.
     """
 
     finished = Signal(int, object)
@@ -118,14 +119,14 @@ class ProcessBackend(QObject):
     ):
         super().__init__(parent)
         self.timeout_seconds = float(timeout_seconds)
-        self._context = multiprocessing.get_context("spawn")
-        self._process: multiprocessing.Process | None = None
-        self._connection = None
-        #: Windows Job Object holding the worker; None on POSIX/where creation
-        #: failed. Closing it is also the KILL_ON_JOB_CLOSE cleanup.
-        self._job = None
+        #: The spawned worker and its pipe; the supervisor owns spawn, containment
+        #: (Windows Job Object) and the reaper.
+        self._worker = ChildProcess(worker_main, sandboxed=True)
         self._active_id: int | None = None
         self._deadline = 0.0
+        #: ``variable`` writes send a result only; other kinds are followed by
+        #: their optional variant rows.
+        self._expect_variants = True
         #: The result was already delivered; this id only waits for its optional
         #: variant rows. It is never reported through `timedOut`/`failed`.
         self._variants_id: int | None = None
@@ -150,7 +151,7 @@ class ProcessBackend(QObject):
         signal. `InlineBackend` has no equivalent.
         """
         try:
-            self._ensure_worker()
+            self._worker.ensure()
         except Exception:  # noqa: BLE001 - warm-up is optional
             self._stop_worker()
 
@@ -163,9 +164,9 @@ class ProcessBackend(QObject):
     ) -> None:
         """Send one request, replacing anything already in flight."""
         self.cancel()
+        self._expect_variants = kind != "variable"
         try:
-            self._ensure_worker()
-            self._connection.send((request_id, kind, payload, scope))
+            self._worker.send((request_id, kind, payload, scope))
         except Exception as exc:  # noqa: BLE001 - start/pipe failure is a status
             self._stop_worker()
             self._active_id = None
@@ -190,10 +191,16 @@ class ProcessBackend(QObject):
         self._poll_timer.stop()
         if self._active_id is None and self._variants_id is None:
             return
+        # Only optional variant rows are pending: their result is already on
+        # screen, so the next request must not block on this worker's reap.
+        retire_async = self._active_id is None
         self._active_id = None
         self._variants_id = None
         self._variants_deadline = 0.0
-        self._stop_worker()
+        if retire_async:
+            self._retire_worker_async()
+        else:
+            self._stop_worker()
 
     def shutdown(self) -> None:
         """Stop the poll and terminate the worker (application exit)."""
@@ -201,93 +208,22 @@ class ProcessBackend(QObject):
         self._active_id = None
         self._stop_worker()
 
-    def _ensure_worker(self) -> None:
-        """Start the child if it is missing or no longer alive."""
-        if (self._process is not None
-                and self._process.is_alive()
-                and self._connection is not None):
-            return
-        self._stop_worker()
-        parent_connection, child_connection = self._context.Pipe()
-        process = self._context.Process(
-            target=worker_main,
-            args=(child_connection,),
-            daemon=True,
-        )
-        process.start()
-        child_connection.close()
-        self._process = process
-        self._connection = parent_connection
-
-        # The child blocks on recv() until the first request, so assigning the
-        # job here has no user work to race with.
-        job = sandbox.create_job()
-        if job is not None:
-            if job.assign(process.pid):
-                self._job = job
-            else:
-                job.close()
-
     def _stop_worker(self) -> None:
         """Terminate and reap the child; idempotent and never raises."""
         self._variants_id = None
         self._variants_deadline = 0.0
-        job, self._job = self._job, None
-        if job is not None:
-            job.close()
-        connection, process = self._connection, self._process
-        self._connection = None
-        self._process = None
-        if connection is not None:
-            try:
-                connection.close()
-            except OSError:
-                pass
-        if process is None:
-            return
-        if process.is_alive():
-            process.terminate()
-        process.join(0.5)
-        if process.is_alive():
-            process.kill()
-            process.join(0.5)
+        self._worker.stop()
 
     def _retire_worker_async(self) -> None:
         """Terminate a worker without joining it on the UI thread.
 
         This is the variants-timeout path: the result is already on screen, and
         stopping a slow optional worker must not freeze the UI while it is
-        reaped. The detached process/pipe/job are owned by the reaper thread.
+        reaped. The supervisor's daemon thread owns the detached process.
         """
         self._variants_id = None
         self._variants_deadline = 0.0
-        job, self._job = self._job, None
-        connection, process = self._connection, self._process
-        self._connection = None
-        self._process = None
-        if job is None and connection is None and process is None:
-            return
-
-        def reap() -> None:
-            try:
-                if job is not None:
-                    job.close()
-                if connection is not None:
-                    try:
-                        connection.close()
-                    except OSError:
-                        pass
-                if process is not None:
-                    if process.is_alive():
-                        process.terminate()
-                    process.join(0.5)
-                    if process.is_alive():
-                        process.kill()
-                        process.join(0.5)
-            except Exception:  # noqa: BLE001 - retirement is best effort
-                pass
-
-        threading.Thread(target=reap, daemon=True).start()
+        self._worker.stop(wait=False)
 
     def _poll(self) -> None:
         """Read one reply, or enforce the current deadline.
@@ -303,7 +239,7 @@ class ProcessBackend(QObject):
             self._poll_timer.stop()
             return
 
-        connection = self._connection
+        connection = self._worker.connection
         if connection is None:
             if active_id is not None:
                 self._fail(active_id, "the calculation backend is not running")
@@ -319,11 +255,17 @@ class ProcessBackend(QObject):
                         return
                     if phase != "result":
                         return
+                    expect_variants = self._expect_variants
                     self._active_id = None
-                    self._variants_id = active_id
-                    self._variants_deadline = (
-                        time.monotonic() + self.VARIANTS_TIMEOUT_SECONDS
-                    )
+                    if expect_variants:
+                        self._variants_id = active_id
+                        self._variants_deadline = (
+                            time.monotonic() + self.VARIANTS_TIMEOUT_SECONDS
+                        )
+                    else:
+                        self._variants_id = None
+                        self._variants_deadline = 0.0
+                        self._poll_timer.stop()
                     self.finished.emit(active_id, payload)
                     return
 

@@ -16,7 +16,12 @@ def main() -> int:
     for module in MODULES:
         print(f"\n=== {module.__name__} ===")
         failed += module.main()
-    print(f"\n{'FAILED' if failed else 'OK'}: {len(MODULES)} module(s)")
+    # Each module's `main` answers 1 when *it* failed, so `failed` counts modules,
+    # not tests — the per-module summary above already prints the test ratio.
+    print(
+        f"\nFAILED: {failed}/{len(MODULES)} module(s)" if failed
+        else f"\nOK: {len(MODULES)} module(s)"
+    )
     return 1 if failed else 0
 
 

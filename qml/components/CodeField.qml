@@ -23,21 +23,17 @@ QQC2.TextField {
     //: (see `CodeContextMenu`).
     CodeContextMenu { editor: field }
 
-    //: The code theme's colours for the current appearance; the UI theme's are
-    //: the fallback for a theme that leaves a slot empty.
-    readonly property var surface: settingsVM.codeSurface(Theme.isDark())
+    //: The code theme's colours, font and insets, defined once for every code
+    //: input (see `CodeInputLook`).
+    CodeInputLook { id: look }
 
-    font: settingsVM.codeFont
-    color: surface.ink || Theme.currentTheme.colors.textColor
-    placeholderTextColor: surface.placeholder
-        || Theme.currentTheme.colors.textSecondaryColor
-    // Equal vertical insets and centre alignment, so the glyphs sit on the
-    // control's centre line however tall the caller makes it: the read-only
-    // label this replaces centres in its cell, and the text must not jump.
-    topPadding: 6
-    bottomPadding: 6
-    leftPadding: 8
-    rightPadding: 8
-    verticalAlignment: TextInput.AlignVCenter
+    font: look.font
+    color: look.ink
+    placeholderTextColor: look.placeholder
+    topPadding: look.topPadding
+    bottomPadding: look.bottomPadding
+    leftPadding: look.leftPadding
+    rightPadding: look.rightPadding
+    verticalAlignment: look.verticalAlignment
     background: CodeSurface { focused: field.activeFocus }
 }

@@ -2,7 +2,6 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import RinUI
-import RinUI as Rin
 import "../components"
 
 // The log is edge to edge and borderless: no card behind it, no rounded chrome of

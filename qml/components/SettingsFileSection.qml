@@ -5,23 +5,10 @@ import RinUI
 //: The Settings page's **Settings file** section: where the file is, what mode the store
 //: resolved, the warning a read-only location produces, and the reset-everything row
 //: with the dialog that confirms it.
-ColumnLayout {
-    //: What the page's sticky bar shows once this subtitle reaches it, and where
-    //: the subtitle sits inside the scrolling column, so the bar can tell when
-    //: that happened (both are plain `y`/`text` bindings: layouts notify).
-    readonly property string sectionTitle: subtitle.text
-    readonly property real subtitleOffset: subtitle.y
+SettingsSection {
+    label: qsTr("Settings file")
 
-                    Layout.fillWidth: true
-                    spacing: 3
-
-                    Text {
-                        id: subtitle
-                        typography: Typography.BodyStrong
-                        text: qsTr("Settings file")
-                    }
-
-                    SettingCard {
+    SettingCard {
                         Layout.fillWidth: true
                         title: qsTr("Open directory")
                         description: settingsVM.configMode + " · " + settingsVM.configPath

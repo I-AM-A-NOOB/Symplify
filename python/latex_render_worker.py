@@ -15,10 +15,15 @@ import warnings
 from typing import Any
 
 from .latex_render import render_data_url
+from .sandbox import apply_worker_limits
 
 
 def render_worker_main(connection: Any, generations: Any) -> None:
     """Serve render requests until the parent closes the pipe or sends None."""
+    # The same child-side containment the calculation worker gets: shed the
+    # environment and, on POSIX, set the rlimits. Windows' job-wide limits are
+    # assigned by the parent (`ChildProcess(sandboxed=True)`).
+    apply_worker_limits()
     try:
         while True:
             try:

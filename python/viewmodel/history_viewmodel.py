@@ -12,9 +12,18 @@ lazily per visible row and re-tinted when the theme color changes.
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from PySide6.QtCore import Property, QAbstractListModel, QModelIndex, Qt, Signal, Slot
+from PySide6.QtCore import (
+    Property,
+    QAbstractListModel,
+    QAbstractProxyModel,
+    QModelIndex,
+    Qt,
+    Signal,
+    Slot,
+)
 
 from ..latex_render import LatexStyle
+from .latex_jobs import LatexJobs
 from .latex_service import LatexRenderService
 
 
@@ -88,11 +97,11 @@ class HistoryModel(QAbstractListModel):
         #: Theme ink, font size and LaTeX font file, in one value.
         self._latex_style = LatexStyle()
         self._latex_service = latex_service or LatexRenderService(self)
-        #: token -> item; row indexes move when entries are inserted at the top.
-        self._latex_pending: dict[str, HistoryItem] = {}
-        self._latex_seq = 0
-        self._latex_service.rendered.connect(self._on_latex_rendered)
-        self._latex_service.failed.connect(self._on_latex_failed)
+        #: The artwork requests; the target is the item itself, because row
+        #: indexes move when entries are inserted at the top.
+        self._latex_jobs = LatexJobs(self._latex_service, "history", self)
+        self._latex_jobs.rendered.connect(self._on_latex_rendered)
+        self._latex_jobs.failed.connect(self._on_latex_failed)
 
     def roleNames(self):
         return {
@@ -162,12 +171,7 @@ class HistoryModel(QAbstractListModel):
         if item.svg_url is not None or item.requested:
             return
         item.requested = True
-        self._latex_seq += 1
-        token = f"history:{self._latex_seq}"
-        self._latex_pending[token] = item
-        self._latex_service.request(
-            token, item.latex, self._latex_style, owner="history"
-        )
+        self._latex_jobs.request(item, item.latex, self._latex_style)
 
     def _row_of(self, item: HistoryItem) -> int | None:
         """Current row for an item; entries can shift after a new calculation."""
@@ -177,11 +181,8 @@ class HistoryModel(QAbstractListModel):
         return None
 
     def _on_latex_rendered(
-        self, token: str, url: str, width: int, height: int
+        self, item: HistoryItem, url: str, width: int, height: int
     ) -> None:
-        item = self._latex_pending.pop(token, None)
-        if item is None:
-            return
         item.svg_url = url
         item.natural_w = width
         item.natural_h = height
@@ -193,23 +194,30 @@ class HistoryModel(QAbstractListModel):
                 [self.LatexUrlRole, self.NaturalWidthRole, self.NaturalHeightRole],
             )
 
-    def _on_latex_failed(self, token: str, message: str) -> None:
-        item = self._latex_pending.pop(token, None)
-        if item is not None:
-            item.requested = False
+    def _on_latex_failed(self, item: HistoryItem, message: str) -> None:
+        item.requested = False
 
-    def set_latex_style(self, style: LatexStyle) -> None:
-        """Drop cached SVGs and re-render lazily in a new style.
+    def set_latex_style(self, style: LatexStyle, invalidate: bool = True) -> None:
+        """Take a new style, and re-render now unless a burst is in progress.
+
+        A single change invalidates every cached SVG at once; later steps of a
+        size drag only move the style, and `refresh_latex_artwork` runs once when
+        the burst ends.
+        """
+        if style == self._latex_style:
+            return
+        self._latex_style = style
+        if invalidate:
+            self.refresh_latex_artwork()
+
+    def refresh_latex_artwork(self) -> None:
+        """Drop cached SVGs and re-render lazily in the current style.
 
         Queued renders from the old style are invalidated by the service's
         history generation; the cards request again when they are next near the
         viewport.
         """
-        if style == self._latex_style:
-            return
-        self._latex_style = style
-        self._latex_service.begin_generation("history")
-        self._latex_pending.clear()
+        self._latex_jobs.reset()
         if self._items:
             for item in self._items:
                 item.svg_url = None
@@ -249,8 +257,7 @@ class HistoryModel(QAbstractListModel):
         """Clear all history entries (granular removal, no reset flash)."""
         if not self._items:
             return
-        self._latex_service.begin_generation("history")
-        self._latex_pending.clear()
+        self._latex_jobs.reset()
         self.beginRemoveRows(QModelIndex(), 0, len(self._items) - 1)
         self._items.clear()
         self.endRemoveRows()
@@ -261,3 +268,157 @@ class HistoryModel(QAbstractListModel):
         return len(self._items)
 
     count = Property(int, _get_count, notify=countChanged)
+
+
+class HistoryWindowModel(QAbstractProxyModel):
+    """The first ``limit`` rows of the history view.
+
+    The History page builds one card per row. Without a window it built every
+    card the moment the page opened — hundreds of object trees and two
+    rich-text bindings each — while only ``loaded`` of them were revealed. The
+    page wraps its search proxy in this one and raises ``limit`` a batch at a
+    time, so the cards beyond the revealed batch never exist.
+
+    Rows map 1:1 onto the source proxy (the search filter), so a window row index
+    is still the proxy row index the page's search and reveal arithmetic use. A
+    plain ``QSortFilterProxyModel`` cannot do this job: with a row count that is
+    a property of the source's *length*, changing ``limit`` made it emit only
+    ``layoutChanged``, and the Repeater built no cards at all (measured). This
+    proxy emits the structural signals the view actually listens to.
+    """
+
+    limitChanged = Signal()
+
+    def __init__(self, parent=None):
+        """Start with no rows; the page binds `limit` to its revealed count."""
+        super().__init__(parent)
+        self._limit = 0
+
+    # -- source ------------------------------------------------------------
+
+    def setSourceModel(self, model) -> None:
+        """Set the source and follow its structural changes."""
+        previous = self.sourceModel()
+        if previous is not None:
+            for signal, slot in (
+                (previous.rowsInserted, self._rows_inserted),
+                (previous.rowsRemoved, self._rows_removed),
+                (previous.modelReset, self._model_reset),
+                (previous.layoutChanged, self._layout_changed),
+                (previous.dataChanged, self._data_changed),
+            ):
+                try:
+                    signal.disconnect(slot)
+                except (RuntimeError, TypeError):
+                    pass
+        super().setSourceModel(model)
+        if model is not None:
+            model.rowsInserted.connect(self._rows_inserted)
+            model.rowsRemoved.connect(self._rows_removed)
+            model.modelReset.connect(self._model_reset)
+            model.layoutChanged.connect(self._layout_changed)
+            model.dataChanged.connect(self._data_changed)
+
+    def _rows_inserted(self, _parent, _first, _last) -> None:
+        """A new entry shifts the window's contents; reset rather than guess."""
+        self.beginResetModel()
+        self.endResetModel()
+
+    def _rows_removed(self, _parent, _first, _last) -> None:
+        self.beginResetModel()
+        self.endResetModel()
+
+    def _model_reset(self) -> None:
+        self.beginResetModel()
+        self.endResetModel()
+
+    def _layout_changed(self, *_args) -> None:
+        """The search proxy re-filtered: the visible rows are a different set."""
+        self.beginResetModel()
+        self.endResetModel()
+
+    def _data_changed(self, top_left, bottom_right, roles) -> None:
+        """Forward one row's data change while it is inside the window."""
+        first = max(0, top_left.row())
+        last = min(self.rowCount() - 1, bottom_right.row())
+        if first <= last:
+            self.dataChanged.emit(
+                self.index(first, 0), self.index(last, 0), roles
+            )
+
+    # -- limit -------------------------------------------------------------
+
+    def _get_limit(self) -> int:
+        return self._limit
+
+    def _set_limit(self, limit: int) -> None:
+        limit = max(0, int(limit))
+        if limit == self._limit:
+            return
+        old_count = self.rowCount()
+        self._limit = limit
+        new_count = self.rowCount()
+        if new_count > old_count:
+            self.beginInsertRows(QModelIndex(), old_count, new_count - 1)
+            self.endInsertRows()
+        elif new_count < old_count:
+            self.beginRemoveRows(QModelIndex(), new_count, old_count - 1)
+            self.endRemoveRows()
+        self.limitChanged.emit()
+
+    limit = Property(int, _get_limit, _set_limit, notify=limitChanged)
+
+    # -- QAbstractProxyModel ------------------------------------------------
+
+    def rowCount(self, parent=QModelIndex()) -> int:
+        source = self.sourceModel()
+        if parent.isValid() or source is None:
+            return 0
+        return min(self._limit, source.rowCount())
+
+    def columnCount(self, parent=QModelIndex()) -> int:
+        return 0 if parent.isValid() or self.sourceModel() is None else 1
+
+    def index(self, row: int, column: int = 0, parent=QModelIndex()) -> QModelIndex:
+        if (parent.isValid() or column != 0
+                or not 0 <= row < self.rowCount()):
+            return QModelIndex()
+        return self.createIndex(row, column)
+
+    def parent(self, index) -> QModelIndex:
+        return QModelIndex()
+
+    def mapToSource(self, proxy_index: QModelIndex) -> QModelIndex:
+        if not proxy_index.isValid() or proxy_index.row() >= self.rowCount():
+            return QModelIndex()
+        source = self.sourceModel()
+        if source is None:
+            return QModelIndex()
+        return source.index(proxy_index.row(), proxy_index.column())
+
+    def mapFromSource(self, source_index: QModelIndex) -> QModelIndex:
+        if not source_index.isValid() or source_index.row() >= self.rowCount():
+            return QModelIndex()
+        return self.index(source_index.row(), source_index.column())
+
+    def data(self, index: QModelIndex, role: int = Qt.DisplayRole):
+        source_index = self.mapToSource(index)
+        if not source_index.isValid():
+            return None
+        return self.sourceModel().data(source_index, role)
+
+    def setData(self, index: QModelIndex, value, role: int = Qt.EditRole) -> bool:
+        source_index = self.mapToSource(index)
+        if not source_index.isValid():
+            return False
+        return self.sourceModel().setData(source_index, value, role)
+
+    def flags(self, index: QModelIndex):
+        source_index = self.mapToSource(index)
+        if not source_index.isValid():
+            return Qt.NoItemFlags
+        return self.sourceModel().flags(source_index)
+
+    def roleNames(self) -> dict:
+        source = self.sourceModel()
+        return source.roleNames() if source is not None else {}

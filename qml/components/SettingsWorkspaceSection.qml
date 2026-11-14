@@ -10,12 +10,8 @@ import RinUI
 //:
 //: `indexOf` is a three-line helper the Interface section keeps its own copy of: a shared
 //: singleton for that would cost more than it saves.
-ColumnLayout {
-    //: What the page's sticky bar shows once this subtitle reaches it, and where
-    //: the subtitle sits inside the scrolling column, so the bar can tell when
-    //: that happened (both are plain `y`/`text` bindings: layouts notify).
-    readonly property string sectionTitle: subtitle.text
-    readonly property real subtitleOffset: subtitle.y
+SettingsSection {
+    label: qsTr("Workspace")
 
         // The bracket setting's two choices, named once: the expander's header shows
         // the one in effect and the rows below are them.
@@ -83,15 +79,6 @@ ColumnLayout {
             return qsTr("%1 LaTeX formulas. One per line; an empty list restores the shipped ones.")
                 .arg(count)
         }
-
-                    Layout.fillWidth: true
-                    spacing: 3
-
-                    Text {
-                        id: subtitle
-                        typography: Typography.BodyStrong
-                        text: qsTr("Workspace")
-                    }
 
                     // The code colours follow the UI theme, so this picks a FAMILY —
                     // every one of them has a dark and a light member — rather than a

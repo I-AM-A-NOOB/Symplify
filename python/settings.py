@@ -299,6 +299,16 @@ class SettingsStore:
         self.update({key: value})
         return self.get(key)
 
+    def stage(self, key: str, value: Any) -> Any:
+        """Validate and store ``value`` in memory **without** touching the file.
+
+        The size setters fire once per spin-box step: the value has to be live
+        immediately, but a YAML dump per step is wasted work. `save` is the
+        flush; the viewmodel coalesces it.
+        """
+        self._write_key(key, self._validate_known(key, value))
+        return self.get(key)
+
     def update(self, values: dict[str, Any]) -> None:
         """Set several dotted keys and persist once (window geometry, resets)."""
         for key, value in values.items():

@@ -29,6 +29,7 @@ Two things about the input:
 
 import io
 import json
+import re
 import sys
 import urllib.request
 import zipfile
@@ -505,29 +506,35 @@ def render() -> str:
     return "\n".join(lines)
 
 
-#: The line `--write` looks for, and the file it splices the table into. Everything
-#: else in that file is hand-written and is left exactly as it is.
-THEMES_MARKER = "THEMES: Dict[str, Dict[str, ThemeLayer]] = {"
+#: The line `--write` looks for, and the file it splices the table into.
+#: Everything else in that file is hand-written and is left exactly as it is.
+#:
+#: Matched by *shape*, not by the literal type hint: the hint is rewritten by any
+#: modernisation pass (`Dict[...]` -> `dict[...]`), and a fixed marker string then
+#: stops matching the file it was written for while looking perfectly correct here.
+_THEMES_DECLARATION = re.compile(r"^THEMES:[^\n]*\{[ \t]*$", re.MULTILINE)
 TARGET = Path(__file__).resolve().parents[1] / "python" / "code_themes.py"
 
 
 def write_into(path: Path = TARGET) -> None:
     """Replace the ``THEMES`` block in ``path`` with what :func:`render` prints.
 
-    The block runs from the marker to the closing brace that ends it at column 0.
-    A missing marker is an error rather than a guess — a table spliced into the
-    wrong place is worse than a run that stops.
+    The block runs from the declaration to the closing brace that ends it at
+    column 0. A missing declaration is an error rather than a guess — a table
+    spliced into the wrong place is worse than a run that stops.
     """
     text = path.read_text(encoding="utf-8")
-    start = text.find(THEMES_MARKER)
-    if start < 0:
-        raise SystemExit(f"{path}: no `{THEMES_MARKER}`")
-    end = text.find("\n}", start + len(THEMES_MARKER))
+    declaration = _THEMES_DECLARATION.search(text)
+    if declaration is None:
+        raise SystemExit(f"{path}: no `THEMES: ... = {{` declaration")
+    end = text.find("\n}", declaration.end())
     if end < 0:
         raise SystemExit(f"{path}: the THEMES block has no closing brace")
-    # `render()` prints the braces too, so only its body is taken.
+    # `render()` prints the braces too, so only its body is taken. The declaration
+    # line (with whatever type hint the file holds) is kept as it is.
     path.write_text(
-        text[:start] + THEMES_MARKER + render()[1:] + text[end + 2:],
+        text[:declaration.start()] + declaration.group(0).rstrip()
+        + render()[1:] + text[end + 2:],
         encoding="utf-8",
     )
     print(f"wrote {len(THEME_SOURCES)} families into {path}")

@@ -223,8 +223,11 @@ Rectangle {
                     z: 1
                     width: 28
                     height: 28
-                    checkable: false
                     focusPolicy: Qt.NoFocus
+                    //: The base `PillButton` is a toggle (`checkable: true`); a
+                    //: scroll step must stay momentary, or the click leaves it
+                    //: checked/highlighted and the icon turns white.
+                    checkable: false
                     visible: tabScroll.canScrollLeft
                     icon.name: "ic_fluent_caret_left_20_regular"
                     onClicked: tabScroll.scrollBy(-tabScroll.notchStep)
@@ -263,8 +266,9 @@ Rectangle {
                     z: 1
                     width: 28
                     height: 28
-                    checkable: false
                     focusPolicy: Qt.NoFocus
+                    //: See `previousTabButton`: a step, not a toggle.
+                    checkable: false
                     visible: tabScroll.canScrollRight
                     icon.name: "ic_fluent_caret_right_20_regular"
                     onClicked: tabScroll.scrollBy(tabScroll.notchStep)
@@ -357,10 +361,17 @@ Rectangle {
                             // QML binding is what makes switching tabs ask for the
                             // next tab's keycaps, while the VM caches by revision.
                             text: modelData.label
-                            readonly property var cap:
-                                modelData.latex && keyGrid.index === root.currentTabIndex
-                                    ? vm.latexKeycap(modelData.latex, vm.keyboardRevision)
+                            readonly property var cap: {
+                                // Art arrives asynchronously: naming the batch
+                                // revision is what re-reads the cache for every
+                                // key once a batch lands.
+                                vm.keycapArtRevision
+                                return modelData.latex
+                                    && keyGrid.index === root.currentTabIndex
+                                    ? vm.latexKeycap(modelData.latex,
+                                                     vm.keyboardRevision)
                                     : null
+                            }
                             focusPolicy: Qt.NoFocus
                             onClicked: root.keyPressed(modelData.insert)
 

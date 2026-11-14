@@ -6,8 +6,6 @@ __pycache__
 /.vscode
 /.vs
 # Distribution files
-/main.build
-/main.dist
 /build
 
 # Nuitka's diagnostics, written next to the CWD when a build fails
@@ -17,7 +15,7 @@ nuitka_output.txt
 # instead of the system config directory (see python/settings.py)
 /data
 
-# Icon rasters, written from icon/Symplify.svg by icon/build-icons.ps1. The .ico
+# Icon rasters, written from icon/Symplify.svg by scripts/build_icon.py. The .ico
 # is committed because Nuitka embeds it; these loose PNGs are derived from the
 # same SVG by a committed script, and nothing reads them.
 /icons-png/

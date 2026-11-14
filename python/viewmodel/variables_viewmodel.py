@@ -7,18 +7,24 @@ dataChanged / remove) so views update in place instead of resetting
 wholesale.
 """
 
-from typing import Any
+from collections import deque
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import (
     Property,
+    QAbstractEventDispatcher,
     QAbstractTableModel,
+    QCoreApplication,
     QModelIndex,
     QObject,
     Qt,
+    QTimer,
     Signal,
     Slot,
 )
 
+from ..latex_render import LatexStyle, render_data_url
 from ..model import render_latex_definition
 from ..model.calculator import (
     Assignment,
@@ -27,9 +33,26 @@ from ..model.calculator import (
     Failure,
     Result,
 )
-from ..model.plotting import is_plot_variable, plot_variable_warning
-from ..model.variable import VariableManager
+from ..model.variable import VariableManager, reserved_name_warning
 from .log_viewmodel import LogViewModel
+
+if TYPE_CHECKING:
+    from .search import VariablesFilterModel
+
+#: Stop the dedicated Variables worker after this long without a write. The
+#: next edit starts it again (SymPy import) and shows its result when ready;
+#: keeping a third SymPy process alive while the page is idle cost ~140 MB.
+BACKEND_IDLE_MS = 60_000
+
+
+@dataclass(frozen=True)
+class _WriteRequest:
+    """One add/update waiting for the dedicated Variables worker."""
+
+    request_id: int
+    kind: str                 # "add" | "update"
+    name: str
+    text: str
 
 
 class VariablesModel(QAbstractTableModel):
@@ -38,25 +61,48 @@ class VariablesModel(QAbstractTableModel):
     Columns: name / expression / type. The expression column shows the
     canonical sympy string for valid entries and the raw user input for
     invalid ones (whose value is NaN, which the type column labels "Invalid").
-    Every write goes through the shared ``Calculator``, so no route can create
-    a variable while skipping name validation.
+
+    In the application every write goes through a dedicated calculation
+    ``backend``, so no expression is evaluated in the UI process and a runaway
+    request is bounded by the backend's deadline. Requests are queued and sent
+    one at a time: the worker answers one request, and a variable edit must not
+    cancel the previous edit. With no backend (tests/headless) the same pipeline
+    runs synchronously through the in-process ``Calculator`` and keeps the old
+    return values.
     """
 
     warningOccurred = Signal(str, str)
     countChanged = Signal()
+    #: Emitted after an add reaches the store (async or sync); QML selects it.
+    variableAdded = Signal(str, bool)
+    #: A queued write started or finished; the viewmodel restarts its idle stop.
+    activity = Signal()
 
     def __init__(
         self,
         manager: VariableManager,
         log: LogViewModel | None = None,
         calculator: Calculator | None = None,
+        backend: QObject | None = None,
         parent=None,
     ):
         """Initialize the variables model."""
         super().__init__(parent)
         self._manager = manager
         self._log = log
-        self._calculator = calculator if calculator is not None else Calculator()
+        self._backend = backend
+        #: The in-process path is the headless/test fallback, never the app's.
+        self._calculator = (
+            None if backend is not None
+            else calculator if calculator is not None else Calculator()
+        )
+        self._queue: deque[_WriteRequest] = deque()
+        self._active: _WriteRequest | None = None
+        self._request_seq = 0
+        if backend is not None:
+            backend.finished.connect(self._on_finished)
+            backend.timedOut.connect(self._on_timed_out)
+            backend.failed.connect(self._on_failed)
         #: Insertion-ordered variable names. Read off the manager rather than
         #: assumed empty: the app starts with the plotting variables in scope
         #: (``MainViewModel(initial_variables=…)``), and a table that began empty
@@ -94,14 +140,7 @@ class VariablesModel(QAbstractTableModel):
             if text == name:
                 return True
             try:
-                ok = self.rename(name, text)
-                if ok:
-                    self._log_info(f"Variable renamed: {name} -> {text}")
-                    # Both ends matter: renaming x away takes the plotting name
-                    # with it, renaming something *to* x replaces the variable.
-                    self._warn_reserved(name)
-                    self._warn_reserved(text)
-                return ok
+                return self.rename(name, text)
             except ValueError as e:
                 #: The write is refused, so the view keeps the editor open and
                 #: nothing moves. Silence is what made that read as "the table
@@ -112,24 +151,7 @@ class VariablesModel(QAbstractTableModel):
                 self.warningOccurred.emit(text, str(e))
                 return False
 
-        try:
-            result = self._parse(text)
-        except Exception as parse_err:
-            self.save_invalid(name, text)
-            self._log_warn(f"Variable '{name}' kept as invalid: {parse_err}")
-            return True
-        if isinstance(result, Failure):
-            self.save_invalid(name, text)
-            self._log_warn(f"Variable '{name}' kept as invalid: {result.message}")
-            return True
-        self.save(name, result.value)
-        self._log_info(f"Variable updated: {name} = {result.value}")
-        self._warn_reserved(name)
-        return True
-
-    def _parse(self, value_str: str) -> Result:
-        """Evaluate an expression with the current variable snapshot."""
-        return self._calculator.evaluate(value_str, self._manager.list_all())
+        return self.update(name, text)
 
     def _log_info(self, message: str) -> None:
         if self._log is not None:
@@ -143,21 +165,173 @@ class VariablesModel(QAbstractTableModel):
         if self._log is not None:
             self._log.add_error(message, "Variables")
 
+    def _assign_direct(self, name: str, value_str: str) -> Result:
+        """Evaluate a write in-process; only the headless/test path reaches it."""
+        assert self._calculator is not None
+        return self._calculator.assign(
+            Assignment(name, "=", value_str), self._manager.list_all()
+        )
+
+    def pending_add_names(self) -> set[str]:
+        """Add names already queued or running, so the next name skips them."""
+        names = {request.name for request in self._queue if request.kind == "add"}
+        if self._active is not None and self._active.kind == "add":
+            names.add(self._active.name)
+        return names
+
+    def _enqueue(self, kind: str, name: str, value_str: str) -> None:
+        self._request_seq += 1
+        self._queue.append(_WriteRequest(self._request_seq, kind, name, value_str))
+        self.activity.emit()
+        self._start_next()
+
+    def is_idle(self) -> bool:
+        """True when no write is queued or running (the worker may be stopped)."""
+        return self._active is None and not self._queue
+
+    def _start_next(self) -> None:
+        """Send the oldest queued request; one worker request at a time."""
+        if self._backend is None or self._active is not None or not self._queue:
+            return
+        request = self._queue.popleft()
+        self._active = request
+        try:
+            self._backend.submit(
+                request.request_id,
+                "variable",
+                Assignment(request.name, "=", request.text),
+                self._manager.list_all(),
+            )
+        except Exception as exc:  # noqa: BLE001 - start failure is a write failure
+            self._finish(
+                request.request_id,
+                Failure(
+                    request.text,
+                    ErrorKind.INTERNAL,
+                    f"{type(exc).__name__}: {exc}",
+                ),
+                transport_error=True,
+            )
+
+    def _on_finished(self, request_id: int, result: Result) -> None:
+        self._finish(request_id, result)
+
+    def _on_timed_out(self, request_id: int) -> None:
+        self._finish(
+            request_id,
+            Failure("", ErrorKind.TIMEOUT, "Variable request timed out."),
+            transport_error=True,
+        )
+
+    def _on_failed(self, request_id: int, message: str) -> None:
+        self._finish(
+            request_id,
+            Failure("", ErrorKind.INTERNAL, f"Calculation backend failed: {message}"),
+            transport_error=True,
+        )
+
+    def _finish(
+        self, request_id: int, result: Result, *, transport_error: bool = False
+    ) -> None:
+        """Apply one backend answer and send the next queued write.
+
+        A transport error (timeout/crash/start failure) is not a statement about
+        the expression: an existing variable keeps its old value and only the
+        log says the update did not complete.
+        """
+        if self._active is None or self._active.request_id != request_id:
+            return
+        request = self._active
+        self._active = None
+        if request.kind == "add":
+            self._apply_add(request.name, request.text, result)
+        else:
+            self._apply_update(
+                request.name, request.text, result,
+                preserve_on_error=transport_error,
+            )
+        self.activity.emit()
+        self._start_next()
+
+    def add(self, name: str, value_str: str) -> bool:
+        """Add one variable; async backends answer through ``variableAdded``."""
+        if self._backend is not None:
+            self._enqueue("add", name, value_str)
+            return True
+        return self._apply_add(name, value_str, self._assign_direct(name, value_str))
+
+    def _apply_add(self, name: str, value_str: str, result: Result) -> bool:
+        if isinstance(result, Failure):
+            self._log_error(f"Failed to add variable: {result.message}")
+            self.variableAdded.emit(name, False)
+            return False
+        self.save(name, result.value)
+        self._log_info(f"Variable added: {name} = {result.value}")
+        self._warn_reserved(name)
+        self.variableAdded.emit(name, True)
+        return True
+
+    def update(self, name: str, value_str: str) -> bool:
+        """Re-parse one variable's value; an unparsable entry is kept as invalid.
+
+        One route for the inline cell editor and the page's fields, so the two
+        cannot disagree about what "kept as invalid" means (the user's input is
+        never lost) or about which failures are refusals instead. With an async
+        backend the same decision lands when the result arrives; the return value
+        then only says the request was accepted.
+        """
+        if not self._manager.exists(name):
+            self._log_error(f"Variable '{name}' does not exist")
+            return False
+        if self._backend is not None:
+            self._enqueue("update", name, value_str)
+            return True
+        try:
+            result = self._assign_direct(name, value_str)
+        except Exception as parse_err:  # noqa: BLE001 - kept, never lost
+            self.save_invalid(name, value_str)
+            self._log_warn(f"Variable '{name}' kept as invalid: {parse_err}")
+            return True
+        return self._apply_update(name, value_str, result)
+
+    def _apply_update(
+        self, name: str, value_str: str, result: Result,
+        *, preserve_on_error: bool = False,
+    ) -> bool:
+        if not self._manager.exists(name):
+            # Renamed or deleted while the request was in flight: the old target
+            # must not be re-created by a late answer.
+            return False
+        if isinstance(result, Failure):
+            if result.kind is ErrorKind.INVALID_NAME:
+                self._log_error(f"Failed to update variable: {result.message}")
+                return False
+            if preserve_on_error:
+                self._log_warn(
+                    f"Variable '{name}' update did not complete: {result.message}; "
+                    "kept the previous value"
+                )
+                return False
+            self.save_invalid(name, value_str)
+            self._log_warn(f"Variable '{name}' kept as invalid: {result.message}")
+            return True
+        self.save(name, result.value)
+        self._log_info(f"Variable updated: {name} = {result.value}")
+        self._warn_reserved(name)
+        return True
+
     def _warn_reserved(self, name: str) -> None:
-        """Warn about the names that input's meaning depends on.
+        """Emit the warning for a name input's meaning depends on.
 
         A SymPy built-in changes what an expression resolves to; a plotting
         variable changes what the plot reads. Both are stored anyway — the
         warning is the whole of the consequence, as it always was for built-ins.
         """
-        if VariableManager.is_sympy_builtin(name):
-            self.warningOccurred.emit(
-                name, f"{name} is a SymPy built-in. You asked for it."
-            )
-            self._log_warn(f"{name} is a SymPy built-in")
-        elif is_plot_variable(name):
-            self.warningOccurred.emit(name, plot_variable_warning(name))
-            self._log_warn(f"{name} is a plotting variable")
+        warning = reserved_name_warning(name)
+        if warning is None:
+            return
+        self.warningOccurred.emit(name, warning)
+        self._log_warn(warning)
 
     def rowCount(self, parent=QModelIndex()) -> int:
         """Return the number of variables."""
@@ -218,6 +392,11 @@ class VariablesModel(QAbstractTableModel):
         self.dataChanged.emit(
             self.index(row, 0), self.index(row, self.columnCount() - 1)
         )
+        self._log_info(f"Variable renamed: {old_name} -> {new_name}")
+        # Both ends matter: renaming x away takes the plotting name with it,
+        # renaming something *to* x replaces the variable.
+        self._warn_reserved(old_name)
+        self._warn_reserved(new_name)
         return True
 
     def remove(self, name: str) -> bool:
@@ -230,6 +409,10 @@ class VariablesModel(QAbstractTableModel):
         self._keys.pop(row)
         self.endRemoveRows()
         self.countChanged.emit()
+        self._log_info(f"Variable deleted: {name}")
+        # Deleting is a modification too: a plotting variable that is gone is
+        # exactly what the next plot cannot read.
+        self._warn_reserved(name)
         return True
 
     @Slot(int, int, result=str)
@@ -278,119 +461,165 @@ class VariablesViewModel(QObject):
     """
 
     warningOccurred = Signal(str, str)
+    #: An add reached the store (or failed); the page selects the new row.
+    variableAdded = Signal(str, bool)
+    #: The rendering style changed: the details panel must ask for new artwork.
+    latexStyleChanged = Signal()
 
     def __init__(
         self,
         variable_manager: VariableManager,
         log: LogViewModel,
         calculator: Calculator | None = None,
+        backend: QObject | None = None,
         parent: QObject | None = None,
     ):
-        """Initialize the variables viewmodel."""
+        """Initialize the variables viewmodel.
+
+        ``backend`` is the application's dedicated Variables worker. With no
+        backend (tests/headless) writes run through ``calculator`` in-process.
+        """
         super().__init__(parent)
         self._variable_manager = variable_manager
         self._log = log
+        self._backend = backend
         self._calculator = calculator if calculator is not None else Calculator()
+        self._filter = None
+        self._latex_style = LatexStyle()
+        #: ``(latex, style) -> {url, width, height}`` for the details panel. The
+        #: page calls `latexFor` from a binding forced by `dataRevision`; a row
+        #: that did not change re-asks for the same artwork, and a ziamath render
+        #: is ~7 ms. Small and bounded: one selected row at a time.
+        self._preview_cache: dict[tuple[str, LatexStyle], dict] = {}
         self._model = VariablesModel(
-            variable_manager, log, self._calculator, parent=self
+            variable_manager, log, self._calculator, backend=backend, parent=self
         )
         self._model.warningOccurred.connect(self.warningOccurred)
+        self._model.variableAdded.connect(self.variableAdded)
+        self._model.activity.connect(self._touch_backend)
+        self._idle_timer = QTimer(self)
+        self._idle_timer.setSingleShot(True)
+        self._idle_timer.setInterval(BACKEND_IDLE_MS)
+        self._idle_timer.timeout.connect(self._stop_idle_backend)
 
     def _get_model(self) -> VariablesModel:
         return self._model
 
     model = Property(QObject, _get_model, constant=True)
 
-    def _assign(self, name: str, value_str: str) -> Result:
-        """Evaluate a write through the model, so the target is checked first."""
-        return self._calculator.assign(
-            Assignment(name, "=", value_str), self._variable_manager.list_all()
-        )
+    def attach_filter(self, filter_model: "VariablesFilterModel") -> None:
+        """Point the page's row lookups at the search proxy.
+
+        The details panel addresses rows as the *proxy* shows them, so the
+        viewmodel needs the same mapping the page's table uses.
+        """
+        self._filter = filter_model
+
+    def set_latex_style(self, style: LatexStyle) -> None:
+        """Take a new rendering style and tell the page it has to ask again."""
+        if style == self._latex_style:
+            return
+        self._latex_style = style
+        self._preview_cache.clear()
+        self.latexStyleChanged.emit()
+
+    @Slot(int, result=str)
+    def latexAt(self, row: int) -> str:
+        """The visible row's expression as LaTeX ("" when it has none)."""
+        if self._filter is None:
+            return ""
+        return self._filter.latexAt(row)
+
+    @Slot(int, result="QVariantMap")
+    def latexFor(self, row: int) -> dict:
+        """``{url, width, height}`` for the visible row's definition.
+
+        Rendered on demand, memoized by the definition text and the style: the
+        page re-asks whenever the selection or the model changes, and a row that
+        did not change would otherwise pay for the same ziamath layout again.
+        """
+        latex = self.latexAt(row)
+        key = (latex, self._latex_style)
+        cached = self._preview_cache.get(key)
+        if cached is not None:
+            return cached
+        url, width, height = render_data_url(latex, self._latex_style)
+        result = {"url": url, "width": width, "height": height}
+        if len(self._preview_cache) >= 32:
+            self._preview_cache.clear()
+        self._preview_cache[key] = result
+        return result
 
     @Slot(str, str, result=bool)
     def addVariable(self, name: str, value_str: str) -> bool:
-        """Add a variable, validating the name and parsing the value."""
-        result = self._assign(name, value_str)
-        if isinstance(result, Failure):
-            self._log.add_error(
-                f"Failed to add variable: {result.message}", "Variables"
-            )
-            return False
-        self._model.save(name, result.value)
-        self._log.add_info(f"Variable added: {name} = {result.value}", "Variables")
-        self._warn_reserved(name)
-        return True
+        """Add a variable through the model's shared write pipeline."""
+        return self._model.add(name, value_str)
 
     @Slot(str, result=bool)
     def deleteVariable(self, name: str) -> bool:
-        """Delete a variable."""
-        if self._model.remove(name):
-            self._log.add_info(f"Variable deleted: {name}", "Variables")
-            # Deleting is a modification too: a plotting variable that is gone
-            # is exactly what the next plot cannot read.
-            self._warn_reserved(name)
-            return True
-        return False
+        """Delete a variable (the model owns the log line and the warning)."""
+        return self._model.remove(name)
 
     @Slot(str, str, result=bool)
     def renameVariable(self, old_name: str, new_name: str) -> bool:
-        """Rename a variable."""
+        """Rename a variable; a refused name is logged and answered False."""
         try:
-            ok = self._model.rename(old_name, new_name)
-            if ok:
-                self._log.add_info(
-                    f"Variable renamed: {old_name} -> {new_name}", "Variables"
-                )
-                # Both ends matter: renaming x away takes the plotting name with
-                # it, renaming something *to* x replaces the variable.
-                self._warn_reserved(old_name)
-                self._warn_reserved(new_name)
-            return ok
-        except Exception as e:
-            self._log.add_error(f"Failed to rename variable: {e}", "Variables")
+            return self._model.rename(old_name, new_name)
+        except ValueError as exc:
+            self._log.add_error(f"Failed to rename variable: {exc}", "Variables")
             return False
 
     @Slot(str, str, result=bool)
     def updateVariable(self, name: str, value_str: str) -> bool:
-        """Update a variable's value.
-
-        An invalid expression is kept in the list as an invalid (NaN) entry so
-        the user's input is never lost.
-        """
-        if not self._variable_manager.exists(name):
-            self._log.add_error(f"Variable '{name}' does not exist", "Variables")
-            return False
-        result = self._assign(name, value_str)
-        if isinstance(result, Failure):
-            if result.kind is ErrorKind.INVALID_NAME:
-                self._log.add_error(
-                    f"Failed to update variable: {result.message}", "Variables"
-                )
-                return False
-            self._model.save_invalid(name, value_str)
-            self._log.add_warning(
-                f"Variable '{name}' kept as invalid: {result.message}", "Variables"
-            )
-            return True
-        self._model.save(name, result.value)
-        self._log.add_info(f"Variable updated: {name} = {result.value}", "Variables")
-        self._warn_reserved(name)
-        return True
+        """Update a variable's value through the model's shared pipeline."""
+        return self._model.update(name, value_str)
 
     @Slot(result=str)
     def generateUniqueName(self) -> str:
-        """Generate a unique default variable name."""
-        return self._variable_manager.generate_unique_name("var")
+        """Generate a default name that also skips queued adds.
 
-    def _warn_reserved(self, name: str) -> None:
-        """Emit the warning for a name input's meaning depends on.
-
-        The same two kinds the table warns about (see ``VariablesModel``):
-        SymPy built-ins, and the variables a plot reads.
+        Two quick `+` clicks would otherwise both ask the manager for `var_1`:
+        the first add has not reached the manager yet, so it cannot reserve the
+        name.
         """
-        if VariableManager.is_sympy_builtin(name):
-            self.warningOccurred.emit(
-                name, f"{name} is a SymPy built-in. You asked for it."
-            )
-        elif is_plot_variable(name):
-            self.warningOccurred.emit(name, plot_variable_warning(name))
+        pending = self._model.pending_add_names()
+        counter = 1
+        while True:
+            name = f"var_{counter}"
+            if (name not in pending
+                    and not self._variable_manager.exists(name)
+                    and self._variable_manager.validate_name(name)):
+                return name
+            counter += 1
+
+    @Slot()
+    def warmUpBackend(self) -> None:
+        """Start the Variables worker after the first frame, hiding SymPy's import."""
+        if self._backend is not None:
+            self._backend.warm_up()
+            self._touch_backend()
+
+    def _touch_backend(self) -> None:
+        if self._backend is None:
+            return
+        # A QCoreApplication can outlive its dispatcher during teardown; a timer
+        # started then would only print "event dispatcher destroyed".
+        if (QCoreApplication.instance() is not None
+                and QAbstractEventDispatcher.instance() is not None
+                and not QCoreApplication.closingDown()):
+            self._idle_timer.start()
+
+    @Slot()
+    def stopBackendIfIdle(self) -> None:
+        """Reclaim the Variables worker when the page is idle or being left."""
+        self._stop_idle_backend()
+
+    def _stop_idle_backend(self) -> None:
+        if self._backend is None:
+            return
+        if self._model.is_idle():
+            self._backend.shutdown()
+            self._idle_timer.stop()
+        else:
+            # A write is still queued/running; check again after another window.
+            self._touch_backend()

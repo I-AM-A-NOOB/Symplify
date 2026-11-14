@@ -52,7 +52,7 @@ from python.model.plotting import plot_series, plot_variables
 from python.model.variable import VariableManager, is_sympy_name, validate_name
 from python.model.variants import variants
 from python.settings import DEFAULTS, SettingsStore
-from python.viewmodel.history_viewmodel import HistoryModel
+from python.viewmodel.history_viewmodel import HistoryModel, HistoryWindowModel
 from python.viewmodel.main_viewmodel import MainViewModel
 from python.viewmodel.search import (
     HistoryFilterModel,
@@ -173,11 +173,19 @@ def test_python_escape_syntax_is_rejected():
     traversal, string-eval helper or builtin call may reach its evaluator."""
     for text in (
         "().__class__.__bases__[0].__subclasses__()",
+        "x.__class__.mro()",
+        "x.subs.__globals__",
+        "x.__getattribute__('subs')",
+        "x.func(1)",
+        "x.func",
+        "x.free_symbols.pop()",
+        "x.free_symbols.__class__",
         "parse_expr('1 + 1')",
         "sympify('1 + 1')",
         "S('1 + 1')",
         "open('nope.txt', 'w')",
         "__import__('os')",
+        'symbols("__import__(\'os\')")',
     ):
         assert isinstance(evaluate(text), Failure), text
     assert isinstance(evaluate("x.__class__", {"x": X}), Failure)
@@ -185,6 +193,29 @@ def test_python_escape_syntax_is_rejected():
     # Strings that are data for a constructor are still allowed; arbitrary
     # string expressions are not.
     assert ok('Symbol("y")') == Symbol("y")
+
+
+def test_sympy_methods_and_symbol_lists_are_allowed():
+    """The gate follows SymPy's object language without reopening Python.
+
+    Whitelisted method calls, dict literals for substitution and the name-list
+    form of symbols() are data operations on sympy objects; bare attributes and
+    unlisted methods remain the escape routes the gate refuses.
+    """
+    assert ok("Matrix([[1, 2], [3, 4]]).det()") == -2
+    assert ok("x.subs({x: 1})") == 1
+    assert ok("symbols('x y')") == (X, Y)
+    assert ok("x.diff(x)") == 1
+    assert ok("x.subs({x: 1}).doit()") == 1
+    assert ok("x.replace(x, y)") == Y
+    assert ok("Matrix([[1, 2], [3, 4]]).inv()") == Matrix(
+        [[-2, 1], [Rational(3, 2), Rational(-1, 2)]]
+    )
+    assert ok("x.free_symbols") == {X}
+    assert ok("(x + 1).args") == (1, X)
+    assert ok("Matrix([[1, 2], [3, 4]]).shape") == (2, 2)
+    assert ok("Matrix([[1, 2], [3, 4]]).T") == Matrix([[1, 3], [2, 4]])
+    assert ok("solve(x**2 - 4, x, dict=True)") == [{X: -2}, {X: 2}]
 
 
 # --------------------------------------------------------------------------
@@ -517,7 +548,10 @@ def test_every_qml_viewmodel_reference_exists():
         "calcVM": viewmodel.calculator,
         "varsVM": viewmodel.variables,
         "variablesModel": viewmodel.variables.model,
+        "variablesFilter": viewmodel.variablesFilter,
         "historyVM": viewmodel.history,
+        "historyFilter": viewmodel.historyFilter,
+        "historyWindow": viewmodel.historyWindow,
         "logVM": viewmodel.log,
         "settingsVM": viewmodel.settings,
     }
@@ -571,6 +605,35 @@ def test_the_watermark_setting_round_trips_and_reaches_the_calculator():
         DEFAULTS["workspace"]["result_watermark_pool"])
     vm.settings.resultWatermark = "nonsense"
     assert vm.settings.resultWatermark == "icon"
+
+
+def test_a_failure_is_not_an_empty_pane_for_the_watermark():
+    """A failure's prose *is* the result surface, so the empty-pane mark stays put.
+
+    The page's emptiness rule has always been `resultText === "" && !isError`
+    (the mark must not show behind an error). The viewmodel tested only
+    `resultText`, so every failed calculation asked the renderer for the mark's
+    artwork again — work the page then hid."""
+    vm = new_vm()
+    renders = []
+    vm.calculator._latex_service.rendered.connect(
+        lambda token, *_: renders.append(token))
+    vm.settings.resultWatermark = "random"
+    assert len(renders) == 1          # the rolled item of the empty pane
+    url = vm.calculator.watermarkSvgUrl
+    width, height = vm.calculator.watermarkWidth, vm.calculator.watermarkHeight
+    assert width > 0 and height > 0
+
+    vm.calculator.calculate("sin(")
+    assert vm.calculator.isError
+    assert len(renders) == 1, "a failure re-rendered the hidden watermark"
+    assert (vm.calculator.watermarkSvgUrl, vm.calculator.watermarkWidth,
+            vm.calculator.watermarkHeight) == (url, width, height)
+
+    # A real empty visit shows the mark again, so it is rendered again.
+    vm.calculator.clear_result()
+    assert len(renders) == 2
+    assert vm.calculator.watermarkWidth > 0
 
 
 def test_calculator_exposes_rendered_variants_and_clears_them():
@@ -1046,6 +1109,152 @@ def test_inline_rename():
     assert model.cellAt(0, 0) == "b"
 
 
+class _FakeVariablesBackend(QObject):
+    finished = Signal(int, object)
+    timedOut = Signal(int)
+    failed = Signal(int, str)
+
+    def __init__(self):
+        super().__init__()
+        self.requests = []
+        self.warmed = 0
+        self.shutdowns = 0
+
+    def warm_up(self):
+        self.warmed += 1
+
+    def shutdown(self):
+        self.shutdowns += 1
+
+    def submit(self, request_id, kind, payload, scope):
+        self.requests.append((request_id, kind, payload, scope))
+
+
+def test_variable_writes_queue_through_the_backend():
+    """The app's Variables path is a worker queue, not an in-process eval.
+
+    One request is in flight at a time, an add exists only after its answer,
+    and a failure keeps the raw input (update) or creates no row (add).
+    """
+    backend = _FakeVariablesBackend()
+    manager = VariableManager()
+    model = VariablesModel(manager, backend=backend)
+    added = []
+    model.variableAdded.connect(lambda name, ok: added.append((name, ok)))
+
+    assert model.add("a", "2") is True
+    assert model.rowCount() == 0                 # the worker has not answered
+    request_id, kind, payload, scope = backend.requests[0]
+    assert kind == "variable"
+    assert payload.target == "a" and payload.expression == "2"
+    backend.finished.emit(request_id, Success("2", Integer(2), "2"))
+    assert model.rowCount() == 1 and model.cellAt(0, 1) == "2"
+    assert added == [("a", True)]
+
+    # Queue: update first, add b waits; a syntax failure keeps the raw input.
+    assert model.update("a", "x +") is True
+    assert model.add("b", "3") is True
+    assert len(backend.requests) == 2
+    update_id = backend.requests[1][0]
+    backend.finished.emit(update_id, Failure("x +", ErrorKind.SYNTAX, "syntax"))
+    assert model.cellAt(0, 1) == "x +" and model.cellAt(0, 2) == "Invalid"
+    assert len(backend.requests) == 3
+    add_id = backend.requests[2][0]
+    backend.finished.emit(add_id, Success("3", Integer(3), "3"))
+    assert model.rowCount() == 2 and model.cellAt(1, 0) == "b"
+
+    # A timed-out add creates nothing and reports the failure.
+    assert model.add("c", "bad +") is True
+    timeout_id = backend.requests[3][0]
+    backend.timedOut.emit(timeout_id)
+    assert model.rowCount() == 2
+    assert added[-1] == ("c", False)
+
+
+def test_a_late_variable_answer_does_not_recreate_a_deleted_name():
+    backend = _FakeVariablesBackend()
+    manager = VariableManager()
+    model = VariablesModel(manager, backend=backend)
+    model.save("a", Integer(1))
+    assert model.update("a", "2") is True
+    request_id = backend.requests[0][0]
+    assert model.remove("a") is True
+    backend.finished.emit(request_id, Success("2", Integer(2), "2"))
+    assert manager.exists("a") is False
+    assert model.rowCount() == 0
+
+
+def test_main_view_model_hands_variables_its_backend():
+    store = SettingsStore(temp_dir() / "config.yaml")
+    store.load()
+    backend = _FakeVariablesBackend()
+    vm = MainViewModel(store, variables_backend=backend)
+    assert vm.variables.addVariable("a", "2") is True
+    assert backend.requests[0][1] == "variable"
+
+
+def test_variables_worker_is_lazy_and_stops_when_idle():
+    from python.viewmodel.log_viewmodel import LogViewModel
+    from python.viewmodel.variables_viewmodel import VariablesViewModel
+
+    backend = _FakeVariablesBackend()
+    viewmodel = VariablesViewModel(VariableManager(), LogViewModel(), backend=backend)
+    assert backend.warmed == 0                    # construction starts nothing
+    viewmodel.warmUpBackend()
+    assert backend.warmed == 1
+
+    # A queued/running write keeps it alive.
+    assert viewmodel.addVariable("a", "2") is True
+    viewmodel.stopBackendIfIdle()
+    assert backend.shutdowns == 0
+
+    # Once the answer landed and the queue is empty, leaving the page frees it.
+    request_id = backend.requests[0][0]
+    backend.finished.emit(request_id, Success("2", Integer(2), "2"))
+    viewmodel.stopBackendIfIdle()
+    assert backend.shutdowns == 1
+
+
+def test_a_variable_update_timeout_keeps_the_previous_value():
+    """A worker timeout is not a statement about the expression: keep the value."""
+    backend = _FakeVariablesBackend()
+    manager = VariableManager()
+    model = VariablesModel(manager, backend=backend)
+    model.save("a", Integer(1))
+
+    assert model.update("a", "2") is True
+    request_id = backend.requests[0][0]
+    backend.timedOut.emit(request_id)
+
+    assert model.cellAt(0, 1) == "1"
+    assert model.cellAt(0, 2) == "Integer"
+    assert manager.get("a") == Integer(1)
+
+
+def test_a_variable_update_transport_failure_keeps_the_previous_value():
+    backend = _FakeVariablesBackend()
+    manager = VariableManager()
+    model = VariablesModel(manager, backend=backend)
+    model.save("a", Integer(1))
+
+    assert model.update("a", "2") is True
+    request_id = backend.requests[0][0]
+    backend.failed.emit(request_id, "worker died")
+
+    assert model.cellAt(0, 1) == "1"
+    assert manager.get("a") == Integer(1)
+
+
+def test_pending_adds_are_not_reused_as_unique_names():
+    from python.viewmodel.log_viewmodel import LogViewModel
+    from python.viewmodel.variables_viewmodel import VariablesViewModel
+
+    backend = _FakeVariablesBackend()
+    viewmodel = VariablesViewModel(VariableManager(), LogViewModel(), backend=backend)
+    assert viewmodel.addVariable("var_1", "0") is True
+    assert viewmodel.generateUniqueName() == "var_2"
+
+
 # --------------------------------------------------------------------------
 # Search filters (the pages' search boxes)
 # --------------------------------------------------------------------------
@@ -1485,6 +1694,25 @@ def test_the_highlighted_markup_survives_a_name():
     assert "<span" in markup, markup
 
 
+def test_the_markup_cache_follows_the_scope_and_the_palette():
+    """The memo in `MainViewModel` must not outlive what it was computed against.
+
+    A cell's label is re-evaluated on every resize frame, so the markup is cached;
+    the two things it depends on are the variable scope (a stored name is painted
+    as a variable, a free one is not) and the code palette. Both invalidate it.
+    """
+    vm = new_vm()
+    free = vm.highlighted("alpha", True)
+    assert vm.highlighted("alpha", True) == free       # memo hit
+    vm.variables.addVariable("alpha", "2")
+    bound = vm.highlighted("alpha", True)
+    assert bound != free                               # scope revision
+    assert vm.highlighted("alpha", True) == bound      # memo hit again
+
+    vm.settings.codeTheme = "solarized"
+    assert vm.highlighted("alpha", True) != bound      # palette invalidated
+
+
 def test_the_settings_viewmodel_hands_qml_the_surface():
     """What the page binds to: ``codeSurface(dark)`` is the map ``CodeSurface.qml``
     paints from. The argument is the *active* theme, as it is for the highlighter."""
@@ -1568,6 +1796,60 @@ def test_history_filter_modes():
     assert expressions(model) == ["bar(2)"]
     model.searchText = "y ="                    # an expression, not a result
     assert expressions(model) == []
+
+
+def test_history_window_builds_only_the_revealed_rows():
+    """The page's Repeater builds one card per model row, so the window proxy is
+    what keeps a long history from building every card when the page opens.
+
+    The order is the filter's, so a window row is still the proxy row the page's
+    reveal and selection arithmetic use; the search proxy still decides *which*
+    rows, and the window only cuts the list.
+    """
+    filter_model, _source = history_filter()
+    window = HistoryWindowModel()
+    window.setSourceModel(filter_model)
+    assert window.rowCount() == 0                  # nothing revealed yet
+    window.limit = 2
+    assert expressions(window) == ["bar(2)", "9"]
+    window.limit = 99
+    assert expressions(window) == ["bar(2)", "9", "x + 1"]
+    window.limit = 1
+    assert expressions(window) == ["bar(2)"]
+
+    filter_model.searchText = "y"
+    assert expressions(window) == ["9"]
+    window.limit = 0
+    assert expressions(window) == []
+
+
+def test_a_size_burst_renders_once_but_a_single_change_is_immediate():
+    """A drag must not re-render every surface per step.
+
+    The first change of a burst is applied at once (a single pick is visible
+    immediately); later steps only move the `LatexStyle`, and one refresh runs
+    when the burst ends.
+    """
+    vm = new_vm()
+    renders = []
+    original = vm.calculator._refresh_strip
+
+    def counting():
+        renders.append(1)
+        original()
+
+    vm.calculator._refresh_strip = counting
+    try:
+        vm.settings.latexSize = 30
+        assert len(renders) == 1           # a single change: at once
+        vm.settings.latexSize = 31
+        vm.settings.latexSize = 32
+        assert vm.calculator._latex_style.size == 32   # the style is live
+        assert len(renders) == 1           # inside the burst: deferred
+        vm._flush_latex_style()            # what the timer does
+        assert len(renders) == 2
+    finally:
+        vm.calculator._refresh_strip = original
 
 
 def test_history_filter_fuzzy_covers_every_field():
@@ -1656,16 +1938,46 @@ def test_one_latex_style_reaches_every_surface():
     vm.history.requestLatex(0)
     assert vm.history.data(row, HistoryModel.LatexUrlRole).startswith("data:image/svg+xml")
 
-    # The panel asks for a row and gets artwork; the filter announced the change
-    # rather than being handed three arguments per call.
+    # The panel asks the viewmodel for a row and gets artwork; the viewmodel
+    # announced the change rather than being handed three arguments per call.
     seen = []
-    vm.variablesFilter.latexStyleChanged.connect(lambda: seen.append(1))
+    vm.variables.latexStyleChanged.connect(lambda: seen.append(1))
     vm.set_latex_color("#00ff00")
     assert len(seen) == 1
     vm.set_latex_color("#00ff00")                      # unchanged: no second trip
     assert len(seen) == 1
-    assert vm.variablesFilter.latexFor(0)["url"].startswith("data:image/svg+xml")
-    assert vm.variablesFilter.latexAt(0) == "\\alpha = 2 \\rho"
+    assert vm.variables.latexFor(0)["url"].startswith("data:image/svg+xml")
+    assert vm.variables.latexAt(0) == "\\alpha = 2 \\rho"
+
+
+def test_the_details_preview_is_memoized_until_the_style_moves():
+    """The details panel re-asks for the selected row on every model change.
+
+    A row's definition did not necessarily change, and a ziamath layout is ~7 ms,
+    so the render is memoized by the definition text and the style; a style
+    change (theme ink, size, font) must drop it.
+    """
+    from python.viewmodel import variables_viewmodel as vvm
+
+    vm = new_vm()
+    vm.variables.addVariable("alpha", "2*rho")
+    calls = []
+    original = vvm.render_data_url
+
+    def counting(latex, style):
+        calls.append(latex)
+        return original(latex, style)
+
+    vvm.render_data_url = counting
+    try:
+        first = vm.variables.latexFor(0)
+        assert vm.variables.latexFor(0) == first
+        assert len(calls) == 1
+        vm.set_latex_color("#ff0000")
+        vm.variables.latexFor(0)
+        assert len(calls) == 2
+    finally:
+        vvm.render_data_url = original
 
 
 def test_history_filter_sees_new_entries():

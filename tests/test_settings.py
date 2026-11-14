@@ -316,14 +316,15 @@ def test_picking_a_font_that_cannot_be_typeset_is_refused():
     `trySetLatexFont` is where that is proven — with a real layout, hence on the one
     font the user picked — and a refusal must leave the setting alone and name the
     family, so the page can say which font it was."""
+    from python.viewmodel import settings_fonts as sfm
     from python.viewmodel import settings_viewmodel as svm
 
     store = store_at(temp_dir() / CONFIG_FILENAME)
     viewmodel = svm.SettingsViewModel(store)
     store.set("workspace.latex_font", "Cambria Math")
 
-    original = svm.math_font_typesets
-    svm.math_font_typesets = lambda family: family != "UnifontExMono"
+    original = sfm.math_font_typesets
+    sfm.math_font_typesets = lambda family: family != "UnifontExMono"
     try:
         assert viewmodel.trySetLatexFont("UnifontExMono") is False
         assert viewmodel.latexFontError == "UnifontExMono"
@@ -332,7 +333,7 @@ def test_picking_a_font_that_cannot_be_typeset_is_refused():
         assert viewmodel.latexFontError == ""
         assert store.get("workspace.latex_font") == "Cambria Math"
     finally:
-        svm.math_font_typesets = original
+        sfm.math_font_typesets = original
 
 
 def test_a_picked_latex_font_is_announced_and_reaches_the_renderers():
@@ -350,16 +351,16 @@ def test_a_picked_latex_font_is_announced_and_reaches_the_renderers():
     handed, and comparing it against a *resolved* path is what makes the difference
     visible.
     """
-    from python.viewmodel import settings_viewmodel as svm
+    from python.viewmodel import settings_fonts as sfm
     from python.viewmodel.main_viewmodel import MainViewModel
 
     store = store_at(temp_dir() / CONFIG_FILENAME)
     view_model = MainViewModel(store)
 
-    original_typesets = svm.math_font_typesets
-    original_path = svm.math_font_path
-    svm.math_font_typesets = lambda family: True
-    svm.math_font_path = lambda family: f"/math-fonts/{family}.ttf" if family else ""
+    original_typesets = sfm.math_font_typesets
+    original_path = sfm.math_font_path
+    sfm.math_font_typesets = lambda family: True
+    sfm.math_font_path = lambda family: f"/math-fonts/{family}.ttf" if family else ""
     try:
         # The built-in STIX: no family, no font file.
         assert view_model.settings.latexFont == ""
@@ -374,8 +375,8 @@ def test_a_picked_latex_font_is_announced_and_reaches_the_renderers():
         assert view_model.settings.latexFontPath == "/math-fonts/Test Math.ttf"
         assert view_model.calculator._latex_style.font == "/math-fonts/Test Math.ttf"
     finally:
-        svm.math_font_typesets = original_typesets
-        svm.math_font_path = original_path
+        sfm.math_font_typesets = original_typesets
+        sfm.math_font_path = original_path
 
 
 def test_accent_mode_is_validated_and_persisted():
@@ -600,6 +601,88 @@ def test_a_tab_can_carry_a_shift_layer():
     assert tabs[0]["shiftKeys"][0]["label"] == "A"
     assert tabs[0]["shiftKeys"][0]["insert"] == "A"
     assert "A" in glyphs
+
+
+def test_the_greek_tab_displays_greek_and_inserts_english_names():
+    """The Greek keyboard shows the glyph but types the English spelling.
+
+    The layout follows GeoGebra's Greek keyboard: the QWERTY positions carry the
+    alphabet, including that layout's duplicated phi and its final-sigma/sigma
+    pair. `insert` is the ASCII name SymPy translates to LaTeX by itself, so the
+    variable stays Pythonic; built-in collisions (`beta`, `gamma`, `zeta`, `pi`,
+    `Chi`, `Lambda`) are the language's, and are overridden by defining that name
+    in the variable list. `lambda` is a Python keyword, so the λ key types
+    `lambda_` — the conventional escape and a valid identifier (SymPy spells it
+    ``\lambda_{}``). `label` is the Greek glyph, rendered in the keyboard font;
+    no `latex` keycap is involved.
+    """
+    import python.keyboard_config as kc
+    from python.model.variable import validate_name
+
+    tabs = kc.load_keyboard_tabs()
+    greek = next(tab for tab in tabs if tab["key"] == "greek")
+
+    def cells(keys, index):
+        return [key for key in sorted(keys, key=lambda key: key["col"])
+                if key["row"] == index]
+
+    expected = [
+        (greek["keys"], 0, "φςερτυθιοπ",
+         ["varphi", "varsigma", "varepsilon", "rho", "tau",
+          "upsilon", "theta", "iota", "omicron", "pi"]),
+        (greek["keys"], 1, "ασδφγηξκλ",
+         ["alpha", "sigma", "delta", "varphi", "gamma",
+          "eta", "xi", "kappa", "lambda_"]),
+        (greek["keys"], 2, "ζχψωβνμ",
+         ["zeta", "chi", "psi", "omega", "beta", "nu", "mu"]),
+        (greek["shiftKeys"], 0, "ΦΣΕΡΤΥΘΙΟΠ",
+         ["Phi", "Sigma", "Epsilon", "Rho", "Tau",
+          "Upsilon", "Theta", "Iota", "Omicron", "Pi"]),
+        (greek["shiftKeys"], 1, "ΑΣΔΦΓΗΞΚΛ",
+         ["Alpha", "Sigma", "Delta", "Phi", "Gamma",
+          "Eta", "Xi", "Kappa", "Lambda"]),
+        (greek["shiftKeys"], 2, "ΖΧΨΩΒΝΜ",
+         ["Zeta", "Chi", "Psi", "Omega", "Beta", "Nu", "Mu"]),
+    ]
+    for keys, index, labels, inserts in expected:
+        row = cells(keys, index)
+        assert "".join(key["label"] for key in row) == labels
+        assert [key["insert"] for key in row] == inserts
+
+    every = greek["keys"] + greek["shiftKeys"]
+    assert all("\u0370" <= key["label"] <= "\u03ff" for key in every)
+    assert all(key["latex"] == "" for key in every)       # plain keyboard-font labels
+    assert all(key["insert"].isascii() for key in every)
+    assert all(validate_name(key["insert"]) for key in every)
+    # The one name that cannot be typed as-is, and why the λ key is escaped.
+    assert not validate_name("lambda")
+
+
+def test_label_glyphs_cache_follows_the_layout_file():
+    """The Settings keyboard-coverage hint re-reads this on every binding; the
+    cache must still notice an edited layout."""
+    import python.keyboard_config as kc
+
+    path = temp_dir() / "keys.yaml"
+    path.write_text(
+        "basic:\n"
+        "  title: Basic\n"
+        "  grid:\n"
+        "    - ['A']\n",
+        encoding="utf-8",
+    )
+    assert kc.label_glyphs(path) == "A"
+
+    path.write_text(
+        "basic:\n"
+        "  title: Basic\n"
+        "  grid:\n"
+        "    - ['B']\n",
+        encoding="utf-8",
+    )
+    stat = path.stat()
+    os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))
+    assert kc.label_glyphs(path) == "B"
 
 
 def test_custom_keyboards_copy_the_default_and_fall_back():
@@ -1028,6 +1111,45 @@ def test_reset_discards_a_pending_accent_write():
     vm._flush_pending_accent()           # what the timer would do after reset
     assert store.get("appearance.accent") == DEFAULTS["appearance"]["accent"]
     assert vm.customAccent == DEFAULTS["appearance"]["accent"]
+
+
+def test_size_changes_coalesce_the_file_write():
+    """A spin-box step must be live and must not dump YAML per step.
+
+    The first change persists at once (a single setter keeps the store's
+    contract); steps inside the cooldown are staged in memory and written once
+    when it ends (or on quit). The timer itself needs an event loop, so this
+    drives the same flush the timer calls.
+    """
+    from python.viewmodel.settings_viewmodel import SettingsViewModel
+
+    path = temp_dir() / CONFIG_FILENAME
+    store = store_at(path)
+    viewmodel = SettingsViewModel(store)
+    saves = []
+    original = store.save
+
+    def counting():
+        saves.append(1)
+        return original()
+
+    store.save = counting
+    try:
+        viewmodel.latexSize = 20
+        assert viewmodel.latexSize == 20
+        assert store.get("workspace.latex_size") == 20
+        assert len(saves) == 1              # a single change is on disk at once
+
+        viewmodel.latexSize = 21
+        viewmodel.latexSize = 22
+        assert store.get("workspace.latex_size") == 22   # live in memory
+        assert len(saves) == 1              # inside the cooldown: no write yet
+
+        viewmodel._flush_size_save()        # what the timer / quit does
+        assert len(saves) == 2
+        assert store_at(path).get("workspace.latex_size") == 22
+    finally:
+        store.save = original
 
 
 # --------------------------------------------------------------------------

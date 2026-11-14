@@ -2,7 +2,6 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts 2.15
 import RinUI
-import RinUI as Rin
 import "../components"
 
 Item {
@@ -31,12 +30,32 @@ Item {
             //: expression is stored as it parses) rather than what was typed.
             details.syncDetails()
         }
-
-        //: The filter owns the `LatexStyle` (ink, size, font), so a change to it
-        //: arrives as a signal: the panel's line is read through `latexFor`, and a
-        //: call in a binding creates no dependency of its own.
-        function onLatexStyleChanged() { page.dataRevision++ }
     }
+
+    //: The viewmodel owns the `LatexStyle` (ink, size, font), so a change to it
+    //: arrives as a signal: the panel's line is read through `varsVM.latexFor`,
+    //: and a call in a binding creates no dependency of its own.
+    Connections {
+        target: varsVM
+
+        function onLatexStyleChanged() { page.dataRevision++ }
+
+        function onVariableAdded(name, ok) {
+            if (!ok)
+                return
+            // A filter would hide the row we are about to select.
+            searchBar.clear()
+            page.selectRow(variablesFilter.rowCount() - 1)
+            page.reveal(variablesFilter.rowCount() - 1)
+        }
+    }
+
+    //: The Variables worker is not started with the app: it would be a third
+    //: SymPy process (~140 MB) even when this page is never opened. Start it
+    //: on first use, and let the viewmodel stop it after it goes idle or this
+    //: page is left.
+    Component.onCompleted: varsVM.warmUpBackend()
+    Component.onDestruction: varsVM.stopBackendIfIdle()
 
     // The selection, not the current index: `currentIndex` is the view's to keep
     // and a programmatic `select()` — the delegate's own click handler, `selectRow`
@@ -83,7 +102,12 @@ Item {
     //: panel's cue for the raw line below.
     readonly property var definition: {
         page.dataRevision
-        return variablesFilter.latexFor(page.selectedRow)
+        // A closed panel renders nothing: the line is asked for by a binding
+        // forced by `dataRevision`, and a ziamath layout is ~7 ms. Naming the
+        // toggle makes opening it re-render.
+        if (!page.sidebarOpen)
+            return {}
+        return varsVM.latexFor(page.selectedRow)
     }
 
     //: The fallback: the entry as it was typed. That is all there is to show when
@@ -102,11 +126,8 @@ Item {
         if (page.selectedRow < 0)
             return
         const name = varsVM.generateUniqueName()
-        if (varsVM.addVariable(name, variablesFilter.cellAt(page.selectedRow, 1))) {
-            searchBar.clear()
-            page.selectRow(variablesFilter.rowCount() - 1)
-            page.reveal(variablesFilter.rowCount() - 1)
-        }
+        // The add is asynchronous in the app; `onVariableAdded` selects the row.
+        varsVM.addVariable(name, variablesFilter.cellAt(page.selectedRow, 1))
     }
 
     onSelectedRowChanged: details.syncDetails()
@@ -129,11 +150,8 @@ Item {
 
     function addVariable() {
         const name = varsVM.generateUniqueName()
-        if (varsVM.addVariable(name, "0")) {
-            searchBar.clear()  // a filter would hide the row we are about to select
-            page.selectRow(variablesFilter.rowCount() - 1)
-            page.reveal(variablesFilter.rowCount() - 1)
-        }
+        // The add is asynchronous in the app; `onVariableAdded` selects the row.
+        varsVM.addVariable(name, "0")
     }
 
     function deleteVariable() {

@@ -51,13 +51,47 @@ _UNSAFE_CALLS = frozenset({
 })
 
 #: Constructors whose string argument is data, not source. ``Symbol``/``Function``
-#: carry names; ``Float`` carries the numeric literal the tokenizer produced.
-_STRING_CALLS = frozenset({"Symbol", "Dummy", "Wild", "Function", "Float"})
+#: carry names; ``symbols`` splits a whitespace/comma list of them; ``Float``
+#: carries the numeric literal the tokenizer produced.
+_STRING_CALLS = frozenset({
+    "Symbol", "Dummy", "Wild", "Function", "Float", "symbols",
+})
+
+#: SymPy methods an expression may call. Attribute *access* stays forbidden:
+#: a bare attribute can walk into a class, so only these calls are admitted.
+#: The list is the expression language's surface, not a security denylist; a
+#: method joins it with a test that shows the value it returns.
+_SAFE_METHODS = frozenset({
+    "subs", "xreplace", "replace", "match", "has", "atoms",
+    "diff", "integrate", "limit", "series", "sum", "product", "doit",
+    "simplify", "expand", "factor", "cancel", "together", "apart",
+    "collect", "coeff", "as_numer_denom", "as_real_imag", "as_independent",
+    "as_coefficients_dict", "as_ordered_factors", "as_ordered_terms",
+    "compute_leading_term", "equals", "evalf", "n", "rewrite",
+    "inverse", "inv", "det", "trace", "transpose", "adjugate", "cofactor",
+    "minor", "submatrix", "extract", "reshape", "row", "col", "tolist",
+    "cross", "dot", "norm", "eigenvals", "eigenvects", "diagonalize",
+    "charpoly", "minpoly", "nullspace", "columnspace", "rowspace", "rref",
+    "lu", "cholesky", "solve", "inv_mod",
+})
+
+#: Read-only SymPy properties an expression may read. Unlike methods, these are
+#: plain attribute reads; they are limited to values (tuples, numbers, sets,
+#: booleans) and never expose a class or a function's globals.
+_SAFE_PROPERTIES = frozenset({
+    "free_symbols", "args", "shape", "rows", "cols", "T", "H",
+    "is_number", "is_real", "is_integer", "is_rational", "is_positive",
+    "is_negative", "is_zero", "is_prime", "is_finite", "is_infinite",
+    "is_commutative",
+})
 
 _SAFE_BINOPS = (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod, ast.Pow)
 _SAFE_UNARYOPS = (ast.UAdd, ast.USub)
 _SAFE_COMPARES = (ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE)
 _FLOAT_RE = re.compile(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?")
+#: ``symbols("x y")`` reads identifiers, not code. Separators/order marks are
+#: enough; quotes, parentheses, operators and backslashes stay out.
+_SYMBOLS_RE = re.compile(r"[\w\s,:]+")
 
 
 class _UnsafeExpression(ValueError):
@@ -84,12 +118,13 @@ def _parser_globals() -> dict:
 
 
 def _validate_safe_ast(node: ast.AST, allowed_names: set[str]) -> None:
-    """Reject everything except arithmetic, SymPy calls, lists and indexing.
+    """Reject everything except arithmetic, SymPy calls/methods and data.
 
     The input goes through SymPy's tokenizer, so the generated code is Python.
     Attribute access, lambdas, comprehensions, imports and arbitrary calls are
     the escape routes from that code; none of them is part of the calculator's
-    expression language.
+    expression language. A method call is admitted only when its name is in
+    :data:`_SAFE_METHODS`; a bare attribute (``x.__class__``) is not.
     """
     if isinstance(node, ast.Expression):
         _validate_safe_ast(node.body, allowed_names)
@@ -119,17 +154,29 @@ def _validate_safe_ast(node: ast.AST, allowed_names: set[str]) -> None:
         for comparator in node.comparators:
             _validate_safe_ast(comparator, allowed_names)
     elif isinstance(node, ast.Call):
-        if not isinstance(node.func, ast.Name):
-            raise _UnsafeExpression("only named functions can be called")
-        name = node.func.id
-        if name.startswith("__") or name in _UNSAFE_CALLS or name not in allowed_names:
-            raise _UnsafeExpression(f"function '{name}' is not allowed")
-        allow_strings = name in _STRING_CALLS
+        allow_strings = False
+        if isinstance(node.func, ast.Name):
+            name = node.func.id
+            if name.startswith("__") or name in _UNSAFE_CALLS or name not in allowed_names:
+                raise _UnsafeExpression(f"function '{name}' is not allowed")
+            allow_strings = name in _STRING_CALLS
+        elif isinstance(node.func, ast.Attribute):
+            # A method call, never a bare attribute read: the base is an
+            # expression this gate already accepts, the name is whitelisted and
+            # no dunder can reach a class or a function's globals.
+            name = node.func.attr
+            if "__" in name or name not in _SAFE_METHODS:
+                raise _UnsafeExpression(f"method '{name}' is not allowed")
+            _validate_safe_ast(node.func.value, allowed_names)
+        else:
+            raise _UnsafeExpression("only named functions and SymPy methods can be called")
         for argument in node.args:
             if allow_strings and isinstance(argument, ast.Constant) \
                     and isinstance(argument.value, str):
                 if name == "Float" and not _FLOAT_RE.fullmatch(argument.value):
                     raise _UnsafeExpression("invalid numeric literal")
+                if name == "symbols" and not _SYMBOLS_RE.fullmatch(argument.value):
+                    raise _UnsafeExpression("symbols() takes a name list, not code")
                 continue
             _validate_safe_ast(argument, allowed_names)
         for keyword_arg in node.keywords:
@@ -137,11 +184,21 @@ def _validate_safe_ast(node: ast.AST, allowed_names: set[str]) -> None:
                 raise _UnsafeExpression("keyword expansion is not supported")
             if allow_strings and isinstance(keyword_arg.value, ast.Constant) \
                     and isinstance(keyword_arg.value.value, str):
+                if name == "Float" and not _FLOAT_RE.fullmatch(keyword_arg.value.value):
+                    raise _UnsafeExpression("invalid numeric literal")
+                if name == "symbols" and not _SYMBOLS_RE.fullmatch(keyword_arg.value.value):
+                    raise _UnsafeExpression("symbols() takes a name list, not code")
                 continue
             _validate_safe_ast(keyword_arg.value, allowed_names)
     elif isinstance(node, (ast.List, ast.Tuple)):
         for element in node.elts:
             _validate_safe_ast(element, allowed_names)
+    elif isinstance(node, ast.Dict):
+        for key, value in zip(node.keys, node.values):
+            if key is None:
+                raise _UnsafeExpression("keyword expansion is not supported")
+            _validate_safe_ast(key, allowed_names)
+            _validate_safe_ast(value, allowed_names)
     elif isinstance(node, ast.Subscript):
         _validate_safe_ast(node.value, allowed_names)
         _validate_safe_ast(node.slice, allowed_names)
@@ -149,6 +206,10 @@ def _validate_safe_ast(node: ast.AST, allowed_names: set[str]) -> None:
         for part in (node.lower, node.upper, node.step):
             if part is not None:
                 _validate_safe_ast(part, allowed_names)
+    elif isinstance(node, ast.Attribute):
+        if "__" in node.attr or node.attr not in _SAFE_PROPERTIES:
+            raise _UnsafeExpression("attribute access is only allowed for a SymPy method call")
+        _validate_safe_ast(node.value, allowed_names)
     else:
         raise _UnsafeExpression(f"{type(node).__name__} is not supported")
 

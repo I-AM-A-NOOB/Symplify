@@ -18,8 +18,14 @@ basic:
   grid:
     - ["7", "8", "9", "/", ""]
     - ["4", "5", "6", "*", ")"]
-    - ["1", "2", "3", "-", "**"]
-    - ["0", ".", "=", "+", { label: "√", latex: '\sqrt{\phantom{x}}', insert: "sqrt" }]
+    - ["1", "2", "3", "-", { label: "**", latex: '\phantom{x}^a', insert: "**" }]
+    - [
+        "0",
+        ".",
+        "=",
+        "+",
+        { label: "√", latex: '\sqrt{\phantom{x}}', insert: "sqrt" },
+      ]
 
 alphabet:
   title: "Alphabet"
@@ -32,6 +38,77 @@ alphabet:
     - ["A", "S", "D", "F", "G", "H", "J", "K", "L"]
     - ["", "Z", "X", "C", "V", "B", "N", "M"]
 
+greek:
+  title: "Greek"
+  grid:
+    - [
+        { label: "φ", insert: "varphi" },
+        { label: "ς", insert: "varsigma" },
+        { label: "ε", insert: "varepsilon" },
+        { label: "ρ", insert: "rho" },
+        { label: "τ", insert: "tau" },
+        { label: "υ", insert: "upsilon" },
+        { label: "θ", insert: "theta" },
+        { label: "ι", insert: "iota" },
+        { label: "ο", insert: "omicron" },
+        { label: "π", insert: "pi" },
+      ]
+    - [
+        { label: "α", insert: "alpha" },
+        { label: "σ", insert: "sigma" },
+        { label: "δ", insert: "delta" },
+        { label: "φ", insert: "varphi" },
+        { label: "γ", insert: "gamma" },
+        { label: "η", insert: "eta" },
+        { label: "ξ", insert: "xi" },
+        { label: "κ", insert: "kappa" },
+        { label: "λ", insert: "lambda_" },
+      ]
+    - [
+        "",
+        { label: "ζ", insert: "zeta" },
+        { label: "χ", insert: "chi" },
+        { label: "ψ", insert: "psi" },
+        { label: "ω", insert: "omega" },
+        { label: "β", insert: "beta" },
+        { label: "ν", insert: "nu" },
+        { label: "μ", insert: "mu" },
+      ]
+  shiftGrid:
+    - [
+        { label: "Φ", insert: "Phi" },
+        { label: "Σ", insert: "Sigma" },
+        { label: "Ε", insert: "Epsilon" },
+        { label: "Ρ", insert: "Rho" },
+        { label: "Τ", insert: "Tau" },
+        { label: "Υ", insert: "Upsilon" },
+        { label: "Θ", insert: "Theta" },
+        { label: "Ι", insert: "Iota" },
+        { label: "Ο", insert: "Omicron" },
+        { label: "Π", insert: "Pi" },
+      ]
+    - [
+        { label: "Α", insert: "Alpha" },
+        { label: "Σ", insert: "Sigma" },
+        { label: "Δ", insert: "Delta" },
+        { label: "Φ", insert: "Phi" },
+        { label: "Γ", insert: "Gamma" },
+        { label: "Η", insert: "Eta" },
+        { label: "Ξ", insert: "Xi" },
+        { label: "Κ", insert: "Kappa" },
+        { label: "Λ", insert: "Lambda" },
+      ]
+    - [
+        "",
+        { label: "Ζ", insert: "Zeta" },
+        { label: "Χ", insert: "Chi" },
+        { label: "Ψ", insert: "Psi" },
+        { label: "Ω", insert: "Omega" },
+        { label: "Β", insert: "Beta" },
+        { label: "Ν", insert: "Nu" },
+        { label: "Μ", insert: "Mu" },
+      ]
+
 functions:
   title: "Functions"
   grid:
@@ -41,7 +118,7 @@ functions:
     - [
         { label: "|x|", latex: '\left|x\right|', insert: "abs" },
         { label: "√", latex: '\sqrt{\phantom{x}}', insert: "sqrt" },
-        { label: "x!", latex: 'x!', insert: "factorial" },
+        { label: "x!", latex: "x!", insert: "factorial" },
         { label: "∛", latex: '\sqrt[3]{\phantom{x}}', insert: "cbrt" },
       ]
 
@@ -49,9 +126,30 @@ calculus:
   title: "Calculus"
   grid:
     - ["limit", "diff", "integrate", "series"]
-    - [{ label: "+∞", latex: '+\infty', insert: "+oo" }, { label: "-∞", latex: '-\infty', insert: "-oo" }, { label: "∞", latex: '\infty', insert: "zoo" }]
-    - [{ label: "π", latex: '\pi', insert: "pi" }, { label: "e", latex: 'e', insert: "E" }, { label: "i", latex: 'i', insert: "I" }]
+    - [
+        { label: "+∞", latex: '+\infty', insert: "+oo" },
+        { label: "-∞", latex: '-\infty', insert: "-oo" },
+        { label: "∞", latex: '\infty', insert: "zoo" },
+      ]
+    - [
+        { label: "π", latex: '\pi', insert: "pi" },
+        { label: "e", latex: "e", insert: "E" },
+        { label: "i", latex: "i", insert: "I" },
+      ]
     - ["summation", "product"]
+  shiftGrid:
+    - ["Limit", "Derivative", "Integral", "series"]
+    - [
+        { label: "+∞", latex: '+\infty', insert: "+oo" },
+        { label: "-∞", latex: '-\infty', insert: "-oo" },
+        { label: "∞", latex: '\infty', insert: "zoo" },
+      ]
+    - [
+        { label: "π", latex: '\pi', insert: "pi" },
+        { label: "e", latex: "e", insert: "E" },
+        { label: "i", latex: "i", insert: "I" },
+      ]
+    - ["Sum", "Product"]
 
 algebra:
   title: "Algebra"
@@ -65,17 +163,35 @@ symbols:
   title: "Symbols"
   grid:
     - ["+", "-", "*", "/", "**"]
-    - ["=", "<", ">", { label: "≤", latex: '\le', insert: "<=" }, { label: "≥", latex: '\ge', insert: ">=" }]
-    - ["", ")", "|", { label: "π", latex: '\pi', insert: "pi" }, { label: "e", latex: 'e', insert: "E" }]
-    - ["deg", "rad", "%", "!", { label: "√", latex: '\sqrt{\phantom{x}}', insert: "sqrt" }]
+    - [
+        "=",
+        "<",
+        ">",
+        { label: "≤", latex: '\le', insert: "<=" },
+        { label: "≥", latex: '\ge', insert: ">=" },
+      ]
+    - [
+        "",
+        ")",
+        "|",
+        { label: "π", latex: '\pi', insert: "pi" },
+        { label: "e", latex: "e", insert: "E" },
+      ]
+    - [
+        "deg",
+        "rad",
+        "%",
+        "!",
+        { label: "√", latex: '\sqrt{\phantom{x}}', insert: "sqrt" },
+      ]
 
 constants:
   title: "Constants"
   grid:
     - [
         { label: "π", latex: '\pi', insert: "pi" },
-        { label: "e", latex: 'e', insert: "E" },
-        { label: "i", latex: 'i', insert: "I" },
+        { label: "e", latex: "e", insert: "E" },
+        { label: "i", latex: "i", insert: "I" },
         { label: "+∞", latex: '+\infty', insert: "+oo" },
         { label: "-∞", latex: '-\infty', insert: "-oo" },
         { label: "∞", latex: '\infty', insert: "zoo" },
@@ -84,6 +200,5 @@ constants:
         { label: "φ", latex: '\varphi', insert: "GoldenRatio" },
         { label: "γ", latex: '\gamma', insert: "EulerGamma" },
         { label: "G", insert: "Catalan" },
-        { label: "infinite", insert: "inf" },
         { label: "NaN", insert: "nan" },
       ]

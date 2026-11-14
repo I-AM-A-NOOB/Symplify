@@ -8,19 +8,11 @@ import multiprocessing
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import qVersion
-from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import QApplication
-from qmlmathplot import register_qml_types
-
-# The bootstrap owns RinUI's configuration (see python/rinui_bootstrap.py), and
-# `main.py` gets the window class from it rather than importing RinUI itself.
-from python import window_drag, window_icon
-from python.model.plotting import plot_variables
-from python.rinui_bootstrap import prepare
-from python.version import __version__
-from python.viewmodel.calculation_backend import ProcessBackend
-from python.viewmodel.main_viewmodel import MainViewModel
+# The UI, SymPy and qmlmathplot imports deliberately live inside `main()`.
+# `multiprocessing`'s spawn re-imports this module in every worker; top-level
+# imports made the "zero Qt" calculation/render workers pay for PySide6 and
+# qmlmathplot before their own modules even loaded. Importing `main` must stay
+# light so a worker starts with only what its target needs.
 
 # Under Nuitka the entry module is the compiled binary, so resolve the
 # project root relative to the executable instead of __file__.
@@ -40,8 +32,24 @@ def main() -> int:
     """Create the app, wire the viewmodels, and start the event loop."""
     # Nuitka standalone builds spawn the calculation worker by re-running this
     # executable with multiprocessing's flag. freeze_support() is what routes
-    # that back into the worker; it is a no-op in a normal interpreter.
+    # that back into the worker; it is a no-op in a normal interpreter, and it
+    # must stay ahead of the UI imports below.
     multiprocessing.freeze_support()
+
+    from PySide6.QtCore import qVersion
+    from PySide6.QtGui import QIcon
+    from PySide6.QtWidgets import QApplication
+    from qmlmathplot import register_qml_types
+
+    # The bootstrap owns RinUI's configuration (see python/rinui_bootstrap.py),
+    # and this composition root gets the window class from it rather than
+    # importing RinUI itself.
+    from python import window_drag, window_icon
+    from python.model.plotting import plot_variables
+    from python.rinui_bootstrap import prepare
+    from python.version import __version__
+    from python.viewmodel.calculation_backend import ProcessBackend
+    from python.viewmodel.main_viewmodel import MainViewModel
 
     runtime = prepare(ROOT)
 
@@ -86,6 +94,7 @@ def main() -> int:
         window.theme_manager,
         initial_variables=plot_variables(),
         calculation_backend=ProcessBackend(CALCULATION_TIMEOUT_SECONDS),
+        variables_backend=ProcessBackend(CALCULATION_TIMEOUT_SECONDS),
         translation_dir=ROOT / "i18n",
         icon_dir=ROOT / "icon",
     )
@@ -104,6 +113,7 @@ def main() -> int:
     context.setContextProperty("variablesFilter", vm.variablesFilter)
     context.setContextProperty("historyVM", vm.history)
     context.setContextProperty("historyFilter", vm.historyFilter)
+    context.setContextProperty("historyWindow", vm.historyWindow)
     context.setContextProperty("logVM", vm.log)
     context.setContextProperty("settingsVM", vm.settings)
     # QML does not retranslate existing bindings on its own when a translator
