@@ -136,6 +136,7 @@ class CalculatorViewModel(QObject):
         self._backend.variantsReady.connect(self._on_variants_ready)
         self._backend.timedOut.connect(self._on_backend_timed_out)
         self._backend.failed.connect(self._on_backend_failed)
+        self._backend.cancelled.connect(self._on_backend_cancelled)
         self._request_seq = 0
         self._active_request: int | None = None
         self._pending: dict | None = None
@@ -639,6 +640,11 @@ class CalculatorViewModel(QObject):
         self.plotChanged.emit()
 
     @Slot()
+    def cancelCalculation(self) -> None:
+        """Cancel the in-flight calculator request; the previous result stays."""
+        self._backend.cancel(notify=True)
+
+    @Slot()
     def clear_result(self) -> None:
         """Clear the result display area (the outcome box then shows the placeholder)."""
         self._backend.cancel()
@@ -761,6 +767,15 @@ class CalculatorViewModel(QObject):
             self._record_success(pending, result)
         else:
             self._record_failure(pending, result, allow_invalid=True)
+
+    @Slot(int)
+    def _on_backend_cancelled(self, request_id: int) -> None:
+        """The user cancelled the in-flight request: keep the previous result."""
+        pending = self._take_pending(request_id)
+        if pending is None:
+            return
+        self._set_backend_state(False, "ready")
+        self._log.add_info("Calculation cancelled.", "Calculator")
 
     @Slot(int, object)
     def _on_variants_ready(self, request_id: int, rows: object) -> None:

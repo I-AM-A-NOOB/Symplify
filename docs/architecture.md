@@ -24,8 +24,8 @@ the Model decides nothing about display.
 这张图回答“代码在哪跑”，而不是“数据长什么样”。`ProcessBackend` 仍在 Qt 主线程；
 计算 worker、Variables worker 和 LaTeX 渲染器都是独立进程。Calculator 的结果/变体、
 History 的卡片和键盘 keycap 共用渲染进程；Variables 详情面板仍在主线程同步渲染
-（短任务，且由 `render_data_url` 的内部锁串行化）。Variables worker 只在 Variables
-页打开时启动，空闲 60 s 或离开页面且无写入时回收，下一次编辑再重启。
+（短任务，且由 `render_data_url` 的内部锁串行化）。Variables worker 只在第一次变量写入时
+启动，空闲 60 s 或离开页面且无写入时回收，下一次编辑再重启。
 
 ```mermaid
 flowchart LR

@@ -519,9 +519,9 @@ transparent corner, not `srgba(255,255,255,1)`.
   answer on screen is authoritative and must not become an error.
 - **The Variables page has its own backend and queue.** `main.py` creates a second
   `ProcessBackend` (`variables_backend`) so a variable edit never cancels a Calculator request.
-  The worker starts only when the Variables page opens, not with the app; it is stopped after
-  (`BACKEND_IDLE_MS`, 60 s) of no writes or when the page is left with nothing in flight, and the
-  next edit restarts it. That keeps a third SymPy process (~140 MB) off the idle app.
+  The worker starts on the first Variables write, not with the app or when the page opens; it is
+  stopped after (`BACKEND_IDLE_MS`, 60 s) of no writes or when the page is left with nothing in
+  flight, and the next edit restarts it. That keeps a third SymPy process off the idle app.
   `VariablesModel` queues add/update requests and sends one `variable` assignment
   at a time (the kind has no variant rows, so the worker is immediately free for
   the next queued write), applying the answer when it arrives; `add` answers
@@ -548,7 +548,10 @@ transparent corner, not `srgba(255,255,255,1)`.
   is deliberately not faked here.
 - **Status UI.** The result header shows `Backend: ready`, a spinner + `Backend: busy`,
   `Backend: timed out`, or `Backend: failed`; the timeout/failure states use the critical theme
-  colour. The outcome box carries the detailed failure text.
+  colour. The outcome box carries the detailed failure text. While a request is in flight the
+  header also offers **Cancel**: it terminates the worker, keeps the previous result and its
+  history, and writes only a log line — cancellation is not a failure card and does not modify
+  variables.
 - **Tests.** `tests/test_model.py` uses a `DeferredBackend` (the same signal contract, including
   `variantsReady`) to lock busy/timeout/cancel/clear, result-before-variants, stale variant ids
   and data survival without spawning anything. `tests/test_process.py` runs the real process

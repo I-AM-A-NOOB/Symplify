@@ -44,6 +44,9 @@ class InlineBackend(QObject):
     variantsReady = Signal(int, object)
     timedOut = Signal(int)
     failed = Signal(int, str)
+    #: The user explicitly cancelled the active request. Unlike a timeout this
+    #: keeps the previous result and does not write a failure card.
+    cancelled = Signal(int)
 
     timeout_seconds = 0.0
 
@@ -79,7 +82,7 @@ class InlineBackend(QObject):
                     variant_rows = ()
             self.variantsReady.emit(request_id, variant_rows)
 
-    def cancel(self) -> None:
+    def cancel(self, *, notify: bool = False) -> None:
         """Nothing to cancel: `submit` has already returned."""
 
     def shutdown(self) -> None:
@@ -102,6 +105,7 @@ class ProcessBackend(QObject):
     variantsReady = Signal(int, object)
     timedOut = Signal(int)
     failed = Signal(int, str)
+    cancelled = Signal(int)
 
     #: A request older than this is terminated. The boundary reports it as a
     #: timeout; the model never sees it.
@@ -182,15 +186,17 @@ class ProcessBackend(QObject):
         )
         self._poll_timer.start()
 
-    def cancel(self) -> None:
+    def cancel(self, *, notify: bool = False) -> None:
         """Abandon the current request and terminate its worker, if any.
 
         Pending variants also own the worker: a new request must not wait for a
-        slow optional computation from the previous result.
+        slow optional computation from the previous result. ``notify`` is only
+        for the user's Cancel button; internal replacement stays silent.
         """
         self._poll_timer.stop()
         if self._active_id is None and self._variants_id is None:
             return
+        active_id = self._active_id
         # Only optional variant rows are pending: their result is already on
         # screen, so the next request must not block on this worker's reap.
         retire_async = self._active_id is None
@@ -201,6 +207,8 @@ class ProcessBackend(QObject):
             self._retire_worker_async()
         else:
             self._stop_worker()
+        if notify and active_id is not None:
+            self.cancelled.emit(active_id)
 
     def shutdown(self) -> None:
         """Stop the poll and terminate the worker (application exit)."""

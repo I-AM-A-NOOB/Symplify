@@ -131,6 +131,17 @@ Item {
             Item { Layout.fillWidth: true }
 
             ToolButton {
+                objectName: "resultCancelButton"
+                visible: calcVM.backendBusy
+                flat: true
+                icon.name: "ic_fluent_stop_20_regular"
+                icon.color: Theme.currentTheme.colors.systemCriticalColor
+                Accessible.name: qsTr("Cancel calculation")
+                Tip { text: qsTr("Cancel calculation") }
+                onClicked: calcVM.cancelCalculation()
+            }
+
+            ToolButton {
                 objectName: "resultCopyButton"
                 flat: true
                 icon.name: "ic_fluent_copy_20_regular"

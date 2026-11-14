@@ -592,13 +592,6 @@ class VariablesViewModel(QObject):
                 return name
             counter += 1
 
-    @Slot()
-    def warmUpBackend(self) -> None:
-        """Start the Variables worker after the first frame, hiding SymPy's import."""
-        if self._backend is not None:
-            self._backend.warm_up()
-            self._touch_backend()
-
     def _touch_backend(self) -> None:
         if self._backend is None:
             return

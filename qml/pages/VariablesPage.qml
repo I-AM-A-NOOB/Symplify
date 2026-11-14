@@ -50,11 +50,10 @@ Item {
         }
     }
 
-    //: The Variables worker is not started with the app: it would be a third
-    //: SymPy process (~140 MB) even when this page is never opened. Start it
-    //: on first use, and let the viewmodel stop it after it goes idle or this
+    //: The Variables worker is not started with the app or with this page: a
+    //: third SymPy process (~55 MB) is only paid for once the user actually
+    //: writes a variable. The viewmodel stops it after it goes idle or this
     //: page is left.
-    Component.onCompleted: varsVM.warmUpBackend()
     Component.onDestruction: varsVM.stopBackendIfIdle()
 
     // The selection, not the current index: `currentIndex` is the view's to keep

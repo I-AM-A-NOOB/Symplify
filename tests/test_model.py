@@ -676,6 +676,7 @@ class DeferredBackend(QObject):
     variantsReady = Signal(int, object)
     timedOut = Signal(int)
     failed = Signal(int, str)
+    cancelled = Signal(int)
     timeout_seconds = 10.0
 
     def __init__(self):
@@ -691,8 +692,10 @@ class DeferredBackend(QObject):
         self.finished.emit(request_id, result)
         self.variantsReady.emit(request_id, rows)
 
-    def cancel(self):
+    def cancel(self, *, notify=False):
         self.cancels += 1
+        if notify and self.requests:
+            self.cancelled.emit(self.requests[-1][0])
 
     def shutdown(self):
         pass
@@ -823,6 +826,28 @@ def test_calculation_waits_for_the_backend_and_reports_busy():
     assert vm.calculator.backendBusy is False
     assert vm.calculator.backendStatus == "ready"
     assert vm.calculator.resultText == "x + 1"
+    assert vm.history.count == 1
+
+
+def test_user_cancel_keeps_the_previous_result_and_does_not_add_history():
+    backend = DeferredBackend()
+    vm = new_vm(backend)
+
+    vm.calculator.calculate("2 + 2")
+    first_id = backend.requests[-1][0]
+    result = Calculator().evaluate("2 + 2", {})
+    backend.respond(first_id, result, variants(result.value))
+    assert vm.calculator.resultText == "4"
+    assert vm.history.count == 1
+
+    vm.calculator.calculate("x + 1")
+    assert vm.calculator.backendBusy is True
+    vm.calculator.cancelCalculation()
+
+    assert backend.cancels >= 1
+    assert vm.calculator.backendBusy is False
+    assert vm.calculator.backendStatus == "ready"
+    assert vm.calculator.resultText == "4"
     assert vm.history.count == 1
 
 
@@ -1117,11 +1142,7 @@ class _FakeVariablesBackend(QObject):
     def __init__(self):
         super().__init__()
         self.requests = []
-        self.warmed = 0
         self.shutdowns = 0
-
-    def warm_up(self):
-        self.warmed += 1
 
     def shutdown(self):
         self.shutdowns += 1
@@ -1199,12 +1220,11 @@ def test_variables_worker_is_lazy_and_stops_when_idle():
 
     backend = _FakeVariablesBackend()
     viewmodel = VariablesViewModel(VariableManager(), LogViewModel(), backend=backend)
-    assert backend.warmed == 0                    # construction starts nothing
-    viewmodel.warmUpBackend()
-    assert backend.warmed == 1
+    assert backend.requests == []                 # construction starts nothing
 
-    # A queued/running write keeps it alive.
+    # The first write is what starts the worker; it is not a page-open warm-up.
     assert viewmodel.addVariable("a", "2") is True
+    assert backend.requests
     viewmodel.stopBackendIfIdle()
     assert backend.shutdowns == 0
 
