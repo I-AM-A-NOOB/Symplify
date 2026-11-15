@@ -68,7 +68,16 @@ class HistoryModel(QAbstractListModel):
     time. ``latexUrl`` is a cache lookup; the view queues the artwork through
     ``requestLatex`` and receives it later via ``dataChanged``. ``error`` is
     non-empty exactly for the entries whose request failed.
+
+    The list is bounded: an entry past ``MAX_HISTORY_ENTRIES`` evicts the oldest
+    one, releasing its rendered SVG with it. History is a session buffer, not a
+    persistence layer; an unbounded list is where a stress session's SVG data
+    URLs turned into hundreds of megabytes.
     """
+
+    #: Oldest entries are dropped past this many. Large enough for a real
+    #: session, small enough that rendered SVG data URLs cannot grow forever.
+    MAX_HISTORY_ENTRIES = 500
 
     ModeRole = Qt.UserRole + 1
     NameRole = Qt.UserRole + 2
@@ -235,7 +244,14 @@ class HistoryModel(QAbstractListModel):
 
         ``error`` marks a failed request: the card then shows the failure text
         instead of a result, and the input is still there to be sent back.
+        Beyond ``MAX_HISTORY_ENTRIES`` the oldest entry is evicted first; its
+        ``HistoryItem`` (and cached SVG data URL) is dropped with it.
         """
+        if len(self._items) >= self.MAX_HISTORY_ENTRIES:
+            last = len(self._items) - 1
+            self.beginRemoveRows(QModelIndex(), last, last)
+            self._items.pop()
+            self.endRemoveRows()
         self.beginInsertRows(QModelIndex(), 0, 0)
         self._items.insert(
             0,

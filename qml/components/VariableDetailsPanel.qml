@@ -17,8 +17,27 @@ import RinUI
 Rectangle {
     id: details
 
+    objectName: "variablesDetailsPanel"
+
     //: The page that owns this panel (see above).
     required property Item host
+
+    //: True while the selected row's expression is still the worker's draft.
+    //: `dataRevision` is named so a draft appearing/landing re-evaluates this.
+    readonly property bool pending: {
+        host.dataRevision
+        return host.selectedRow >= 0 && varsVM.isPending(host.selectedRow)
+    }
+
+    //: The selected row's stored type; the draft has no committed type yet.
+    readonly property string typeText: {
+        host.dataRevision
+        if (host.selectedRow < 0)
+            return ""
+        return details.pending
+            ? qsTr("Calculating…")
+            : variablesFilter.cellAt(host.selectedRow, 2)
+    }
 
     //: Load the panel's fields from the selected row. Assignments, not bindings:
     //: the user types in them, and a binding would fight the typing. The page calls
@@ -100,9 +119,60 @@ Rectangle {
             text: host.definitionText
             wrapMode: Text.WordWrap
             font: settingsVM.codeFont
-            color: host.selectedRow < 0
+            color: host.selectedRow < 0 || details.pending
                 ? Theme.currentTheme.colors.textSecondaryColor
                 : Theme.currentTheme.colors.systemCriticalColor
+        }
+
+        //: The table's spinner lives in the page header; the panel is a second
+        //: view of the same row, so it says the same thing without making the
+        //: reader look across the page. The raw line above is the latest draft.
+        RowLayout {
+            Layout.fillWidth: true
+            visible: details.pending
+            spacing: 6
+
+            ProgressRing {
+                objectName: "detailsProgressRing"
+
+                size: 14
+                strokeWidth: 2
+                //: RinUI's ring animation ignores `visible`; a collapsed panel
+                //: must not keep an invisible spinner painting.
+                indeterminate: visible
+            }
+
+            Text {
+                text: qsTr("Calculating…")
+                typography: Typography.Caption
+                color: Theme.currentTheme.colors.textSecondaryColor
+            }
+        }
+
+        //: The type the table shows in its third column. The draft has no
+        //: committed type, so it says "Calculating…" until the answer lands.
+        RowLayout {
+            Layout.fillWidth: true
+            visible: host.selectedRow >= 0
+            spacing: 6
+
+            Text {
+                text: qsTr("Type")
+                typography: Typography.Caption
+                color: Theme.currentTheme.colors.textSecondaryColor
+            }
+
+            Item { Layout.fillWidth: true }
+
+            Text {
+                objectName: "detailsTypeLabel"
+
+                text: details.typeText
+                font: settingsVM.codeFont
+                color: details.pending
+                    ? Theme.currentTheme.colors.textSecondaryColor
+                    : Theme.currentTheme.colors.textColor
+            }
         }
 
         CodeField {

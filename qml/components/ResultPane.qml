@@ -119,7 +119,9 @@ Item {
                 visible: calcVM.backendBusy
                 size: 14
                 strokeWidth: 2
-                indeterminate: true
+                //: RinUI's ring animation ignores `visible`; without this the
+                //: idle result area keeps an invisible Canvas animating.
+                indeterminate: visible
             }
 
             Text {

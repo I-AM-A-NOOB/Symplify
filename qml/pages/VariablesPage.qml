@@ -433,6 +433,34 @@ Item {
                          qsTr("Type")]
         }
 
+        //: The Variables worker is a page-level activity: one write at a time.
+        //: The ring says the raw text in the row is a draft, and the stop button
+        //: aborts only the active request; queued names keep their place.
+        ProgressRing {
+            objectName: "variablesProgressRing"
+
+            visible: varsVM.busy
+            Layout.alignment: Qt.AlignVCenter
+            size: 14
+            strokeWidth: 2
+            //: RinUI's ring animation ignores `visible`; tying `indeterminate`
+            //: to it keeps a hidden spinner from painting forever (which is
+            //: measurable GPU work on an otherwise idle page).
+            indeterminate: visible
+        }
+
+        ToolButton {
+            objectName: "variablesAbortButton"
+
+            visible: varsVM.busy
+            flat: true
+            icon.name: "ic_fluent_stop_20_regular"
+            icon.color: Theme.currentTheme.colors.systemCriticalColor
+            Accessible.name: qsTr("Abort variable calculation")
+            Tip { text: qsTr("Abort variable calculation") }
+            onClicked: varsVM.cancelPending()
+        }
+
         //: The table's own actions. Everything here may fold into the overflow
         //: menu when the row runs short — the search box and the title have already
         //: given what they can by then.
