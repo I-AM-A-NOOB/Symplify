@@ -4,6 +4,13 @@ This page is **Model-first**: it documents the pure-Python calculation core
 (`python/model/`), the two requests it answers, where those requests come from,
 and who reads what comes back. It is about how data actually moves.
 
+> **当前生产边界（重构后）**：UI 进程不 import SymPy。变量由 `StoreClient` →
+> `store_worker` 持有字符串 `StoreEntry`；Calculator/Variables 的 scope 是
+> `ScopeSnapshot`/`ScopeDelta`；`ProcessBackend` 跨进程只传 `ResultView` /
+> `VariantView` / `PlotSpec`，SymPy 对象留在 Compute worker。本文的 Model 图仍以
+> `Success | Failure` 描述模型内部语义，UI 侧的完整边界见
+> `.Agent/DEVELOPER_GUIDE.md` 的 *Protocol DTOs* 与 *Calculation backend* 两节。
+
 ## The Model in one sentence
 
 Two requests, one parser, no Qt:
@@ -162,7 +169,7 @@ flowchart TB
     C2 -.->|"语法 / 域错误"| C5
 
     C3 -->|"赋值：写回（跨进程）"| C6
-    C6 -.->|"list_all() 作为 scope 快照"| C1
+    C6 -.->|"StoreClient.snapshot() / legacy list_all()"| C1
     C6 -.->|"is_sympy_builtin(name)"| D6
     B6 -->|"异步 finished / timedOut / failed"| R["ViewModel 分发"]
 

@@ -5,9 +5,16 @@ just saves remembering them.
 """
 
 
-from . import test_model, test_process, test_settings
+from . import (
+    test_model,
+    test_process,
+    test_protocol,
+    test_scope,
+    test_settings,
+    test_store,
+)
 
-MODULES = (test_model, test_settings, test_process)
+MODULES = (test_model, test_protocol, test_store, test_scope, test_settings, test_process)
 
 
 def main() -> int:

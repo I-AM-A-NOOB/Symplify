@@ -23,7 +23,6 @@ import operator
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
-from enum import Enum, auto
 from functools import lru_cache
 from typing import Any
 
@@ -36,6 +35,7 @@ from sympy.parsing.sympy_parser import (
     stringify_expr,
 )
 
+from ..worker_protocol import Assignment, ErrorKind
 from .latex import render_latex, render_latex_definition
 from .plotting import Origin
 from .variable import is_sympy_name, sympy_callables, validate_name
@@ -227,29 +227,6 @@ def _safe_parse_expr(text: str, local_dict: dict, transformations: tuple) -> Any
             local_dict[name] = null
 
 
-class ErrorKind(Enum):
-    """Why a request could not be answered.
-
-    Attributes:
-        SYNTAX: the text is not parseable as an expression.
-        UNKNOWN_NAME: a name used as a call that resolves to no function, or an
-            augmented assignment to a variable that does not exist.
-        INVALID_NAME: an assignment target that is not a legal variable name.
-        UNSUPPORTED: a well-formed request this model does not implement.
-        INTERNAL: sympy raised something that is not a syntax problem — a bug
-            in the request's domain or in this layer, never the user's typo.
-        TIMEOUT: the request exceeded the backend's deadline and was cancelled;
-            raised by the frontend/backend boundary, never by the model itself.
-    """
-
-    SYNTAX = auto()
-    UNKNOWN_NAME = auto()
-    INVALID_NAME = auto()
-    UNSUPPORTED = auto()
-    INTERNAL = auto()
-    TIMEOUT = auto()
-
-
 @dataclass(frozen=True)
 class Success:
     """A request that produced a value.
@@ -293,29 +270,6 @@ class Failure:
 
 #: Result of any request: exactly one of the two shapes.
 Result = Success | Failure
-
-
-@dataclass(frozen=True)
-class Assignment:
-    """A write to the variable store, as a request rather than a string.
-
-    ``expression`` stays *text* so the expression language (implicit
-    multiplication, ``^``, paren-less application) is parsed by exactly one
-    parser. Reassembling the write into a new expression string — the previous
-    implementation built ``f"{name} {op[0]} ({value})"`` — is what turned
-    ``x += 1`` on an undefined ``x`` into the self-referential binding
-    ``x = x + 1``.
-
-    Attributes:
-        target: Variable name to write.
-        op: ``'='`` or an augmented operator (``'+='``, ``'-='``, ``'*='``,
-            ``'/='``, ``'%='``).
-        expression: The right-hand side, as the user typed it.
-    """
-
-    target: str
-    op: str = "="
-    expression: str = ""
 
 
 #: Augmented operators mapped to the operation they apply.
@@ -501,7 +455,8 @@ class Calculator:
         # history card both show this LaTeX on its own, and a bare number beside the
         # name they already print reads as two answers to the same question. The
         # operator is not repeated — `x += 1` is reported as the `x = …` it made.
-        return Success(request, value, render_latex_definition(target, value))
+        latex = render_latex_definition(target, value)
+        return Success(request, value, latex)
 
     def unknown_calls(self, expression: str, scope: Mapping[str, Any]) -> list[str]:
         """Names used as calls that resolve to no function, in order of use.

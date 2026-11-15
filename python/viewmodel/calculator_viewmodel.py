@@ -7,16 +7,15 @@ The widgets app's eager plot-data computation (``create_plot_data`` /
 
 import random
 import re
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import Property, QCoreApplication, QObject, QTimer, Signal, Slot
 from qmlmathplot import Curve, Plot
+from qmlmathplot.protocol import Program
 
 from ..latex_render import LatexStyle, svg_data_url
-from ..model.calculator import Assignment, ErrorKind, Failure, Result, Success
-from ..model.variable import VariableManager, reserved_name_warning
-from ..model.variants import Variant
-from .calculation_backend import InlineBackend
+from ..worker_protocol import Assignment, ResultView, StoreEntryCandidate
 from .history_viewmodel import HistoryModel
 from .input_mode import InputMode
 from .latex_jobs import LatexJobs
@@ -81,7 +80,7 @@ class CalculatorViewModel(QObject):
 
     def __init__(
         self,
-        variable_manager: VariableManager,
+        variable_manager: Any | None,
         history: HistoryModel,
         log: LogViewModel,
         variables_model: VariablesModel | None = None,
@@ -89,6 +88,7 @@ class CalculatorViewModel(QObject):
         backend: QObject | None = None,
         latex_service: LatexRenderService | None = None,
         icon_svg: str = "",
+        scope_source: Callable[[], Any] | None = None,
     ):
         """Initialize the calculator viewmodel.
 
@@ -106,6 +106,8 @@ class CalculatorViewModel(QObject):
         """
         super().__init__(parent)
         self._variable_manager = variable_manager
+        self._scope_source = scope_source
+        self._sent_scope_revision: int | None = None
         self._history = history
         self._log = log
         self._variables_model = variables_model
@@ -123,13 +125,17 @@ class CalculatorViewModel(QObject):
         self._latex_height = 0
         #: Alternative forms of the current answer; their artwork is filled by
         #: the renderer as each request completes.
-        self._variants: tuple[Variant, ...] = ()
+        self._variants: tuple[Any, ...] = ()
         self._variant_items: list[dict] = []
         #: Calculation crosses a backend boundary. The default is synchronous
         #: (tests, headless callers); the application passes a process backend
         #: with a timeout. The viewmodel allocates request ids, so both take the
         #: same path and stale replies are ignored.
-        self._backend = backend if backend is not None else InlineBackend(self)
+        if backend is None:
+            from .inline_backend import InlineBackend
+
+            backend = InlineBackend(self)
+        self._backend = backend
         self._backend.finished.connect(self._on_backend_finished)
         self._backend.variantsReady.connect(self._on_variants_ready)
         self._backend.timedOut.connect(self._on_backend_timed_out)
@@ -639,6 +645,7 @@ class CalculatorViewModel(QObject):
         self._active_request = None
         self._pending = None
         self._last_completed_request = None
+        self._sent_scope_revision = None
         self._latex_jobs.reset()
         self._plot_token += 1
         self._set_backend_state(False, "ready")
@@ -651,22 +658,22 @@ class CalculatorViewModel(QObject):
         self._refresh_strip()
         self.resultChanged.emit()
 
-    def _apply_result(self, result: Result) -> None:
+    def _apply_result(self, result: ResultView, legacy: Any | None = None) -> None:
         """Apply a request's outcome, then schedule its plot separately."""
         # A new outcome invalidates every render from the previous one, even if
         # it is still in the renderer's queue.
         self._latex_jobs.reset()
         self._clear_variants()
-        if isinstance(result, Success):
-            self._result_text = str(result.value)
-            self._result_latex = result.latex
-            self._is_error = False
-            self._error_message = ""
-        else:
+        if result.is_error:
             self._result_text = ""
             self._result_latex = ""
             self._is_error = True
             self._error_message = self._format_failure(result)
+        else:
+            self._result_text = result.text
+            self._result_latex = result.latex
+            self._is_error = False
+            self._error_message = ""
         # Capture the generation before any notification: the renderer can
         # complete synchronously in headless mode, and a listener may start
         # another calculation, which must own the plot.
@@ -678,25 +685,42 @@ class CalculatorViewModel(QObject):
         # Plot preparation is not part of the result. It stays on the UI thread
         # (qmlmathplot is Qt/GPU state) but runs after this notification.
         if QCoreApplication.instance() is None:
-            self._apply_plot(result, token)
+            self._apply_plot(result, token, legacy)
         else:
-            QTimer.singleShot(0, lambda: self._apply_plot(result, token))
+            QTimer.singleShot(0, lambda: self._apply_plot(result, token, legacy))
 
-    def _apply_plot(self, result: Result, token: int) -> None:
+    def _apply_plot(
+        self, result: ResultView, token: int, legacy: Any | None = None
+    ) -> None:
         """Apply the curves for one result if it is still the current one."""
         if token != self._plot_token:
             return
-        if isinstance(result, Success):
-            self._set_plot(getattr(result, "plot", ()))
-        else:
+        if legacy is not None:
+            self._set_plot(getattr(legacy, "plot", ()))
+            return
+        if result.is_error:
             self._set_plot(())
+            return
+        try:
+            specs = tuple(
+                {
+                    "program": Program.from_dict(spec.program),
+                    "label": spec.label,
+                    "role": spec.role,
+                }
+                for spec in result.plot
+            )
+        except Exception as exc:  # noqa: BLE001 - a bad plot must not break the result
+            self._log.add_warning(f"Plot failed: {type(exc).__name__}: {exc}", "Calculator")
+            specs = ()
+        self._set_plot(specs)
 
     @staticmethod
-    def _format_failure(failure: Failure) -> str:
+    def _format_failure(failure: ResultView) -> str:
         """User-facing error text: the message plus its hint, when there is one."""
         if failure.hint:
-            return f"{failure.message} — {failure.hint}"
-        return failure.message
+            return f"{failure.error_message} — {failure.hint}"
+        return failure.error_message
 
     def _start_request(
         self,
@@ -710,8 +734,10 @@ class CalculatorViewModel(QObject):
         `finished` inside `submit`, and both backends then follow the same
         stale-reply path.
         """
-        if self._active_request is not None:
-            self._backend.cancel()
+        # A new request replaces anything in flight, including a worker only
+        # waiting to deliver variants. Do this before asking for the scope: the
+        # replacement increments the worker generation, which forces a snapshot.
+        self._backend.cancel()
         # A variant message from the previous answer must not attach to the
         # result of this request, even if it arrives while this one is running.
         self._last_completed_request = None
@@ -720,16 +746,27 @@ class CalculatorViewModel(QObject):
         self._pending = pending
         self._set_backend_state(True, "calculating")
         try:
+            scope = self._scope_for_request()
+            pending["scope_revision"] = getattr(scope, "revision", None)
             self._backend.submit(
                 self._active_request,
                 kind,
                 payload,
-                self._variable_manager.list_all(),
+                scope,
             )
         except Exception as exc:  # noqa: BLE001 - a broken boundary is reported
             self._on_backend_failed(
                 self._active_request, f"{type(exc).__name__}: {exc}"
             )
+
+    def _scope_for_request(self) -> Any:
+        """The snapshot or delta that brings this worker up to date."""
+        if self._scope_source is not None:
+            generation = getattr(self._backend, "generation", 0)
+            return self._scope_source(generation, self._sent_scope_revision)
+        if self._variable_manager is not None:
+            return self._variable_manager.list_all()
+        return {}
 
     def _take_pending(self, request_id: int) -> dict | None:
         """Claim a reply, or return None when it belongs to a cancelled request."""
@@ -740,7 +777,7 @@ class CalculatorViewModel(QObject):
         self._active_request = None
         return pending
 
-    def _on_backend_finished(self, request_id: int, result: Result) -> None:
+    def _on_backend_finished(self, request_id: int, result: Any) -> None:
         """A model answer arrived: display it, then record its effects."""
         pending = self._take_pending(request_id)
         if pending is None:
@@ -749,12 +786,55 @@ class CalculatorViewModel(QObject):
         # Identify the displayed result before notifying: a listener may start
         # another request, which must invalidate this one's late variants.
         self._last_completed_request = request_id
+        legacy = None if isinstance(result, ResultView) else result
+        view = result if isinstance(result, ResultView) else self._legacy_view(
+            result, request_id
+        )
+        # A successful answer means the worker applied the scope first. A model
+        # failure also synced, but resetting on error is cheap insurance against
+        # a scope-sync failure masquerading as an internal model error.
+        self._sent_scope_revision = (
+            None if view.is_error else pending.get("scope_revision")
+        )
         # Result first: it no longer waits for optional variant rows.
-        self._apply_result(result)
-        if isinstance(result, Success):
-            self._record_success(pending, result)
+        self._apply_result(view, legacy)
+        if view.is_error:
+            self._record_failure(pending, view, allow_invalid=True)
         else:
-            self._record_failure(pending, result, allow_invalid=True)
+            self._record_success(pending, view, legacy)
+
+    def _legacy_view(self, result: Any, request_id: int) -> ResultView:
+        """The compatibility path for the in-process/Deferred test backends."""
+        from ..model.calculator import Success
+
+        if isinstance(result, Success):
+            return ResultView(
+                request_id=request_id,
+                expression=result.expression,
+                text=str(result.value),
+                latex=result.latex,
+                is_error=False,
+                error_message="",
+                hint="",
+                variants=(),
+                plot=(),
+                scope_revision=0,
+                profile_id="default",
+            )
+        return ResultView(
+            request_id=request_id,
+            expression=result.expression,
+            text="",
+            latex="",
+            is_error=True,
+            error_message=result.message,
+            hint=result.hint,
+            variants=(),
+            plot=(),
+            scope_revision=0,
+            profile_id="default",
+            error_kind=result.kind.name,
+        )
 
     @Slot(int)
     def _on_backend_cancelled(self, request_id: int) -> None:
@@ -763,6 +843,7 @@ class CalculatorViewModel(QObject):
         if pending is None:
             return
         self._set_backend_state(False, "ready")
+        self._sent_scope_revision = None
         self._log.add_info("Calculation cancelled.", "Calculator")
 
     @Slot(int, object)
@@ -780,14 +861,24 @@ class CalculatorViewModel(QObject):
         if pending is None:
             return
         self._set_backend_state(False, "timedout")
+        self._sent_scope_revision = None
         timeout = self._get_backend_timeout()
-        failure = Failure(
-            pending["expression"],
-            ErrorKind.TIMEOUT,
-            f"Calculation timed out after {timeout:g} s.",
+        view = ResultView(
+            request_id=request_id,
+            expression=pending["expression"],
+            text="",
+            latex="",
+            is_error=True,
+            error_message=f"Calculation timed out after {timeout:g} s.",
+            hint="",
+            variants=(),
+            plot=(),
+            scope_revision=0,
+            profile_id="default",
+            error_kind="TIMEOUT",
         )
-        self._apply_result(failure)
-        self._record_failure(pending, failure, allow_invalid=False)
+        self._apply_result(view)
+        self._record_failure(pending, view, allow_invalid=False)
 
     def _on_backend_failed(self, request_id: int, message: str) -> None:
         """The worker died or the boundary could not start/send."""
@@ -795,15 +886,27 @@ class CalculatorViewModel(QObject):
         if pending is None:
             return
         self._set_backend_state(False, "failed")
-        failure = Failure(
-            pending["expression"],
-            ErrorKind.INTERNAL,
-            f"Calculation backend failed: {message}",
+        self._sent_scope_revision = None
+        view = ResultView(
+            request_id=request_id,
+            expression=pending["expression"],
+            text="",
+            latex="",
+            is_error=True,
+            error_message=f"Calculation backend failed: {message}",
+            hint="",
+            variants=(),
+            plot=(),
+            scope_revision=0,
+            profile_id="default",
+            error_kind="INTERNAL",
         )
-        self._apply_result(failure)
-        self._record_failure(pending, failure, allow_invalid=False)
+        self._apply_result(view)
+        self._record_failure(pending, view, allow_invalid=False)
 
-    def _record_success(self, pending: dict, result: Success) -> None:
+    def _record_success(
+        self, pending: dict, result: ResultView, legacy: Any | None = None
+    ) -> None:
         """History, log and variable-store effects of a successful request."""
         if pending["kind"] == "evaluate":
             self._history.add_item(
@@ -819,13 +922,13 @@ class CalculatorViewModel(QObject):
                 name=pending["name"],
                 op=pending["operator"],
             )
-            self._save_variable(pending["name"], result.value)
-        self._log.add_info(f"= {result.value}", "Calculator")
+            self._save_variable(pending["name"], result, legacy)
+        self._log.add_info(f"= {result.text}", "Calculator")
 
     def _record_failure(
         self,
         pending: dict,
-        failure: Failure,
+        failure: ResultView,
         allow_invalid: bool,
     ) -> None:
         """History and log effects of a failed request.
@@ -850,18 +953,30 @@ class CalculatorViewModel(QObject):
                 op=pending["operator"],
                 error=self._format_failure(failure),
             )
-        self._log.add_error(f"Error: {failure.message}", "Calculator")
+        self._log.add_error(f"Error: {failure.error_message}", "Calculator")
 
         if (pending["kind"] != "assign"
                 or not allow_invalid
-                or failure.kind is ErrorKind.INVALID_NAME
+                or failure.error_kind == "INVALID_NAME"
                 or pending["operator"] != "="
                 or self._variables_model is None):
             return
         try:
-            self._variables_model.save_invalid(
-                pending["name"], pending["expression"]
-            )
+            if self._variables_model.is_store_backed():
+                self._variables_model.commit_candidate(
+                    StoreEntryCandidate(
+                        name=pending["name"],
+                        srepr="",
+                        display=pending["expression"],
+                        type_label="Invalid",
+                        latex="",
+                        valid=False,
+                    )
+                )
+            else:
+                self._variables_model.save_invalid(
+                    pending["name"], pending["expression"]
+                )
         except Exception as exc:  # noqa: BLE001 - a store failure is a warning
             self._log.add_warning(
                 f"Failed to store invalid entry: {exc}", "Calculator"
@@ -908,14 +1023,39 @@ class CalculatorViewModel(QObject):
             },
         )
 
-    def _save_variable(self, name: str, value: Any) -> None:
+    def _save_variable(
+        self, name: str, view: ResultView, legacy: Any | None = None
+    ) -> None:
         """Save an assigned variable, warning about the names input depends on."""
+        candidate = view.entry
         try:
             if self._variables_model is not None:
-                self._variables_model.save(name, value)
+                if self._variables_model.is_store_backed():
+                    if candidate is None and legacy is not None:
+                        from ..result_payload import assignment_candidate
+
+                        candidate = assignment_candidate(name, legacy.value)
+                    if candidate is not None:
+                        self._variables_model.commit_candidate(candidate)
+                elif self._variable_manager is not None:
+                    if legacy is not None:
+                        self._variables_model.save(name, legacy.value)
+                    elif candidate is not None:
+                        from ..model.srepr import restore_srepr
+
+                        self._variables_model.save(
+                            name, restore_srepr(candidate.srepr)
+                        )
         except Exception as e:
             self._log.add_warning(f"Failed to save variable: {e}", "Calculator")
+            return
 
-        warning = reserved_name_warning(name)
-        if warning is not None:
+        if candidate is not None and self._variables_model is not None \
+                and self._variables_model.is_store_backed():
+            warning = candidate.warning
+        else:
+            from ..model.variable import reserved_name_warning
+
+            warning = reserved_name_warning(name)
+        if warning:
             self.warningOccurred.emit(name, warning)

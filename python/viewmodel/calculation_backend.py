@@ -1,23 +1,18 @@
 """The frontend/backend boundary for calculation requests.
 
-The UI never evaluates sympy on its event loop. A backend receives one request
-at a time and reports the model's ``Success | Failure`` first, then its optional
-variant rows through a separate Qt signal. The variants are computed inside the
-backend because ``doit``, ``expand`` and ``factor`` are symbolic work and share
-the request's deadline.
-Two implementations share the contract:
+The UI never evaluates sympy on its event loop. The application uses
+:class:`ProcessBackend`, which runs the calculation worker in a spawned process;
+a request that misses its deadline is reported as ``timedOut`` and the process
+is terminated — Python cannot interrupt sympy in a thread, so a separate
+process is the only place a hard timeout can be enforced. The worker replies
+with plain-data :class:`~python.worker_protocol.ResultView` and
+:class:`~python.worker_protocol.VariantView` values, never a SymPy object.
 
-* :class:`InlineBackend` runs the model synchronously in this process. It is
-  the default when no backend is supplied, which keeps the headless tests and
-  any embedding caller deterministic; it has no timeout.
-* :class:`ProcessBackend` runs :mod:`python.backend_worker` in a spawned
-  process. A request that misses its deadline is reported as ``timedOut`` and
-  the process is terminated — Python cannot interrupt sympy in a thread, so a
-  separate process is the only place a hard timeout can be enforced.
-
-The viewmodel allocates the request id before submitting, so a synchronous
-backend and an asynchronous one follow the same path. Stale ids are ignored by
-the caller.
+The synchronous test/headless backend lives in
+:mod:`python.viewmodel.inline_backend`, so importing this module does not load
+SymPy into the UI process. The viewmodel allocates the request id before
+submitting, so a synchronous backend and an asynchronous one follow the same
+path. Stale ids are ignored by the caller.
 """
 
 import time
@@ -26,69 +21,9 @@ from typing import Any
 
 from PySide6.QtCore import QCoreApplication, QObject, QTimer, Signal
 
-from ..backend_worker import worker_main
+from ..backend_entry import worker_main
 from ..child_process import ChildProcess
-from ..model.calculator import Calculator, Success
-from ..model.variants import variants
-from ..plot_programs import with_plot
-
-
-class InlineBackend(QObject):
-    """Synchronous backend: evaluate in-process, emit the result immediately.
-
-    No timeout: a runaway request blocks the caller exactly as it did before
-    the backend existed. Tests and headless callers use this; the application
-    passes a :class:`ProcessBackend`.
-    """
-
-    finished = Signal(int, object)
-    variantsReady = Signal(int, object)
-    timedOut = Signal(int)
-    failed = Signal(int, str)
-    #: The user explicitly cancelled the active request. Unlike a timeout this
-    #: keeps the previous result and does not write a failure card.
-    cancelled = Signal(int)
-
-    timeout_seconds = 0.0
-
-    def __init__(self, parent: QObject | None = None):
-        super().__init__(parent)
-        self._calculator = Calculator()
-
-    def warm_up(self) -> None:
-        """Nothing to start: the inline backend runs in this process."""
-
-    def submit(
-        self,
-        request_id: int,
-        kind: str,
-        payload: Any,
-        scope: Mapping[str, Any],
-    ) -> None:
-        """Evaluate now and emit the outcome before returning."""
-        try:
-            if kind == "evaluate":
-                result = self._calculator.evaluate(payload, scope)
-            else:
-                result = self._calculator.assign(payload, scope)
-        except Exception as exc:  # noqa: BLE001 - a crash is a report, not a raise
-            self.failed.emit(request_id, f"{type(exc).__name__}: {exc}")
-        else:
-            result = with_plot(result)
-            self.finished.emit(request_id, result)
-            variant_rows = ()
-            if isinstance(result, Success):
-                try:
-                    variant_rows = variants(result.value)
-                except Exception:  # noqa: BLE001 - no card, not a failed answer
-                    variant_rows = ()
-            self.variantsReady.emit(request_id, variant_rows)
-
-    def cancel(self, *, notify: bool = False) -> None:
-        """Nothing to cancel: `submit` has already returned."""
-
-    def shutdown(self) -> None:
-        """Nothing to release."""
+from ..worker_protocol import ScopeDelta, ScopeSnapshot
 
 
 class ProcessBackend(QObject):
@@ -130,6 +65,10 @@ class ProcessBackend(QObject):
         self._worker = ChildProcess(worker_main, sandboxed=True)
         self._active_id: int | None = None
         self._deadline = 0.0
+        #: Bumped whenever the worker is replaced, so the scope sender knows to
+        #: send a snapshot instead of a delta.
+        self._generation = 0
+        self._worker_started = False
         #: ``variable`` writes send a result only; other kinds are followed by
         #: their optional variant rows.
         self._expect_variants = True
@@ -149,6 +88,15 @@ class ProcessBackend(QObject):
         if app is not None:
             app.aboutToQuit.connect(self.shutdown)
 
+    @property
+    def generation(self) -> int:
+        """The identity of the current worker; changes on every replacement."""
+        if self._worker_started and not self._worker.alive:
+            # An idle worker died; the next send will start a fresh one.
+            self._worker_started = False
+            self._generation += 1
+        return self._generation
+
     def warm_up(self) -> None:
         """Start the worker before the first request, hiding SymPy's import.
 
@@ -158,6 +106,7 @@ class ProcessBackend(QObject):
         """
         try:
             self._worker.ensure()
+            self._worker_started = True
         except Exception:  # noqa: BLE001 - warm-up is optional
             self._stop_worker()
 
@@ -166,13 +115,14 @@ class ProcessBackend(QObject):
         request_id: int,
         kind: str,
         payload: Any,
-        scope: Mapping[str, Any],
+        scope: Mapping[str, Any] | ScopeSnapshot | ScopeDelta,
     ) -> None:
         """Send one request, replacing anything already in flight."""
         self.cancel()
         self._expect_variants = kind != "variable"
         try:
             self._worker.send((request_id, kind, payload, scope))
+            self._worker_started = True
         except Exception as exc:  # noqa: BLE001 - start/pipe failure is a status
             self._stop_worker()
             self._active_id = None
@@ -222,6 +172,8 @@ class ProcessBackend(QObject):
         """Terminate and reap the child; idempotent and never raises."""
         self._variants_id = None
         self._variants_deadline = 0.0
+        self._generation += 1
+        self._worker_started = False
         self._worker.stop()
 
     def _retire_worker_async(self) -> None:
@@ -233,6 +185,8 @@ class ProcessBackend(QObject):
         """
         self._variants_id = None
         self._variants_deadline = 0.0
+        self._generation += 1
+        self._worker_started = False
         self._worker.stop(wait=False)
 
     def _poll(self) -> None:

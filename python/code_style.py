@@ -8,7 +8,7 @@ expression can never drift apart:
   ``QTextDocument`` behind the editable inputs;
 * :func:`to_rich_text` — markup, for a read-only ``Text`` item.
 
-The spans have two producers, merged here: ``model/lexer.py`` says what each run
+The spans have two producers, merged here: ``lexer.py`` says what each run
 of characters *is*, and ``brackets.py`` adds the nesting layer that colours the
 brackets. Brackets win where the two overlap, which is why the merge is a single
 function instead of something each renderer repeats.
@@ -27,7 +27,7 @@ from typing import Any, NamedTuple
 from . import code_themes
 from .brackets import DEFAULT_COLORS as BRACKET_COLORS
 from .brackets import spans as bracket_spans
-from .model.lexer import TokenKind, tokenize
+from .lexer import TokenKind, tokenize
 
 
 class Style(Enum):

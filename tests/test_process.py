@@ -95,7 +95,7 @@ def test_process_backend_sends_result_before_variants():
             main()
         """
     )
-    assert events[:2] == [["result", "Success"], ["variants", 1]]
+    assert events[:2] == [["result", "ResultView"], ["variants", 1]]
 
 
 def test_importing_the_entry_point_is_worker_safe():
@@ -134,7 +134,7 @@ def test_process_backend_attaches_plot_programs():
 
             def finished(request_id, result):
                 events.append([type(result).__name__, len(result.plot),
-                               result.plot[0]["label"] if result.plot else ""])
+                               result.plot[0].label if result.plot else ""])
                 app.quit()
 
             backend.finished.connect(finished)
@@ -150,7 +150,7 @@ def test_process_backend_attaches_plot_programs():
             main()
         """
     )
-    assert events == [["Success", 1, "x**2"]]
+    assert events == [["ResultView", 1, "x**2"]]
 
 
 def test_variable_writes_cross_a_real_worker():
@@ -163,14 +163,14 @@ def test_variable_writes_cross_a_real_worker():
         r"""
         import json
         from PySide6.QtCore import QCoreApplication, QTimer
-        from python.model.variable import VariableManager
+        from python.store_worker import VariableStore
         from python.viewmodel.calculation_backend import ProcessBackend
         from python.viewmodel.variables_viewmodel import VariablesModel
 
         def main():
             app = QCoreApplication([])
             backend = ProcessBackend(timeout_seconds=30.0)
-            model = VariablesModel(VariableManager(), backend=backend)
+            model = VariablesModel(None, backend=backend, store=VariableStore())
             events = []
 
             def added(name, ok):
@@ -363,7 +363,7 @@ def test_variant_timeout_does_not_fail_the_result():
             main()
         """
     )
-    assert events[:2] == [["result", "Success"], ["variants", 0]]
+    assert events[:2] == [["result", "ResultView"], ["variants", 0]]
     assert not any(event[0] == "failed" for event in events)
 
 
@@ -558,6 +558,243 @@ def test_a_render_past_its_deadline_fails_instead_of_hanging():
 
     assert failures and "exceeded" in failures[0][1]
     assert not service._pending
+
+
+def test_the_store_worker_crosses_a_real_process():
+    events = run_script(
+        r"""
+        import json
+        from python.child_process import ChildProcess
+        from python.store_worker import worker_main
+        from python.worker_protocol import CommitRequest, StoreEntryCandidate
+
+        def main():
+            child = ChildProcess(worker_main)
+            events = []
+            try:
+                pipe = child.ensure()
+                pipe.send((1, "snapshot", None))
+                request_id, kind, snapshot = pipe.recv()
+                events.append([request_id, kind, snapshot.revision, len(snapshot.entries)])
+
+                pipe.send((2, "commit", CommitRequest(
+                    0,
+                    StoreEntryCandidate(
+                        name="x",
+                        srepr="Symbol('x')",
+                        display="x",
+                        type_label="Symbol",
+                        latex="x",
+                    ),
+                )))
+                request_id, kind, reply = pipe.recv()
+                events.append([request_id, kind, reply.ok, reply.revision,
+                               reply.delta.base_revision, reply.delta.revision])
+
+                pipe.send((3, "snapshot", None))
+                request_id, kind, snapshot = pipe.recv()
+                events.append([request_id, kind, snapshot.revision,
+                               [entry.name for entry in snapshot.entries]])
+            finally:
+                child.stop()
+            print(json.dumps(events))
+
+        if __name__ == "__main__":
+            main()
+        """
+    )
+    assert events == [
+        [1, "snapshot", 0, 0],
+        [2, "reply", True, 1, 0, 1],
+        [3, "snapshot", 1, ["x"]],
+    ]
+
+
+def test_the_compute_worker_caches_scope_revisions():
+    events = run_script(
+        r"""
+        import json
+        from python.backend_worker import worker_main
+        from python.child_process import ChildProcess
+        from python.worker_protocol import ScopeChange, ScopeDelta, ScopeSnapshot, StoreEntry
+
+        def entry(name, revision, srepr):
+            return StoreEntry(
+                name=name,
+                srepr=srepr,
+                display=name,
+                type_label="Integer",
+                latex="",
+                revision=revision,
+                valid=True,
+            )
+
+        def main():
+            child = ChildProcess(worker_main)
+            events = []
+            try:
+                pipe = child.ensure()
+                snapshot = ScopeSnapshot(1, (entry("x", 1, "Symbol('x')"),))
+                pipe.send((1, "evaluate", "x + 1", snapshot))
+                result = pipe.recv()
+                events.append(["snapshot", type(result[2]).__name__, result[2].text])
+                pipe.recv()  # optional variants
+
+                delta = ScopeDelta(
+                    1,
+                    2,
+                    (ScopeChange("x", 2, entry("x", 2, "Integer(5)")),),
+                )
+                pipe.send((2, "evaluate", "x + 1", delta))
+                result = pipe.recv()
+                events.append(["delta", type(result[2]).__name__, result[2].text])
+                pipe.recv()  # optional variants
+            finally:
+                child.stop()
+            print(json.dumps(events))
+
+        if __name__ == "__main__":
+            main()
+        """
+    )
+    assert events == [
+        ["snapshot", "ResultView", "x + 1"],
+        ["delta", "ResultView", "6"],
+    ]
+
+
+def test_building_the_app_viewmodels_does_not_import_sympy():
+    events = run_script(
+        r"""
+        import json
+        import sys
+        import tempfile
+        from pathlib import Path
+
+        from PySide6.QtCore import QCoreApplication
+
+        from python.settings import SettingsStore
+        from python.store_worker import VariableStore
+        from python.viewmodel.calculation_backend import ProcessBackend
+        from python.viewmodel.main_viewmodel import MainViewModel
+
+        def main():
+            app = QCoreApplication([])
+            settings = SettingsStore(Path(tempfile.mkdtemp()) / "config.yaml")
+            settings.load()
+            store = VariableStore()
+            calculator = ProcessBackend()
+            variables = ProcessBackend()
+            try:
+                MainViewModel(
+                    settings,
+                    calculation_backend=calculator,
+                    variables_backend=variables,
+                    store_client=store,
+                )
+                print(json.dumps({
+                    "sympy": "sympy" in sys.modules,
+                    "model": "python.model" in sys.modules,
+                }))
+            finally:
+                calculator.shutdown()
+                variables.shutdown()
+
+        if __name__ == "__main__":
+            main()
+        """
+    )
+    assert events == {"sympy": False, "model": False}
+
+
+def test_the_store_client_persists_variables_between_runs():
+    events = run_script(
+        r"""
+        import json
+        import tempfile
+        from pathlib import Path
+
+        from python.store_client import StoreClient, plotting_seeds
+        from python.worker_protocol import CommitRequest, StoreEntryCandidate
+
+        def main():
+            path = Path(tempfile.mkdtemp()) / "variables.json"
+            first = StoreClient(path)
+            try:
+                first.bootstrap(plotting_seeds())
+                assert first.commit(CommitRequest(
+                    first.snapshot().revision,
+                    StoreEntryCandidate(
+                        name="a", srepr="Integer(5)", display="5",
+                        type_label="Integer", latex="a = 5",
+                    ),
+                )).ok
+            finally:
+                first.close()
+
+            second = StoreClient(path)
+            try:
+                snapshot = second.bootstrap(plotting_seeds())
+            finally:
+                second.close()
+
+            data = json.loads(path.read_text(encoding="utf-8"))
+            print(json.dumps({
+                "names": [entry.name for entry in snapshot.entries],
+                "sympy_version": data["sympy_version"],
+            }))
+
+        if __name__ == "__main__":
+            main()
+        """
+    )
+    assert events["names"] == ["x", "y", "a"]
+    assert events["sympy_version"]
+
+
+def test_the_store_client_bootstraps_and_commits_in_a_child():
+    events = run_script(
+        r"""
+        import json
+        from python.store_client import StoreClient, plotting_seeds
+        from python.worker_protocol import CommitRequest, StoreEntryCandidate
+
+        def main():
+            client = StoreClient()
+            try:
+                snapshot = client.bootstrap(plotting_seeds())
+                reply = client.commit(CommitRequest(
+                    snapshot.revision,
+                    StoreEntryCandidate(
+                        name="a",
+                        srepr="Integer(5)",
+                        display="5",
+                        type_label="Integer",
+                        latex="a = 5",
+                    ),
+                ))
+                final = client.snapshot()
+                print(json.dumps({
+                    "seed_revision": snapshot.revision,
+                    "reply": [reply.ok, reply.revision],
+                    "names": [entry.name for entry in final.entries],
+                    "a": next(
+                        entry.display for entry in final.entries if entry.name == "a"
+                    ),
+                }))
+            finally:
+                client.close()
+
+        if __name__ == "__main__":
+            main()
+        """
+    )
+    assert events == {
+        "seed_revision": 2,
+        "reply": [True, 3],
+        "names": ["x", "y", "a"],
+        "a": "5",
+    }
 
 
 def main() -> int:

@@ -10,24 +10,45 @@ Protocol (both directions): ``(request_id, ...)``.
   ``"assign"`` and ``"variable"`` both carry an :class:`Assignment`; ``"variable"``
   is the Variables page's write and deliberately skips the optional variant
   rows, because it has no cards to show. ``None`` asks the worker to exit.
-- Child → parent: ``(request_id, "result", Success | Failure, ())`` followed by
-  ``(request_id, "variants", None, variants)`` for ``evaluate``/``assign``. The
-  result is sent first so the UI can display it immediately; the variants are
-  the `model.variants` tuple for a success (empty for a failure), because
-  `doit()` and the polynomial forms are symbolic work too and remain inside the
-  request's deadline. ``variable`` sends the result only.
+  ``scope`` is either the legacy mapping of already-built SymPy objects, a
+  :class:`~python.worker_protocol.ScopeSnapshot`, or a
+  :class:`~python.worker_protocol.ScopeDelta`.
+- Child → parent: ``(request_id, "result", ResultView, ())`` followed by
+  ``(request_id, "variants", None, tuple[VariantView, ...])`` for
+  ``evaluate``/``assign``. The result is sent first so the UI can display it
+  immediately; the variants are the display rows for a success (empty for a
+  failure), because `doit()` and the polynomial forms are symbolic work too and
+  remain inside the request's deadline. ``variable`` sends the result only.
+  No SymPy object crosses this pipe: the worker converts at the boundary with
+  :func:`python.result_payload.result_view`.
 
-The worker is disposable: the parent terminates it at its deadline. That is why
-a single ``Calculator`` can be reused between requests — nothing here holds the
-user's variables, which arrive with every request.
+The worker is disposable: the parent terminates it at its deadline. Its
+:class:`~python.scope_cache.ScopeCache` is a performance cache, not authority.
+A legacy mapping replaces it; a snapshot parses every entry once (the path after
+a restart); a delta parses only the changed entries. A Store snapshot or delta
+whose revision does not line up is refused, so a lost worker always recovers
+from a fresh snapshot rather than a guessed scope.
 """
 
 from typing import Any
 
 from .model.calculator import Assignment, Calculator, ErrorKind, Failure, Success
+from .model.srepr import restore_srepr
 from .model.variants import variants
 from .plot_programs import with_plot
+from .result_payload import assignment_candidate, result_view, variant_views
 from .sandbox import apply_worker_limits
+from .scope_cache import ScopeCache
+
+
+def _assignment_entry(kind: str, payload: Any, result: Any) -> Any:
+    """The Store candidate for an assignment, or None for a read/failure."""
+    if kind not in ("assign", "variable") or not isinstance(result, Success):
+        return None
+    try:
+        return assignment_candidate(payload.target, result.value)
+    except Exception:  # noqa: BLE001 - a candidate is optional extra data
+        return None
 
 
 def worker_main(connection: Any) -> None:
@@ -42,6 +63,7 @@ def worker_main(connection: Any) -> None:
     # process's resource limits and sheds the environment.
     apply_worker_limits()
     calculator = Calculator()
+    scope_cache = ScopeCache(restore_srepr)
     try:
         while True:
             try:
@@ -53,10 +75,15 @@ def worker_main(connection: Any) -> None:
 
             request_id, kind, payload, scope = request
             try:
+                # ``scope`` is either the legacy mapping of SymPy objects or a
+                # Store ScopeSnapshot/ScopeDelta. The cache parses only what the
+                # revision says changed; a bad sync is reported like any other
+                # internal failure and leaves the cache untouched.
+                scope_objects = scope_cache.sync(scope)
                 if kind == "evaluate":
-                    result = calculator.evaluate(payload, scope)
+                    result = calculator.evaluate(payload, scope_objects)
                 else:
-                    result = calculator.assign(payload, scope)
+                    result = calculator.assign(payload, scope_objects)
             except Exception as exc:  # noqa: BLE001 - report, never escape
                 expression = (
                     payload.expression
@@ -72,8 +99,13 @@ def worker_main(connection: Any) -> None:
                 # The Variables page has no variant cards: send the result
                 # only, so the dedicated worker can serve the next queued write
                 # without computing/delaying optional forms.
+                candidate = _assignment_entry(kind, payload, result)
+                view = result_view(
+                    result, request_id, scope_revision=scope_cache.revision,
+                    entry=candidate,
+                )
                 try:
-                    connection.send((request_id, "result", result, ()))
+                    connection.send((request_id, "result", view, ()))
                 except (BrokenPipeError, EOFError, OSError):
                     return
                 continue
@@ -81,18 +113,26 @@ def worker_main(connection: Any) -> None:
             # `expand` and `factor` can be the slowest part of a request, but
             # they are not needed to display the result.
             result = with_plot(result)
+            candidate = _assignment_entry(kind, payload, result)
+            view = result_view(
+                result, request_id, scope_revision=scope_cache.revision,
+                entry=candidate,
+            )
             try:
-                connection.send((request_id, "result", result, ()))
+                connection.send((request_id, "result", view, ()))
+            except (BrokenPipeError, EOFError, OSError):
+                return
+            variant_rows = ()
+            if isinstance(result, Success):
+                try:
+                    variant_rows = variants(result.value)
+                except Exception:  # noqa: BLE001 - no card, no failure
+                    variant_rows = ()
+            try:
                 # Variants remain part of the symbolic work and stay under the
                 # request's deadline; the parent only renders their LaTeX.
-                variant_rows = ()
-                if isinstance(result, Success):
-                    try:
-                        variant_rows = variants(result.value)
-                    except Exception:  # noqa: BLE001 - no card, no failure
-                        variant_rows = ()
                 connection.send(
-                    (request_id, "variants", None, variant_rows)
+                    (request_id, "variants", None, variant_views(variant_rows))
                 )
             except (BrokenPipeError, EOFError, OSError):
                 return

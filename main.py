@@ -45,8 +45,8 @@ def main() -> int:
     # and this composition root gets the window class from it rather than
     # importing RinUI itself.
     from python import window_drag, window_icon
-    from python.model.plotting import plot_variables
     from python.rinui_bootstrap import prepare
+    from python.store_client import StoreClient, plotting_seeds
     from python.version import __version__
     from python.viewmodel.calculation_backend import ProcessBackend
     from python.viewmodel.main_viewmodel import MainViewModel
@@ -89,10 +89,20 @@ def main() -> int:
     # QML tree is instantiated.
     window = runtime.window_class()
 
+    # The variable Store is a separate process with no SymPy; it owns the
+    # authoritative strings and the revision every calculation is computed
+    # against. A fresh store starts with the plotting names, seeded as strings so
+    # the composition root never imports SymPy for them. The snapshot sits beside
+    # the settings file (portable or OS config), and a different SymPy version
+    # sets it aside rather than restoring potentially incompatible srepr.
+    store = StoreClient(runtime.settings.path.with_name("variables.json"))
+    store.bootstrap(plotting_seeds())
+    app.aboutToQuit.connect(store.close)
+
     vm = MainViewModel(
         runtime.settings,
         window.theme_manager,
-        initial_variables=plot_variables(),
+        store_client=store,
         calculation_backend=ProcessBackend(CALCULATION_TIMEOUT_SECONDS),
         variables_backend=ProcessBackend(CALCULATION_TIMEOUT_SECONDS),
         translation_dir=ROOT / "i18n",

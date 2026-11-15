@@ -16,11 +16,13 @@ built by CI on Windows.
 ## Source layout
 
 ```
-main.py                         # Entry / composition root. Builds MainViewModel with the
-                                # ProcessBackend (10 s calculation deadline), registers flat
-                                # QML context properties, then RinUIWindow loads
-                                # qml/MainWindow.qml. Calls multiprocessing.freeze_support()
-                                # first. ROOT = exe dir when frozen (Nuitka), else __file__ dir.
+main.py                         # Entry / composition root. Starts the Store worker (seeded
+                                # with x/y as strings, loading variables.json beside the settings),
+                                # builds MainViewModel with the ProcessBackends (10 s calculation
+                                # deadline) and that Store, registers flat QML context properties,
+                                # then RinUIWindow loads qml/MainWindow.qml. Calls
+                                # multiprocessing.freeze_support() first. ROOT = exe dir when frozen
+                                # (Nuitka), else __file__ dir.
 python/
   model/                        # PURE PYTHON, must never import Qt. The Model owns what an
                                 # input MEANS (syntax, name resolution, failure kinds).
@@ -36,9 +38,6 @@ python/
                                 #   Variables table). '' for "sympy cannot typeset it", never a raise.
     variable.py                 #   VariableManager (VariableEntry snapshots), validate_name,
                                 #   is_sympy_name + sympy name table, classify_type
-    lexer.py                    #   tokenize(text, scope) -> [(start, length, kind)]: what each run
-                                #   of characters IS — never whether it is valid. Python's own
-                                #   identifier/decimal rules, so it agrees with the parser.
     plotting.py                 #   What a result draws (zero Qt): plot_series(value, origin) ->
                                 #   Series(expression, label, implicit, role), the x/y rule, the
                                 #   transform policy (diff/integrate show the source *and* the
@@ -49,6 +48,12 @@ python/
                                 #   unevaluated Integral/Derivative/Sum/Product/Limit, N(),
                                 #   expanded and factored. Deduped and guarded; zero Qt.
                                 #   See Rendering.
+    srepr.py                    #   restore_srepr(text): the Compute worker's one eval path, an
+                                #   AST-whitelisted reconstruction of a Store entry's srepr with
+                                #   no builtins. Never used by the UI or the Store worker.
+  lexer.py                      # tokenize(text, scope) -> [(start, length, kind)]: what each run
+                                # of characters IS — never whether it is valid (zero Qt, zero
+                                # SymPy; the static SymPy name table lives in names.py).
   brackets.py                   # Rainbow bracket pairing + nesting layers + parse_colors() for
                                 # the custom palette (zero Qt). Ported from the v1 QWidget app's
                                 # RainbowBracketsHighlighter.
@@ -85,16 +90,43 @@ python/
   backend_worker.py             # The calculation backend's spawned child (zero Qt): a pickled
                                 # request loop over a pipe, one Calculator, disposable by design.
                                 # See Calculation backend.
+  backend_entry.py              # The spawn target (zero imports): imports backend_worker inside
+                                # the child, so the parent never loads SymPy for a worker.
   child_process.py              # One spawned child behind a pickled pipe (zero Qt): spawn,
                                 # optional Job Object containment, terminate/reap, and the
                                 # daemon-thread retirement. Both long-lived workers use it; the
                                 # services keep their protocols and deadlines.
+  names.py                      # The variable-name grammar (identifier + not a keyword) and
+                                # the static SymPy constants/callables table from
+                                # sympy_names.json (zero Qt/SymPy; shared by the lexer, model
+                                # and Store worker). Regenerate with scripts/update_sympy_names.py.
+  plot_programs.py              # attach qmlmathplot display programs to a result (worker side)
+  result_payload.py             # Success|Failure + Variant -> ResultView/VariantView/PlotSpec;
+                                # the one conversion at the Compute/UI boundary (no Qt).
+  scope_cache.py                # The Compute worker's name -> (revision, object) cache (zero
+                                # SymPy by injection): applies ScopeSnapshot/ScopeDelta, parses
+                                # only the changed srepr entries, or adopts a legacy mapping.
+  store_client.py               # Blocking client for the Store worker (zero Qt, zero SymPy):
+                                # snapshot/commit/rename/delete/clear and a fresh-install
+                                # seed for x/y. The Variables page and the composition root
+                                # use it; the long work stays in the Compute worker.
+  store_worker.py               # The variable Store's spawned child (zero Qt, zero SymPy):
+                                # authoritative StoreEntry map, revision allocation, commit/
+                                # rename/delete/clear, optional atomic JSON snapshot; answers with
+                                # ScopeDelta/StoreReply. See "Protocol DTOs and the Store worker".
+  worker_protocol.py            # UI/worker DTOs and scope sync (zero Qt, zero SymPy; the Store
+                                # worker must be able to import it without the model package):
+                                # StoreEntry, VariableView, ResultView, VariantView, PlotSpec,
+                                # ScopeSnapshot/ScopeDelta + ScopeState, ParsePolicy. See
+                                # "Protocol DTOs" under Calculation backend.
   viewmodel/                    # Qt bridge (QObject + models). The ONLY layer that imports Qt
                                 # (besides main.py). State that must survive page switches lives here.
     input_mode.py               #   InputMode (CODE=0 / ASSIGN=1) — UI state, not model state
-    calculation_backend.py      #   InlineBackend (synchronous: tests/headless) and
-                                #   ProcessBackend (spawned worker, hard timeout, cancel/stale
-                                #   request ids). See Calculation backend.
+    calculation_backend.py      #   ProcessBackend (spawned worker, hard timeout, cancel/stale
+                                #   request ids). Its worker target is backend_entry, so importing
+                                #   the UI boundary does not load SymPy. See Calculation backend.
+    inline_backend.py           #   InlineBackend (synchronous, legacy Success/Failure): tests
+                                #   and headless only; imported lazily when no backend is given.
     main_viewmodel.py           #   Root VM; aggregates children; signals sendToCode/sendToAssign
     calculator_viewmodel.py      #   Result state, input persistence, clear_result, the `variants`
                                 #   rows, and the qmlmathplot.Plot (curves, legend, theme, error)
@@ -108,7 +140,10 @@ python/
     variables_viewmodel.py      #   VariablesModel (3-col: name/expr/type) with the ONE write
                                 #   pipeline (add/update/rename/remove share parse, logging and
                                 #   the reserved-name rule) + thin QML CRUD slots; the details
-                                #   panel's artwork is `latexFor` here, not in the proxy
+                                #   panel's artwork is `latexFor` here, not in the proxy.
+                                #   In the app it reads StoreEntry strings and commits Compute
+                                #   candidates; with no Store it keeps the VariableManager path
+                                #   for tests/headless.
     history_viewmodel.py        #   HistoryModel (QAbstractListModel, newest first, lazy LaTeX
                                 #   through LatexJobs) + HistoryWindowModel, the row-limited proxy
                                 #   the History page's Repeater is cut to
@@ -147,6 +182,8 @@ python/
   version.py                    # Runtime version copy (kept in sync with pyproject)
 tests/
   test_model.py                 # Behaviour contract of the model + viewmodels
+  test_protocol.py              # Worker DTOs: JSON round trips, revision deltas, full recovery
+  test_store.py                 # Store revisions, deltas, rename/delete/clear, JSON snapshot
   test_process.py               # Real backend/renderer process boundaries in child interpreters
   test_settings.py              # Settings store, config paths, RinUI bootstrap
   golden_accent_palettes.json   # 63 recorded accent ramps for the port (see README)
@@ -280,6 +317,9 @@ scripts/
                                 # theme bullet under Rendering)
   update_translations.py        # lupdate the QML template and every symplify_*.ts, then
                                 # lrelease those plus the hand-written rinui_*.ts fragments
+  update_sympy_names.py         # Regenerates python/sympy_names.json from the installed SymPy;
+                                # the UI lexer reads that static table (no SymPy import). A test
+                                # holds it to the runtime list, so an upgrade cannot drift silently.
   ruff_all.py                   # `ruff check` over every project .py file (tests/scripts included)
   cheat-sheet.md                # Human quick reference
 installer/
@@ -448,11 +488,12 @@ transparent corner, not `srgba(255,255,255,1)`.
    early is harmless, but nothing configures it unless `prepare()` ran first.
 9. **Calculation leaves the UI thread through the backend, and only through it.**
    `CalculatorViewModel.calculate/calculateAssign` submit `(kind, payload, scope)` and return.
-   The result arrives as `finished(request_id, result)`; the optional variant rows arrive
-   later as `variantsReady(request_id, rows)` (or a timeout/crash/empty list). The default
-   `InlineBackend` is synchronous and is what tests/headless callers get; `main.py` passes a
+   The result arrives as `finished(request_id, ResultView)`; the optional variant rows arrive
+   later as `variantsReady(request_id, tuple[VariantView, ...])` (or a timeout/crash/empty list).
+   `CalculatorViewModel` lazily imports the synchronous legacy `InlineBackend` only when no
+   backend is given; tests/headless get it, while `main.py` passes a
    `ProcessBackend(10 s)` for the Calculator and **a second** `ProcessBackend(10 s)` for the
-   Variables page (`variables_backend`), which spawns another `python/backend_worker.py` (zero Qt)
+   Variables page (`variables_backend`), which spawns another `python/backend_entry.py` → zero Qt
    and terminates it at the deadline. **The result is applied before the variants are requested**,
    so the outcome text never waits for `doit`/`expand`/`factor`. The VM allocates request ids
    before submitting (so the synchronous and asynchronous backends share one path), ignores
@@ -464,13 +505,20 @@ transparent corner, not `srgba(255,255,255,1)`.
    multiprocessing plugin routes the spawned executable back to the worker. The Variables page's
    add/update writes go through `VariablesModel` onto its own backend; the in-process
    `Calculator` remains only for tests/headless (`backend=None`).
-10. **Variables, history and the log are UI-process state, not worker state.** The workers are
-    stateless between requests and receive a serialized scope snapshot with each one; the
-    `VariableManager`, `HistoryModel` and `LogViewModel` live on the Qt main thread. A timeout,
-    crash or EOF can therefore discard a pending assignment but cannot erase existing variables or
-    history. None of the three is persisted across an app restart (settings are the only persisted
-    state); tests lock the failure-survival path in
-    `test_backend_failure_keeps_existing_variables_history_and_log`.
+10. **The Store owns variables; history and log are UI state; the Compute cache is disposable.**
+    In the application, `StoreClient` talks to `python/store_worker.py`, which holds the
+    authoritative `StoreEntry` strings and revision; the Variables table and the Calculator's
+    scope both read that snapshot, and a write commits a `StoreEntryCandidate` back to it.
+    `VariableManager` remains only in the headless test path (`store=None`). The Compute worker
+    keeps a `ScopeCache` between requests, but that is a performance cache, not authority: it is
+    rebuilt from a `ScopeSnapshot` after a worker restart, and a stale/gapped `ScopeDelta` is
+    refused rather than guessed. A timeout, crash or EOF can therefore discard a pending
+    assignment but cannot erase existing Store variables or history. Variables **are persisted**
+    in a versioned `variables.json` beside the settings file; history and the log remain UI-only
+    and are not persisted. A snapshot written by another SymPy version is set aside rather than
+    restored. Tests lock the failure-survival path in
+    `test_backend_failure_keeps_existing_variables_history_and_log` and the Store-backed path in
+    `test_store_backed_variables_and_assignments_share_one_source`.
 
 ## Calculation backend
 
@@ -481,19 +529,70 @@ transparent corner, not `srgba(255,255,255,1)`.
   `failed(int, str)`. `payload` is the
   expression text (`evaluate`) or an `Assignment` (`assign`) — never a display string assembled
   in the VM, and never a sympy object interpreted by QML.
+- **Protocol DTOs, the Store worker and the result boundary.** `python/worker_protocol.py`
+  is the shared boundary for the Store/Compute split. It imports **neither Qt nor SymPy** —
+  importing `python/model` would load SymPy, which is exactly what the Store worker must not do.
+  `StoreEntry` is the Store's record (`srepr` for recovery, `display`/`type_label`/`latex`/
+  `warning` for the UI, plus `revision`/`valid`); `StoreEntryCandidate` is the uncommitted shape
+  the Compute worker returns, and `CommitRequest(expected_revision, candidate)` makes a stale
+  editor a conflict instead of an overwrite. The UI receives `VariableView` (the display columns
+  including `latex` and `warning`), `ResultView` (with `error_kind` so follow-up decisions never
+  re-parse a message) and `VariantView`, never a SymPy object. `ScopeDelta` carries the entries
+  changed between two Store revisions and `ScopeSnapshot` is the full-recovery message; the pure
+  `ScopeState` applies either one and raises `ScopeStaleError` (caller behind), `ScopeGapError`
+  (changes missing) or `ScopeConflictError` (a name the scope cannot accept) **before mutating**,
+  so a bad delta cannot leave the cache half-synced. `ParsePolicy` reserves the parser profile and
+  its transformation-name allowlist but is deliberately not connected to `Calculator` yet.
+  `python/store_worker.py` is the authoritative Store process: it holds `StoreEntry` values only,
+  allocates the next revision on every accepted mutation, rejects a stale `expected_revision`,
+  returns the `ScopeDelta` the Compute cache should apply, and writes a versioned JSON snapshot
+  atomically (`variables.json` beside the settings file; a corrupt or SymPy-version-mismatched
+  file is moved to `<name>.corrupt`, not overwritten). The envelope records
+  `sympy_version` from the generated `python/names.py` table, so a build cannot silently restore
+  `srepr` written by a different SymPy. Rename keeps the entry's position and `srepr` while
+  clearing the name-dependent `latex`/`warning`; delete and clear emit tombstones.
+  `python/names.py` owns the identifier rule so the Store can validate names without importing the
+  model. `main.py` does spawn it.
+  On the Compute side, `python/scope_cache.py` pairs a `ScopeState` with `name -> object` and
+  accepts a `ScopeSnapshot` (parse every valid entry once, after a worker restart), a
+  `ScopeDelta` (parse only the changed entries) or the legacy mapping of already-built SymPy
+  objects. `python/model/srepr.py` is the one restore path: an AST-whitelisted `srepr` evaluation
+  with no builtins. A stale/gapped/conflicting delta or a failed restore leaves both the revision
+  and the object map untouched. `python/backend_entry.worker_main` is the zero-import spawn target;
+  it imports `backend_worker.worker_main` inside the child, which keeps the cache per worker and
+  passes its objects to `Calculator`.
+  `tests/test_protocol.py`, `tests/test_store.py` and `tests/test_scope.py` lock JSON round trips,
+  revision monotonicity, delta application, conflict/no-mutation paths, snapshot recovery,
+  only-changed restoration, the srepr corpus/refusals and the no-Qt/no-SymPy import proof;
+  `tests/test_process.py` runs the Store in a real child process and exercises the Compute cache
+  across a snapshot and a delta.
 - **`InlineBackend`** keeps the old behaviour for tests and headless callers: evaluate in this
-  process, emit the result, then compute variants and emit them before `submit` returns. It has no
-  timeout.
+  process, emit the legacy `Success | Failure`, then compute variants and emit them before
+  `submit` returns. It has no timeout. It is the one backend path that still builds SymPy
+  objects in the UI process; the application uses `ProcessBackend`.
 - **`ProcessBackend`** starts `python/backend_worker.worker_main` with a `spawn` context and a
-  duplex `Pipe`. The parent sends `(request_id, kind, payload, scope)`; the child keeps one
-  `Calculator` and sends two messages:
-  `(request_id, "result", Success | Failure, ())`, then
-  `(request_id, "variants", None, rows)`. The result is sent before the optional work, so the UI
-  can display it immediately. Sympy values cross by pickle, which is why `Success.origin`, the
-  plotted expression and the variant values survive intact. **The variants are still computed in
-  the worker**, not in the ViewModel: `doit()`, `expand`, `factor` and `N` are symbolic work and
-  remain inside the request's timeout. The frontend only renders each row's LaTeX. The worker is
-  disposable and must not import Qt.
+  duplex `Pipe`. The parent sends `(request_id, kind, payload, scope)`; `scope` may be the legacy
+  mapping of SymPy objects, a `ScopeSnapshot`, or a `ScopeDelta`. The child keeps one `Calculator`
+  and one `ScopeCache`, and sends two messages:
+  `(request_id, "result", ResultView, ())`, then
+  `(request_id, "variants", None, tuple[VariantView, ...])`. The result is sent before the optional
+  work, so the UI can display it immediately. **No SymPy object crosses the pipe**:
+  `python/result_payload.py` converts `Success | Failure` and `Variant` to string/plain-data DTOs
+  inside the worker; `PlotSpec.program` is qmlmathplot's `Program.to_dict()`, which the UI turns
+  back into a `Program` for the plot. **The variants are still computed in the worker**, not in
+  the ViewModel: `doit()`, `expand`, `factor` and `N` are symbolic work and remain inside the
+  request's timeout. The frontend only renders each row's LaTeX. The worker is disposable and must
+  not import Qt.
+- **Scope sync is revisioned.** `VariablesModel` mirrors the Store entries and revision locally
+  (never a `store.snapshot()` IPC just to build a request) and retains the last
+  `MAX_SCOPE_HISTORY` mutation deltas. `CalculatorViewModel` asks
+  `scope_for(backend.generation, sent_revision)`: a new worker generation or no confirmed
+  revision gets a `ScopeSnapshot`; otherwise the history is merged into one `ScopeDelta`.
+  `ProcessBackend.generation` changes on every worker replacement (including an idle worker found
+  dead); a failed/timed-out/cancelled calculation resets the confirmed revision, so the next
+  request falls back to a snapshot. `StoreClient` likewise stops and replaces its worker after a
+  timeout or a mismatched reply, and records `last_error` / `timeout_count` for the log/status
+  surface instead of leaving the pipe one answer behind.
 - **One request at a time.** A new submission cancels the old worker, including a worker that is
   only waiting to deliver variants; `clear_result` does the same. The poll timer (2 ms) drains every
   ready message per tick (the renderer's queue is drained the same way), and a cancel that only
@@ -521,15 +620,34 @@ transparent corner, not `srgba(255,255,255,1)`.
   `ProcessBackend` (`variables_backend`) so a variable edit never cancels a Calculator request.
   The worker starts on the first Variables write, not with the app or when the page opens; it is
   stopped after (`BACKEND_IDLE_MS`, 60 s) of no writes or when the page is left with nothing in
-  flight, and the next edit restarts it. That keeps a third SymPy process off the idle app.
-  `VariablesModel` queues add/update requests and sends one `variable` assignment
-  at a time (the kind has no variant rows, so the worker is immediately free for
-  the next queued write), applying the answer when it arrives; `add` answers
-  "accepted" and `variableAdded(name, ok)` tells QML which row to select. A
-  timeout or backend failure keeps the raw input as Invalid for an update and
-  creates no row for an add; a late answer for a renamed/deleted name is
-  discarded. With `backend=None` the model keeps the synchronous in-process path
-  for tests/headless.
+  flight, and the next edit restarts it. That keeps the extra SymPy process off the idle app.
+  The table itself is fed by the **Store**: `StoreClient` (a blocking wrapper around
+  `store_worker.worker_main`) is bootstrapped in `main.py` with `x`/`y` as `StoreEntryCandidate`
+  strings, and `VariablesModel` reads `StoreEntry` values (`display`, `type_label`, `latex`).
+  A write still goes through `variables_backend` as a `variable` assignment, but the worker's
+  `ResultView.entry` is a string-only `StoreEntryCandidate` (built by
+  `python/result_payload.assignment_candidate`); the model commits it with
+  `CommitRequest(expected_revision, candidate)` and applies the returned `ScopeDelta`. A conflict
+  reloads the Store snapshot. The expression cell shows a **pending draft** — the text just
+  submitted — while the Store still holds the committed entry; `data()`/`cellAt()` answer that
+  draft for the expression column, so the table never looks as if it ignored an edit.
+  The page binds its spinner and abort button to `varsVM.busy`; aborting calls
+  `VariablesModel.cancel_active()`, keeps the latest draft as **Invalid** (a committed
+  `valid=False` Store entry), drops queued writes for that same name (so a later answer cannot
+  overwrite it), and lets other names continue. That abort path deliberately differs from a
+  timeout/backend failure: those keep the previous value for an update and create no row for an
+  add, because transport trouble is not a statement about the expression. A newer edit of the
+  same name supersedes older queued writes; an answer for an older request is ignored while the
+  newer draft is pending. A late answer for a renamed/deleted name is discarded.
+  `CalculatorViewModel` uses the same Store snapshot as its calculation scope and commits an
+  Assign's `ResultView.entry` through `VariablesModel.commit_candidate`, so a Calculator write and
+  a Variables-page edit land in one authoritative place. With `store=None` (tests/headless) the
+  model keeps the synchronous `VariableManager` path and `InlineBackend`. Tests:
+  `test_store_backed_variables_and_assignments_share_one_source`,
+  `test_pending_variable_update_shows_the_typed_text_and_abort_keeps_it_invalid`,
+  `test_a_newer_pending_edit_wins_over_the_running_answer`,
+  `test_abort_uses_the_latest_draft_and_drops_same_name_queue`, and
+  `test_variables_viewmodel_busy_tracks_the_worker_queue`.
 - **The entry module is re-imported in every spawned worker.** `multiprocessing`'s
   `spawn` loads `main.py` as `__mp_main__` before running the worker target. Keeping
   PySide6/qmlmathplot/SymPy imports at module level therefore made the "zero Qt"
@@ -538,11 +656,11 @@ transparent corner, not `srgba(255,255,255,1)`.
   `test_importing_the_entry_point_is_worker_safe` asserts that importing `main`
   loads neither PySide6, SymPy nor qmlmathplot. Do not move them back to module level.
 - **Worker containment.** `python/sandbox.py` puts each spawned worker — the calculation backend,
-  the Variables backend *and* the LaTeX renderer — in a Win32 Job Object on Windows (memory/CPU
-  caps, one active process, UI/desktop isolation, kill-on-close) and applies POSIX `resource`
-  limits on Linux/macOS (CPU, address space, file size, descriptors, core dumps). The children
-  also shed non-system environment variables after their imports. `python/child_process.py` owns
-  that spawn/contain/reap lifecycle for all three. This is *resource and process containment*,
+  the Variables backend, the Store *and* the LaTeX renderer — in a Win32 Job Object on Windows
+  (memory/CPU caps, one active process, UI/desktop isolation, kill-on-close) and applies POSIX
+  `resource` limits on Linux/macOS (CPU, address space, file size, descriptors, core dumps). The
+  children also shed non-system environment variables after their imports. `python/child_process.py`
+  owns that spawn/contain/reap lifecycle for all four. This is *resource and process containment*,
   not a filesystem/network capability sandbox; the safe parser is the primary boundary. A true
   "no files, no network" worker needs AppContainer/Landlock/seccomp/sandbox-exec or WASM/WASI and
   is deliberately not faked here.
@@ -1729,10 +1847,16 @@ mode hides the input and most chrome, and the window-level side of it lives in
   `Qt.callLater` after the new cards' layout, not a loop (a loop reads a stale `contentHeight` and
   pours everything in) and not a `contentHeightChanged` handler (Qt swallows the re-entrant emission,
   stalling the chain one batch after a resize). Beyond `onContentYChanged` it also runs on page
-  completion and on flickable height changes, because a window too tall for one batch has nothing to
-  scroll — without those, the rest of the history is unreachable. `cardCount` stays the *filtered*
+  completion and on flickable height changes, because a window too tall for one batch has nothing
+  to scroll — without those, the rest of the history is unreachable. `cardCount` stays the *filtered*
   count (`historyFilter.rowCount()`), so the cards' arrow keys can reach an entry that has not been
   revealed yet; `reveal` grows `loaded` and looks again on the next turn.
+- **The source list itself is bounded.** `HistoryModel.MAX_HISTORY_ENTRIES` is 500; adding past
+  the cap removes the oldest row before inserting the new one, so that entry's `HistoryItem` and
+  its cached SVG data URL are released. The cards' window above limits construction, not the
+  stored list; without this cap a stress session of repeated examples retained every SVG and
+  accounted for ~150 MB. `test_history_is_bounded_and_evicts_the_oldest_entry` locks the eviction
+  and the `countChanged` sequence.
 - **Set the LaTeX colour before any page is built.** The pages used to do it in their own
   `Component.onCompleted`, which runs after their delegates exist: every entry rendered once in the
   default black, then the colour arrived, dropped the whole cache, and every entry rendered again.
@@ -1746,7 +1870,7 @@ mode hides the input and most chrome, and the window-level side of it lives in
 One lexer, one span list, two renderers. Anything that colours code contributes spans to
 `code_style.spans(text, scope)`, and nothing paints on its own.
 
-- **The lexical truth is `model/lexer.py`** — a tokenizer, not a parser and not a judge. It says
+- **The lexical truth is `lexer.py`** (top level, zero Qt/zero SymPy) — a tokenizer, not a parser and not a judge. It says
   what each run of characters *is*; whether the expression is valid stays with `Calculator.evaluate`
   (`Success` / `Failure`). That split is the point: `implicit_multiplication` turns `foo(1)` into
   `f*o**2`, so a highlighter deciding for itself would call it a function call while
@@ -2972,8 +3096,8 @@ index where it was, so adding or duplicating a variable highlighted the new row 
 reader had clicked — two selected rows, one of them stale. `selectRow` uses
 `setCurrentIndex(index, ClearAndSelect | Current)` for that reason.
 
-**The details panel** (a toolbar toggle, closed by default) shows the selected variable and its two
-fields, and duplicates or deletes the row. It is its own component,
+**The details panel** (a toolbar toggle, closed by default) shows the selected variable, its type,
+its two fields, and duplicates or deletes the row. It is its own component,
 `qml/components/VariableDetailsPanel.qml` — the page hands it `host` (everything it shows is the
 page's state: which row is selected, the definition read through `dataRevision`, `sidebarOpen`,
 `panelWidth`, and the row's two actions), it owns the two fields and the `syncDetails`/`applyDetails`
@@ -3003,6 +3127,18 @@ keeping:
   variable without selecting it and duplicate threw. `page.selectRow(row)` — the selection model,
   the same expression the delegate's click handler uses — is the only door, and it is used by all
   three callers now.
+- **A pending draft is shown here too.** While the visible row is in `VariablesModel._pending`,
+  `variablesFilter.cellAt`/the panel's fields return the raw draft; `latexAt` answers `""`, so the
+  panel shows that raw line (secondary colour, not the critical “invalid” colour) and a small
+  spinner with `Calculating…`. The type row says `Calculating…` until the answer lands, then shows
+  the committed type (`Invalid` after an abort). This is driven by `VariablesViewModel.isPending`
+  (through the search proxy) and `page.dataRevision`; see
+  `test_details_pending_lookup_follows_the_filter_proxy`.
+- **RinUI's `ProgressRing` animates even while hidden.** Its internal Canvas
+  animations are gated by `indeterminate`/`state`, not by `visible`, so every
+  spinner in the app binds `indeterminate: visible` (ResultPane, the Variables
+  header and this panel). Without that, an idle window keeps several invisible
+  rings painting every frame — measurable GPU work for no status on screen.
 
 ## Testing
 
@@ -3012,11 +3148,20 @@ files are also pytest-compatible if one is ever added). One command runs everyth
 ```bash
 uv run python -m tests                # every module
 uv run python -m tests.test_model     # model + viewmodels
+uv run python -m tests.test_protocol  # worker DTOs, scope revisions, JSON round trips
+uv run python -m tests.test_store     # Store revisions, deltas, snapshot persistence
+uv run python -m tests.test_scope     # Compute cache, only-changed restore, srepr corpus
 uv run python -m tests.test_settings  # settings store, config paths, RinUI bootstrap
 uv run ruff check .                   # configured in pyproject: E/F/I/UP, target py311
 uv run python scripts/ruff_all.py      # same check over every project .py explicitly
 uv run python scripts/ruff_all.py --select UP --fix  # mechanical typing migration
 ```
+
+`python/sympy_names.json` is generated by `scripts/update_sympy_names.py`; the UI lexer reads it
+without importing SymPy, and `test_the_static_sympy_name_table_matches_the_runtime` fails if an
+upgrade drifts. `test_building_the_app_viewmodels_does_not_import_sympy` constructs the Store-backed
+`MainViewModel` in a fresh interpreter and asserts `sympy` and `python.model` are absent — the
+regression that matters for the UI/worker boundary.
 
 Typing uses PEP 585/604 (`list[str]`, `X | None`); `Any`, `NamedTuple`, `TypedDict`, `Mapping`,
 `Sequence` and `TYPE_CHECKING` remain where they express something Python's builtins cannot.

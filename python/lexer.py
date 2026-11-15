@@ -1,9 +1,9 @@
-"""Tokenizing the calculator's expression language (pure Python, zero Qt).
+"""Tokenizing the calculator's expression language (pure Python, zero Qt, zero SymPy).
 
-The point of this module is that the *lexical* rules live next to the rules that
-decide what the text **means** (``calculator.py``), and are read by everything
-that has to point at a piece of the text: syntax colouring, hover, completion
-and the ranges error messages underline.
+The point of this module is that the *lexical* rules are read by everything that
+has to point at a piece of the text: syntax colouring, hover, completion and the
+ranges error messages underline. The SymPy name table is static data in
+:mod:`python.names`, so importing this module never loads SymPy.
 
 What this is not: a parser, and not a judge. It says what each run of characters
 *is*, never whether the expression is valid — that stays with ``Calculator``,
@@ -22,7 +22,7 @@ from collections.abc import Mapping, Sequence
 from enum import Enum, auto
 from typing import Any, NamedTuple
 
-from .variable import SYMPY_CONSTANTS, sympy_callables
+from .names import SYMPY_CALLABLES, SYMPY_CONSTANTS
 
 
 class TokenKind(Enum):
@@ -125,7 +125,7 @@ def _name_kind(name: str, scope: Mapping[str, Any]) -> TokenKind:
         return TokenKind.VARIABLE
     if name in SYMPY_CONSTANTS:
         return TokenKind.CONSTANT
-    if name in sympy_callables():
+    if name in SYMPY_CALLABLES:
         return TokenKind.CALLABLE
     return TokenKind.NAME
 

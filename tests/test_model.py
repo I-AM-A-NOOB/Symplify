@@ -40,6 +40,7 @@ from python.code_style import (
 from python.code_style import spans as code_spans
 from python.code_themes import FAMILIES, VSCODE_BRACKET_COLORS
 from python.latex_render import MAX_LATEX_CHARS, LatexStyle, render_data_url
+from python.lexer import TokenKind, tokenize
 from python.model.calculator import (
     Assignment,
     Calculator,
@@ -47,12 +48,14 @@ from python.model.calculator import (
     Failure,
     Success,
 )
-from python.model.lexer import TokenKind, tokenize
 from python.model.plotting import plot_series, plot_variables
 from python.model.variable import VariableManager, is_sympy_name, validate_name
 from python.model.variants import variants
 from python.settings import DEFAULTS, SettingsStore
+from python.store_client import plotting_seeds
+from python.store_worker import VariableStore
 from python.viewmodel.history_viewmodel import HistoryModel, HistoryWindowModel
+from python.viewmodel.inline_backend import InlineBackend
 from python.viewmodel.main_viewmodel import MainViewModel
 from python.viewmodel.search import (
     HistoryFilterModel,
@@ -61,6 +64,12 @@ from python.viewmodel.search import (
     VariablesFilterModel,
 )
 from python.viewmodel.variables_viewmodel import VariablesModel
+from python.worker_protocol import (
+    CommitRequest,
+    ScopeDelta,
+    ScopeSnapshot,
+    StoreEntryCandidate,
+)
 
 X = Symbol("x")
 Y = Symbol("y")
@@ -288,6 +297,30 @@ def test_plain_assignment():
     result = assign("y", "=", "3")
     assert isinstance(result, Success) and result.value == 3
     assert result.expression == "y = 3"
+
+
+def test_an_assignment_builds_its_store_candidate():
+    from python.model.srepr import restore_srepr
+    from python.result_payload import assignment_candidate
+
+    result = assign("a", "=", "2 + 3")
+    assert isinstance(result, Success)
+    candidate = assignment_candidate("a", result.value)
+    assert candidate.name == "a"
+    assert candidate.display == "5"
+    assert candidate.type_label == "Integer"
+    assert candidate.valid is True
+    assert candidate.warning == ""
+    assert candidate.latex == "a = 5"
+    assert restore_srepr(candidate.srepr) == Integer(5)
+
+
+def test_a_plotting_name_candidate_warns():
+    from python.result_payload import assignment_candidate
+
+    result = assign("x", "=", "5")
+    assert isinstance(result, Success)
+    assert "plotting variable" in assignment_candidate("x", result.value).warning
 
 
 def test_assignment_rhs_uses_the_expression_language():
@@ -706,6 +739,109 @@ def new_vm(backend=None):
     store = SettingsStore(temp_dir() / "config.yaml")
     store.load()
     return MainViewModel(store, calculation_backend=backend)
+
+
+def test_the_static_sympy_name_table_matches_the_runtime():
+    import sympy
+
+    from python.model.variable import sympy_callables
+    from python.names import SYMPY_CALLABLES, SYMPY_CONSTANTS, SYMPY_VERSION
+
+    assert SYMPY_VERSION == sympy.__version__
+    assert set(SYMPY_CONSTANTS) == {"pi", "E", "I", "oo", "zoo", "nan",
+                                    "GoldenRatio", "EulerGamma", "Catalan"}
+    assert set(SYMPY_CALLABLES) == set(sympy_callables())
+
+
+def test_scope_for_sends_deltas_and_falls_back_to_snapshot():
+    store = VariableStore()
+    model = VariablesModel(None, backend=InlineBackend(), store=store)
+
+    first = model.scope_for(0, None)
+    assert isinstance(first, ScopeSnapshot)
+    assert first.revision == 0
+
+    assert model.commit_candidate(
+        StoreEntryCandidate(
+            name="a",
+            srepr="Integer(5)",
+            display="5",
+            type_label="Integer",
+            latex="a = 5",
+        )
+    )
+    delta = model.scope_for(0, first.revision)
+    assert isinstance(delta, ScopeDelta)
+    assert (delta.base_revision, delta.revision) == (0, 1)
+    assert [change.name for change in delta.changes] == ["a"]
+
+    empty = model.scope_for(0, 1)
+    assert isinstance(empty, ScopeDelta)
+    assert empty.changes == ()
+
+    replaced = model.scope_for(1, 1)
+    assert isinstance(replaced, ScopeSnapshot)
+    assert replaced.revision == 1
+
+
+class RecordingInlineBackend(InlineBackend):
+    """Inline backend that records the scope of every submitted request."""
+
+    def __init__(self):
+        super().__init__()
+        self.scopes = []
+
+    def submit(self, request_id, kind, payload, scope):
+        self.scopes.append(scope)
+        super().submit(request_id, kind, payload, scope)
+
+
+def test_store_backed_variables_and_assignments_share_one_source():
+    settings = SettingsStore(temp_dir() / "config.yaml")
+    settings.load()
+    store = VariableStore()
+    for seed in plotting_seeds():
+        assert store.commit(CommitRequest(store.revision, seed)).ok
+
+    calculation = RecordingInlineBackend()
+    vm = MainViewModel(
+        settings,
+        calculation_backend=calculation,
+        variables_backend=InlineBackend(),
+        store_client=store,
+    )
+    model = vm.variables.model
+    assert [model.nameAt(row) for row in range(model.rowCount())] == ["x", "y"]
+    assert model.cellAt(0, 2) == "Symbol"
+    assert model.latexAt(0) == "x"
+
+    assert vm.variables.addVariable("a", "2 + 3") is True
+    assert model.nameAt(2) == "a"
+    assert model.cellAt(2, 1) == "5"
+    assert model.cellAt(2, 2) == "Integer"
+    assert store.entry("a").display == "5"
+
+    assert vm.variables.updateVariable("a", "7") is True
+    assert model.cellAt(2, 1) == "7"
+    assert store.entry("a").display == "7"
+
+    assert vm.variables.renameVariable("a", "b") is True
+    assert [model.nameAt(row) for row in range(model.rowCount())] == ["x", "y", "b"]
+    assert store.entry("b").srepr == "Integer(7)"
+    assert store.entry("a") is None
+
+    assert vm.variables.deleteVariable("b") is True
+    assert [model.nameAt(row) for row in range(model.rowCount())] == ["x", "y"]
+    assert store.entry("b") is None
+
+    vm.calculator.calculateAssign("c", "=", "6")
+    assert store.entry("c").display == "6"
+    assert model.nameAt(2) == "c"
+    vm.calculator.calculate("c + 1")
+    assert vm.calculator.resultText == "7"
+    assert isinstance(calculation.scopes[0], ScopeSnapshot)
+    assert isinstance(calculation.scopes[1], ScopeDelta)
+    assert calculation.scopes[1].base_revision == calculation.scopes[0].revision
 
 
 def test_zen_mode_toggles_and_notifies():
@@ -1138,17 +1274,177 @@ class _FakeVariablesBackend(QObject):
     finished = Signal(int, object)
     timedOut = Signal(int)
     failed = Signal(int, str)
+    cancelled = Signal(int)
 
     def __init__(self):
         super().__init__()
         self.requests = []
         self.shutdowns = 0
+        self.cancels = 0
 
     def shutdown(self):
         self.shutdowns += 1
 
     def submit(self, request_id, kind, payload, scope):
         self.requests.append((request_id, kind, payload, scope))
+
+    def cancel(self, *, notify=False):
+        self.cancels += 1
+        if notify and self.requests:
+            self.cancelled.emit(self.requests[-1][0])
+
+
+def test_details_pending_lookup_follows_the_filter_proxy():
+    from python.viewmodel.log_viewmodel import LogViewModel
+    from python.viewmodel.search import VariablesFilterModel
+    from python.viewmodel.variables_viewmodel import VariablesViewModel
+
+    backend = _FakeVariablesBackend()
+    viewmodel = VariablesViewModel(VariableManager(), LogViewModel(), backend=backend)
+    proxy = VariablesFilterModel()
+    proxy.setSourceModel(viewmodel.model)
+    viewmodel.attach_filter(proxy)
+    viewmodel.model.save("a", Integer(1))
+
+    assert viewmodel.isPending(0) is False
+    assert viewmodel.updateVariable("a", "2") is True
+    assert viewmodel.isPending(0) is True
+    assert proxy.cellAt(0, 1) == "2"
+    assert viewmodel.cancelPending() is True
+    assert viewmodel.isPending(0) is False
+    assert proxy.cellAt(0, 2) == "Invalid"
+
+
+def test_variables_viewmodel_busy_tracks_the_worker_queue():
+    from python.viewmodel.log_viewmodel import LogViewModel
+    from python.viewmodel.variables_viewmodel import VariablesViewModel
+
+    backend = _FakeVariablesBackend()
+    viewmodel = VariablesViewModel(VariableManager(), LogViewModel(), backend=backend)
+    seen = []
+    viewmodel.busyChanged.connect(lambda: seen.append(viewmodel.busy))
+
+    assert viewmodel.busy is False
+    assert viewmodel.addVariable("a", "2") is True
+    assert viewmodel.busy is True
+    request_id = backend.requests[0][0]
+    backend.finished.emit(request_id, Success("2", Integer(2), "2"))
+    assert viewmodel.busy is False
+    assert seen == [True, False]
+
+
+def test_pending_variable_update_shows_the_typed_text_and_abort_keeps_it_invalid():
+    backend = _FakeVariablesBackend()
+    manager = VariableManager()
+    model = VariablesModel(manager, backend=backend)
+    model.save("a", Integer(1))
+
+    assert model.is_busy() is False
+    assert model.update("a", "2") is True
+    assert model.is_busy() is True
+    assert model.is_pending("a") is True
+    # The draft is visible, but the manager still holds the committed value.
+    assert model.cellAt(0, 1) == "2"
+    assert manager.get("a") == Integer(1)
+
+    assert model.cancel_active() is True
+    assert backend.cancels == 1
+    assert model.is_busy() is False
+    assert model.is_pending("a") is False
+    assert model.cellAt(0, 1) == "2"
+    assert model.cellAt(0, 2) == "Invalid"
+    assert manager.get("a") is None
+
+
+def test_store_backed_pending_abort_keeps_an_invalid_entry():
+    store = VariableStore()
+    assert store.commit(CommitRequest(0, StoreEntryCandidate(
+        name="a", srepr="Integer(1)", display="1",
+        type_label="Integer", latex="a = 1"))).ok
+    backend = _FakeVariablesBackend()
+    model = VariablesModel(None, backend=backend, store=store)
+
+    assert model.update("a", "2") is True
+    assert model.is_pending("a") is True
+    assert model.cellAt(0, 1) == "2"
+    assert model.cancel_active() is True
+    assert model.cellAt(0, 1) == "2"
+    assert model.cellAt(0, 2) == "Invalid"
+    entry = store.entry("a")
+    assert entry is not None and entry.valid is False and entry.display == "2"
+
+
+def test_a_store_conflict_reloads_the_authoritative_snapshot():
+    store = VariableStore()
+    backend = _FakeVariablesBackend()
+    model = VariablesModel(None, backend=backend, store=store)
+
+    # Another writer advanced the Store while the model still thought revision 0.
+    assert store.commit(CommitRequest(0, StoreEntryCandidate(
+        name="x", srepr="Integer(1)", display="1",
+        type_label="Integer", latex="x = 1"))).ok
+
+    assert model.commit_candidate(StoreEntryCandidate(
+        name="a", srepr="Integer(5)", display="5",
+        type_label="Integer", latex="a = 5")) is False
+    assert model.rowCount() == 1
+    assert model.nameAt(0) == "x"
+    assert model.cellAt(0, 1) == "1"
+    assert store.entry("a") is None
+
+
+def test_store_backed_timeout_keeps_the_old_value():
+    store = VariableStore()
+    assert store.commit(CommitRequest(0, StoreEntryCandidate(
+        name="x", srepr="Integer(1)", display="1",
+        type_label="Integer", latex="x = 1"))).ok
+    backend = _FakeVariablesBackend()
+    model = VariablesModel(None, backend=backend, store=store)
+
+    assert model.update("x", "2") is True
+    request_id = backend.requests[-1][0]
+    backend.timedOut.emit(request_id)
+
+    assert model.cellAt(0, 1) == "1"
+    entry = store.entry("x")
+    assert entry is not None and entry.display == "1"
+
+
+def test_a_newer_pending_edit_wins_over_the_running_answer():
+    backend = _FakeVariablesBackend()
+    manager = VariableManager()
+    model = VariablesModel(manager, backend=backend)
+    model.save("a", Integer(1))
+
+    assert model.update("a", "2") is True
+    first_id = backend.requests[0][0]
+    assert model.update("a", "3") is True
+    assert model.cellAt(0, 1) == "3"
+    assert len(backend.requests) == 1              # only the first is running
+
+    backend.finished.emit(first_id, Success("2", Integer(2), "2"))
+    assert model.cellAt(0, 1) == "3"               # stale answer is ignored
+    assert len(backend.requests) == 2              # the newer draft now runs
+    second_id = backend.requests[1][0]
+    backend.finished.emit(second_id, Success("3", Integer(3), "3"))
+    assert model.cellAt(0, 1) == "3"
+    assert model.cellAt(0, 2) == "Integer"
+    assert manager.get("a") == Integer(3)
+
+
+def test_abort_uses_the_latest_draft_and_drops_same_name_queue():
+    backend = _FakeVariablesBackend()
+    manager = VariableManager()
+    model = VariablesModel(manager, backend=backend)
+    model.save("a", Integer(1))
+
+    assert model.update("a", "2") is True
+    assert model.update("a", "3") is True
+    assert model.cancel_active() is True
+
+    assert model.cellAt(0, 1) == "3"
+    assert model.cellAt(0, 2) == "Invalid"
+    assert len(backend.requests) == 1              # the queued "3" was dropped
 
 
 def test_variable_writes_queue_through_the_backend():
@@ -1329,6 +1625,20 @@ def test_variable_filter_modes():
     assert names(model) == ["radius"]                # Rational
     model.searchMode = VariableSearchMode.FUZZY.value
     assert names(model) == ["radius"]
+
+
+def test_history_is_bounded_and_evicts_the_oldest_entry():
+    """A long stress session must not keep every rendered SVG forever."""
+    history = HistoryModel()
+    history.MAX_HISTORY_ENTRIES = 3
+    sizes = []
+    history.countChanged.connect(lambda: sizes.append(history.count))
+    for index in range(5):
+        history.add_item(f"e{index}", f"r{index}")
+    assert history.count == 3
+    assert sizes == [1, 2, 3, 3, 3]
+    assert [history.data(history.index(row, 0), HistoryModel.ExpressionRole)
+            for row in range(3)] == ["e4", "e3", "e2"]
 
 
 def test_count_is_a_notifying_property():

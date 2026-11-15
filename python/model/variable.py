@@ -8,29 +8,12 @@ reference yet-unassigned variables simply stay symbolic (native sympy
 behavior), and invalid input is kept as an invalid (NaN) entry.
 """
 
-import keyword
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
 
+from ..names import SYMPY_CONSTANTS, validate_name
 from .plotting import is_plot_variable, plot_variable_warning
-
-#: Names sympy already defines, which a variable would shadow. User input is
-#: resolved against sympy's namespace, so these are exactly the names that can
-#: silently change what an expression means.
-SYMPY_CONSTANTS = frozenset(
-    {
-        "pi",
-        "E",
-        "I",
-        "oo",
-        "zoo",
-        "nan",
-        "GoldenRatio",
-        "EulerGamma",
-        "Catalan",
-    }
-)
 
 
 @lru_cache(maxsize=1)
@@ -65,22 +48,6 @@ def reserved_name_warning(name: str) -> str | None:
     if is_plot_variable(name):
         return plot_variable_warning(name)
     return None
-
-
-def validate_name(name: str) -> bool:
-    """Check if a variable name is legal (the single source of truth).
-
-    A name must be a valid Python identifier and not a keyword. Delegating to
-    ``str.isidentifier`` (rather than hand-rolled ``isalpha``/``isalnum``
-    checks) keeps the rule in lockstep with sympy's parser, which tokenizes
-    with the same grammar: e.g. ``x²`` (a superscript two) is ``isalnum`` but
-    not a valid identifier, so the old check admitted a name that could never
-    be referenced back in an expression.
-
-    Returns:
-        True if the name is valid, False otherwise.
-    """
-    return isinstance(name, str) and name.isidentifier() and not keyword.iskeyword(name)
 
 
 def classify_type(value: Any) -> str:

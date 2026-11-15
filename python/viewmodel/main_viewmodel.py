@@ -26,9 +26,8 @@ from ..brackets import parse_colors
 from ..code_style import Style, theme, to_rich_text
 from ..keyboard_config import load_keyboard_layout
 from ..latex_render import LatexStyle
-from ..model.calculator import Calculator
-from ..model.variable import VariableManager
 from ..settings import SettingsStore
+from ..store_client import StoreClient
 from .calculator_viewmodel import CalculatorViewModel
 from .highlighter import attach
 from .history_viewmodel import HistoryModel, HistoryWindowModel
@@ -73,6 +72,7 @@ class MainViewModel(QObject):
         initial_variables: Mapping[str, Any] | None = None,
         calculation_backend: QObject | None = None,
         variables_backend: QObject | None = None,
+        store_client: StoreClient | None = None,
         translation_dir: Path | None = None,
         icon_dir: Path | None = None,
     ):
@@ -83,12 +83,10 @@ class MainViewModel(QObject):
             theme_manager: RinUI's ``ThemeManager``, so the settings viewmodel can
                 apply appearance changes; None in headless tests.
             parent: Qt parent.
-            initial_variables: Variables a fresh session starts with. The app
-                passes ``plotting.plot_variables()`` — ``x`` and ``y`` as
-                themselves, so the plotting names are visible in the table and a
-                result can use them without defining anything. Left empty here,
-                which is what the tests build: the default scope is the
-                composition root's decision, not the viewmodel's.
+            initial_variables: Variables a fresh session starts with **on the legacy
+                test/headless path**. The app seeds the Store instead
+                (``StoreClient.bootstrap(plotting_seeds())``), so this mapping is
+                ignored when ``store_client`` is supplied.
             calculation_backend: How calculation requests leave the UI. None
                 keeps the synchronous in-process backend (tests/headless); the
                 application passes a ``ProcessBackend`` with a timeout.
@@ -97,6 +95,10 @@ class MainViewModel(QObject):
                 (tests/headless); the application passes a second
                 ``ProcessBackend`` so variable edits also have a deadline and
                 never run on the UI thread.
+            store_client: The application's Store worker client. When present,
+                the Variables table reads Store entries, the Calculator's scope
+                is the Store snapshot, and writes commit StoreEntryCandidate
+                values; ``VariableManager`` is not created.
             translation_dir: Folder with compiled ``symplify_<code>.qm`` files
                 (and the ``rinui_<code>.qm`` fragments); defaults to the
                 repository's ``i18n/``.
@@ -106,10 +108,16 @@ class MainViewModel(QObject):
                 checkout and next to the frozen exe).
         """
         super().__init__(parent)
-        self._calculator = Calculator()
-        self._variable_manager = VariableManager()
-        for name, value in (initial_variables or {}).items():
-            self._variable_manager.save(name, value)
+        self._calculator: Any | None = None
+        self._variable_manager: Any | None = None
+        if store_client is None:
+            from ..model.calculator import Calculator
+            from ..model.variable import VariableManager
+
+            self._calculator = Calculator()
+            self._variable_manager = VariableManager()
+            for name, value in (initial_variables or {}).items():
+                self._variable_manager.save(name, value)
 
         # One renderer process for both result/variant artwork and history
         # cards. The service owns the cache and invalidates queued work by owner.
@@ -121,6 +129,7 @@ class MainViewModel(QObject):
             self._log,
             self._calculator,
             backend=variables_backend,
+            store=store_client,
             parent=self,
         )
         self._calculator_vm = CalculatorViewModel(
@@ -132,6 +141,10 @@ class MainViewModel(QObject):
             backend=calculation_backend,
             latex_service=self._latex_service,
             icon_svg=self._read_watermark_svg(icon_dir, translation_dir),
+            scope_source=(
+                self._variables_vm.scope_for
+                if store_client is not None else None
+            ),
         )
 
         # Search-filtered views: the pages bind their views to these, so the
@@ -585,6 +598,12 @@ class MainViewModel(QObject):
         self._palette_cache[dark] = (styles, brackets)
         return styles, brackets
 
+    def _code_scope(self) -> dict[str, Any]:
+        """Names only, for the lexer: values are irrelevant to colouring."""
+        if self._variable_manager is not None:
+            return self._variable_manager.list_all()
+        return {name: True for name in self._variables_vm.model.names()}
+
     def _invalidate_scope(self, *_args) -> None:
         """A variable was written: markup classified names against the old scope."""
         self._scope_revision += 1
@@ -609,7 +628,7 @@ class MainViewModel(QObject):
             return cached
         styles, bracket_colors = self._palette(dark)
         markup = to_rich_text(
-            text, self._variable_manager.list_all(), styles, bracket_colors
+            text, self._code_scope(), styles, bracket_colors
         )
         if len(self._markup_cache) >= 512:
             self._markup_cache.clear()
@@ -637,7 +656,7 @@ class MainViewModel(QObject):
         styles, bracket_colors = self._palette(dark)
         document = text_document.textDocument()
         highlighter = attach(
-            text_document, self._variable_manager.list_all, styles, bracket_colors
+            text_document, self._code_scope, styles, bracket_colors
         )
         self._code_highlighters[document] = highlighter
         document.destroyed.connect(
