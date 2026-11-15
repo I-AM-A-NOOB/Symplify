@@ -222,6 +222,10 @@ PRUNE_QML_DIRS = (
 #: and `--low-memory` is enough. So it is applied on CI and not locally; set
 #: `CI=1` to force it anywhere.
 CI_JOBS = os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS")
+#: Local builds can choose a bounded C-compilation width; memory, not CPU, is
+#: the limit on a 16 GB machine because MSVC's second pass on the generated
+#: SymPy C files is the peak. `SYMPLIFY_BUILD_JOBS=3` is the safe local setting.
+BUILD_JOBS = os.environ.get("SYMPLIFY_BUILD_JOBS", "").strip()
 
 
 def _style_dlls(dist: Path) -> None:
@@ -361,9 +365,16 @@ def main() -> int:
     # Before the script path: Nuitka's parser is happy either way, but keeping
     # the flags ahead of the positional argument is the shape its own --help and
     # its docs use.
-    command = CMD[:-1] + (["--jobs=1"] if CI_JOBS else []) + CMD[-1:]
-    if CI_JOBS:
+    # CI serializes C compilation to survive a small runner; a dev machine can
+    # choose a bounded width with SYMPLIFY_BUILD_JOBS (memory is the limit).
+    jobs = []
+    if BUILD_JOBS:
+        jobs = [f"--jobs={BUILD_JOBS}"]
+        print(f"Building with --jobs={BUILD_JOBS} (SYMPLIFY_BUILD_JOBS)")
+    elif CI_JOBS:
+        jobs = ["--jobs=1"]
         print("CI detected: adding --jobs=1 (see the note on CI_JOBS)")
+    command = CMD[:-1] + jobs + CMD[-1:]
     print("Nuitka build root:", ROOT)
     code = subprocess.call(command, cwd=ROOT)
     if code == 0:
