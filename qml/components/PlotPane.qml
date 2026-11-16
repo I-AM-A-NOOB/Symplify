@@ -17,6 +17,10 @@ Item {
 
     objectName: "plotPane"
     visible: calcVM.hasPlot
+    //: The PlotView only exists while there is something to draw. Its GPU/RHI
+    //: resources are the expensive part of this pane, and an empty calculator
+    //: must not pay for them.
+    readonly property var plotViewItem: plotLoader.item
 
     //: Plot actions live in the pane header, outside the drawing surface.
     //: Overlaying them on the canvas hid the plot's own furniture (axis labels,
@@ -53,7 +57,7 @@ Item {
             enabled: calcVM.hasPlot
             Accessible.name: qsTr("Reset plot view")
             Tip { text: qsTr("Reset plot view") }
-            onClicked: plotView.camera.reset()
+            onClicked: root.plotViewItem.camera.reset()
         }
         ToolButton {
             objectName: "plotZoomOutButton"
@@ -62,11 +66,13 @@ Item {
             icon.color: enabled
                 ? Theme.currentTheme.colors.textColor
                 : Theme.currentTheme.colors.textDisabledColor
-            enabled: calcVM.hasPlot && plotView.camera.zoomEnabled
+            enabled: calcVM.hasPlot && root.plotViewItem
+                && root.plotViewItem.camera.zoomEnabled
             Accessible.name: qsTr("Zoom out")
             Tip { text: qsTr("Zoom out") }
-            onClicked: plotView.camera.animate_zoom(
-                -120, 0.5, 0.5, plotView.width, plotView.height, 160)
+            onClicked: root.plotViewItem.camera.animate_zoom(
+                -120, 0.5, 0.5, root.plotViewItem.width,
+                root.plotViewItem.height, 160)
         }
         ToolButton {
             objectName: "plotZoomInButton"
@@ -75,11 +81,13 @@ Item {
             icon.color: enabled
                 ? Theme.currentTheme.colors.textColor
                 : Theme.currentTheme.colors.textDisabledColor
-            enabled: calcVM.hasPlot && plotView.camera.zoomEnabled
+            enabled: calcVM.hasPlot && root.plotViewItem
+                && root.plotViewItem.camera.zoomEnabled
             Accessible.name: qsTr("Zoom in")
             Tip { text: qsTr("Zoom in") }
-            onClicked: plotView.camera.animate_zoom(
-                120, 0.5, 0.5, plotView.width, plotView.height, 160)
+            onClicked: root.plotViewItem.camera.animate_zoom(
+                120, 0.5, 0.5, root.plotViewItem.width,
+                root.plotViewItem.height, 160)
         }
     }
 
@@ -109,16 +117,18 @@ Item {
         //: (6.5): a Control's own `focusPolicy` decides, and NoFocus is its
         //: default.
         focusPolicy: Qt.StrongFocus
-        Keys.forwardTo: [plotView]
+        Keys.forwardTo: root.plotViewItem ? [root.plotViewItem] : []
 
         onActiveFocusChanged: {
             if (activeFocus)
+                return
+            if (!root.plotViewItem)
                 return
             //: The plot never loses focus itself (the keys are forwarded), so a
             //: held arrow key would keep panning. qmlmathplot drops held keys
             //: when the camera stops accepting them; these two toggles are that,
             //: through public API.
-            const camera = plotView.camera
+            const camera = root.plotViewItem.camera
             const pan = camera.panEnabled
             const zoom = camera.zoomEnabled
             camera.panEnabled = false
@@ -144,18 +154,25 @@ Item {
                 }
 
                 //: The plot handles the mouse and the forwarded keys; the control
-                //: above owns the Tab stop.
-                PlotView {
-                    id: plotView
-
-                    objectName: "plotView"
+                //: above owns the Tab stop. The Loader owns its GPU/RHI lifetime.
+                Loader {
+                    id: plotLoader
                     anchors.fill: parent
-                    plot: calcVM.plot
-                    //: Not the Tab stop: the control above is, so the ring has
-                    //: one owner. A click still focuses the plot (PlotInput
-                    //: forces it), which is the mouse path the ring ignores.
-                    focus: false
-                    activeFocusOnTab: false
+                    active: calcVM.hasPlot
+
+                    sourceComponent: Component {
+                        PlotView {
+                            objectName: "plotView"
+                            anchors.fill: parent
+                            plot: calcVM.plot
+                            //: Not the Tab stop: the control above is, so the
+                            //: ring has one owner. A click still focuses the
+                            //: plot (PlotInput forces it), which is the mouse
+                            //: path the ring ignores.
+                            focus: false
+                            activeFocusOnTab: false
+                        }
+                    }
                 }
             }
 

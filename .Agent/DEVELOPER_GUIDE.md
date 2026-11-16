@@ -1714,16 +1714,19 @@ mode hides the input and most chrome, and the window-level side of it lives in
   only the final click clamps to the strip's end. The wheel and the pills therefore share both
   the distance and the 200 ms animation.
   `canScrollLeft`/`canScrollRight` (0.5 px of slack) decide which pill is shown — the one on a
-  side that has reached its end disappears, so a row with no overflow shows neither. The key
-  grid itself still switches instantly through `StackLayout`: the row scrolls, it does not page.
+  side that has reached its end disappears, so a row with no overflow shows neither. Only the
+  current tab's `GridLayout` exists: `KeyboardPanel` binds one grid to
+  `vm.keyboardTabs[root.currentTabIndex]`, so switching tabs rebuilds one handful of keys instead
+  of keeping a complete `Rin.Button` tree per tab alive (the old `StackLayout` did the latter;
+  this was the one measured startup-memory win in the QML audit, ≈54 MB private).
 - **Keyboard math symbols are LaTeX-rendered, but the keyboard stays one font.**
   `keyboard_config.yaml` keys carry `{label, latex, insert}`: `label` is still the plain
   fallback/accessibility text, `insert` is what the key types, and `latex` is optional artwork.
-  `KeyboardPanel` asks `vm.latexKeycap(latex, vm.keyboardRevision)` only for the current tab
-  (`keyGrid.index === root.currentTabIndex`), so switching tabs requests that tab's handful of
-  symbols. The render is **asynchronous**: the first call registers the key with the shared
-  renderer and answers `{}`, QML draws the plain `label`, and `vm.keycapArtRevision` re-evaluates
-  the binding once a batch of artwork lands (completions are coalesced into one bump per 16 ms).
+  `KeyboardPanel` asks `vm.latexKeycap(latex, vm.keyboardRevision)` for the current tab's keys, so
+  switching tabs requests that tab's handful of symbols. The render is **asynchronous**: the first
+  call registers the key with the shared renderer and answers `{}`, QML draws the plain `label`,
+  and `vm.keycapArtRevision` re-evaluates the binding once a batch of artwork lands (completions
+  are coalesced into one bump per 16 ms).
   This used to be a synchronous ziamath layout per key (~1.9 ms × 20+ keys) inside a QML binding,
   which froze a tab switch; the headless tests still get artwork on the first call because the
   inline renderer fills the cache before the method returns. `MainViewModel` caches
@@ -2911,11 +2914,12 @@ draw (`python/model/plotting.py`, zero Qt), the **object** every surface binds t
 - **The Plot belongs to the viewmodel, and the worker builds its Programs.** RinUI destroys and
   recreates pages (invariant 2), so `CalculatorViewModel` owns it and a page only injects it
   (`PlotView { plot: calcVM.plot }`); curves survive navigation, and `clear_result()`/a failure
-  clears them. The worker's `python/plot_programs.py` converts each `plot_series` item to a
-  qmlmathplot `Program`; the ViewModel only calls `plot.add_program(program)` and
-  `curve.set_program(program)`. Curves are reused slot by slot, so a recalculation is a program
-  write, not a rebuild. qmlmathplot's `plotError`/`plotErrorChanged` is mirrored into the card;
-  shader failures never escape a Qt slot.
+  clears them. `PlotView` itself is inside a `Loader active: calcVM.hasPlot`, so an empty
+  calculator does not create its GPU/RHI item (the pane's toolbar and focus wrapper remain). The
+  worker's `python/plot_programs.py` converts each `plot_series` item to a qmlmathplot `Program`;
+  the ViewModel only calls `plot.add_program(program)` and `curve.set_program(program)`. Curves are
+  reused slot by slot, so a recalculation is a program write, not a rebuild. qmlmathplot's
+  `plotError`/`plotErrorChanged` is mirrored into the card; shader failures never escape a Qt slot.
 - **qmlmathplot 0.7 is the UI boundary.** The package imports no SymPy at base; the worker uses
   the optional `calc` extra to build `Program`s from the SymPy result. The UI's Plot source is
   `None`; text parsing never happens in the UI. A Program carries the `intervals`/`adaptive`/

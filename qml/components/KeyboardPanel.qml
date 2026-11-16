@@ -297,129 +297,120 @@ Rectangle {
                 }
             }
 
-        // Key grids, one per tab
-        StackLayout {
+        // Only the current tab's grid is built. The old StackLayout kept one
+        // complete GridLayout (and every Rin.Button) per tab, while only one is
+        // ever visible. Switching tabs now rebuilds that one grid.
+        GridLayout {
+            id: keyGrid
             Layout.fillWidth: true
             Layout.fillHeight: true
-            currentIndex: root.currentTabIndex
+
+            readonly property var tab:
+                vm.keyboardTabs[root.currentTabIndex] || ({})
+            // A tab opts into case by carrying a `shiftGrid`; without one the
+            // toggle is visible but inert here. The panel never looks at a
+            // tab's name, so adding Greek (or a user tab with a shiftGrid)
+            // needs no code.
+            readonly property bool shifted:
+                root.shiftActive && !!tab.shiftKeys
+            readonly property var activeKeys:
+                tab ? ((shifted ? tab.shiftKeys : tab.keys) || []) : []
+            readonly property int activeColumns:
+                tab ? ((shifted ? tab.shiftColumns : tab.columns) || 1) : 1
+
+            columns: Math.max(1, keyGrid.activeColumns)
+            columnSpacing: 6
+            rowSpacing: 6
 
             Repeater {
-                model: vm.keyboardTabs
+                model: keyGrid.activeKeys
 
-                delegate: GridLayout {
-                    id: keyGrid
+                delegate: Rin.Button {
+                    id: keyButton
 
-                    required property int index
                     required property var modelData
 
-                    // A tab opts into case by carrying a `shiftGrid`; without
-                    // one the toggle is visible but inert here. The panel never
-                    // looks at a tab's name, so adding Greek (or a user tab
-                    // with a shiftGrid) needs no code.
-                    readonly property bool shifted:
-                        root.shiftActive && !!modelData.shiftKeys
-                    readonly property var activeKeys:
-                        shifted ? modelData.shiftKeys : modelData.keys
-                    readonly property int activeColumns:
-                        shifted ? modelData.shiftColumns : modelData.columns
+                    Layout.row: modelData.row
+                    Layout.column: modelData.col
+                    // Equal cells, by the mechanism Qt documents: the extra
+                    // space in a layout is shared out by the *ratio* of the
+                    // items' preferred sizes, and the preferred sizes act as
+                    // weights when everything fills. A preferred size of 0 is
+                    // not a size (the item's implicit width is used instead,
+                    // which is what the label makes it), so every key prefers
+                    // 1 and states the same stretch factor: the ratio is 1:1
+                    // and the columns come out equal. A label that no longer
+                    // fits elides; see the contentItem below.
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    Layout.preferredWidth: 1
+                    Layout.preferredHeight: 1
+                    Layout.minimumWidth: 1
+                    Layout.minimumHeight: 1
+                    Layout.horizontalStretchFactor: 1
+                    Layout.verticalStretchFactor: 1
+                    // The key shows `label` and types `insert`; they are the
+                    // same string unless the glyph differs from the name it
+                    // inserts (√ shows, sqrt types). `latex` is optional and
+                    // only the current tab is built, so its keycaps are the
+                    // only ones requested; the VM caches by revision.
+                    text: modelData.label
+                    readonly property var cap: {
+                        // Art arrives asynchronously: naming the batch
+                        // revision is what re-reads the cache for every key
+                        // once a batch lands.
+                        vm.keycapArtRevision
+                        return modelData.latex
+                            ? vm.latexKeycap(modelData.latex,
+                                             vm.keyboardRevision)
+                            : null
+                    }
+                    focusPolicy: Qt.NoFocus
+                    onClicked: root.keyPressed(modelData.insert)
 
-                    columns: keyGrid.activeColumns
-                    columnSpacing: 6
-                    rowSpacing: 6
+                    // RinUI's Button draws its own label with a hardcoded
+                    // `Typography.Body` (whose family is `Utils.fontFamily`),
+                    // so `font.*` on the button never reaches the glyphs —
+                    // the face has to be given to the label itself. Text keys
+                    // use the keyboard font; a LaTeX keycap is already artwork
+                    // (keyboard size, LaTeX font) and falls back to this label
+                    // if ziamath refuses the source.
+                    contentItem: Item {
+                        Text {
+                            anchors.fill: parent
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                            elide: Text.ElideRight
+                            visible: !keyButton.cap || keyButton.cap.url === ""
+                            text: keyButton.text
+                            color: keyButton.highlighted
+                                ? Rin.Theme.currentTheme.colors.textOnAccentColor
+                                : Rin.Theme.currentTheme.colors.textColor
+                            font: settingsVM.keyboardFont
+                        }
 
-                    Repeater {
-                        model: keyGrid.activeKeys
-
-                        delegate: Rin.Button {
-                            id: keyButton
-
-                            required property var modelData
-
-                            Layout.row: modelData.row
-                            Layout.column: modelData.col
-                            // Equal cells, by the mechanism Qt documents: the extra
-                            // space in a layout is shared out by the *ratio* of the
-                            // items' preferred sizes, and the preferred sizes act as
-                            // weights when everything fills. A preferred size of 0 is
-                            // not a size (the item's implicit width is used instead,
-                            // which is what the label makes it), so every key prefers
-                            // 1 and states the same stretch factor: the ratio is 1:1
-                            // and the columns come out equal. A label that no longer
-                            // fits elides; see the contentItem below.
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            Layout.preferredWidth: 1
-                            Layout.preferredHeight: 1
-                            Layout.minimumWidth: 1
-                            Layout.minimumHeight: 1
-                            Layout.horizontalStretchFactor: 1
-                            Layout.verticalStretchFactor: 1
-                            // The key shows `label` and types `insert`; they are
-                            // the same string unless the glyph differs from the
-                            // name it inserts (√ shows, sqrt types). `latex` is
-                            // optional and only rendered for the current tab: the
-                            // QML binding is what makes switching tabs ask for the
-                            // next tab's keycaps, while the VM caches by revision.
-                            text: modelData.label
-                            readonly property var cap: {
-                                // Art arrives asynchronously: naming the batch
-                                // revision is what re-reads the cache for every
-                                // key once a batch lands.
-                                vm.keycapArtRevision
-                                return modelData.latex
-                                    && keyGrid.index === root.currentTabIndex
-                                    ? vm.latexKeycap(modelData.latex,
-                                                     vm.keyboardRevision)
-                                    : null
-                            }
-                            focusPolicy: Qt.NoFocus
-                            onClicked: root.keyPressed(modelData.insert)
-
-                            // RinUI's Button draws its own label with a hardcoded
-                            // `Typography.Body` (whose family is `Utils.fontFamily`),
-                            // so `font.*` on the button never reaches the glyphs —
-                            // the face has to be given to the label itself. Text
-                            // keys use the keyboard font; a LaTeX keycap is already
-                            // artwork (keyboard size, LaTeX font) and falls back to
-                            // this label if ziamath refuses the source.
-                            contentItem: Item {
-                                Text {
-                                    anchors.fill: parent
-                                    horizontalAlignment: Text.AlignHCenter
-                                    verticalAlignment: Text.AlignVCenter
-                                    elide: Text.ElideRight
-                                    visible: !keyButton.cap || keyButton.cap.url === ""
-                                    text: keyButton.text
-                                    color: keyButton.highlighted
-                                        ? Rin.Theme.currentTheme.colors.textOnAccentColor
-                                        : Rin.Theme.currentTheme.colors.textColor
-                                    font: settingsVM.keyboardFont
-                                }
-
-                                Image {
-                                    anchors.centerIn: parent
-                                    visible: keyButton.cap !== null
-                                        && keyButton.cap.url !== ""
-                                    source: keyButton.cap ? keyButton.cap.url : ""
-                                    fillMode: Image.PreserveAspectFit
-                                    smooth: true
-                                    // Natural size unless the key is too small;
-                                    // sourceSize keeps the SVG crisp at the DPI.
-                                    readonly property real fit: Math.min(
-                                        1.0,
-                                        Math.max(0, (keyButton.width - 10)
-                                            / Math.max(1, keyButton.cap
-                                                ? keyButton.cap.width : 1)),
-                                        Math.max(0, (keyButton.height - 10)
-                                            / Math.max(1, keyButton.cap
-                                                ? keyButton.cap.height : 1)))
-                                    width: (keyButton.cap ? keyButton.cap.width : 0) * fit
-                                    height: (keyButton.cap ? keyButton.cap.height : 0) * fit
-                                    sourceSize: Qt.size(
-                                        Math.ceil(width * Screen.devicePixelRatio),
-                                        Math.ceil(height * Screen.devicePixelRatio))
-                                }
-                            }
+                        Image {
+                            anchors.centerIn: parent
+                            visible: keyButton.cap !== null
+                                && keyButton.cap.url !== ""
+                            source: keyButton.cap ? keyButton.cap.url : ""
+                            fillMode: Image.PreserveAspectFit
+                            smooth: true
+                            // Natural size unless the key is too small;
+                            // sourceSize keeps the SVG crisp at the DPI.
+                            readonly property real fit: Math.min(
+                                1.0,
+                                Math.max(0, (keyButton.width - 10)
+                                    / Math.max(1, keyButton.cap
+                                        ? keyButton.cap.width : 1)),
+                                Math.max(0, (keyButton.height - 10)
+                                    / Math.max(1, keyButton.cap
+                                        ? keyButton.cap.height : 1)))
+                            width: (keyButton.cap ? keyButton.cap.width : 0) * fit
+                            height: (keyButton.cap ? keyButton.cap.height : 0) * fit
+                            sourceSize: Qt.size(
+                                Math.ceil(width * Screen.devicePixelRatio),
+                                Math.ceil(height * Screen.devicePixelRatio))
                         }
                     }
                 }
