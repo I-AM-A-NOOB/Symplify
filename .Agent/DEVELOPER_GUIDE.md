@@ -2945,15 +2945,16 @@ draw (`python/model/plotting.py`, zero Qt), the **object** every surface binds t
   `∫ f dx`) — and lives in the scene, so it follows the plot's theme (background, text, axis
   colours) and an export includes it. The page used to draw a `Repeater` legend row above the card;
   there is no `plotLegend` property any more, and nothing in QML knows the curves' colours.
-- **The plot is clipped by a rounded mask, not by `clip`.** Qt's `Item.clip` is rectangular, so
-  `clip: true` on the card let the canvas' square corners paint over its rounded ones. The card's
-  contents are rendered into a layer (`layer.enabled`) and masked with
-  `Qt5Compat.GraphicalEffects.OpacityMask`, whose `maskSource` is a transparent `Rectangle` of the
-  card's own `appearance.buttonRadius` — the same radius every other control uses. The mask is a
-  sibling of the masked item (an effect may not include itself); the module is already in the frozen
-  build (`PySide6/qml/Qt5Compat/GraphicalEffects`). `MultiEffect` would be the Qt 6 answer, but its
-  masked source has to be hidden, and a hidden item cannot hold keyboard focus — which the plot now
-  does.
+- **The plot card is a card, and the plot is inset instead of masked.** `plotFrame` is the
+  same `Control` the focus ring already needs; its `background` is a `Rectangle` with
+  `appearance.buttonRadius`, `cardColor` and `cardBorderColor` — the Other Forms card's
+  anatomy — so the pane gets RinUI's border and radius without a hand-authored mask. The
+  plot content is inset by `max(14, appearance.buttonRadius)`; a card's radius does not clip
+  its children, so the square canvas must stay inside the rounding. That inset is what makes
+  `layer.enabled`/`Qt5Compat.GraphicalEffects.OpacityMask` unnecessary here. Do not replace
+  it with `clip: true`: Qt's `Item.clip` is still rectangular and would put the canvas'
+  square corners over the card's rounded ones. If the inset is ever removed, the rounded
+  mask has to come back (and with it the full-pane offscreen texture).
 - **The plot card is a `Control`, so its ring is the same one every other control raises.** Ctrl+Tab
   (the app's focus shortcut — a bare Tab belongs to the code input, which types it) lands on
   `plotFrame`, whose `visualFocus` + `focusReason` drive `ProjectFocusIndicator`; no

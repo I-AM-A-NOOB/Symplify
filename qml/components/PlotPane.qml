@@ -3,10 +3,9 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import RinUI
 import QmlMathPlot 2.0
-import Qt5Compat.GraphicalEffects
 
-//: The calculator's plot surface: the pane header (reset/zoom), the frame with
-//: its rounded mask, and the plot itself.
+//: The calculator's plot surface: the pane header (reset/zoom), a RinUI card
+//: around the plot, and the plot itself.
 //:
 //: The page owns where the pane goes (it is the split's other half) and assigns
 //: its geometry; this component owns what the plot looks like and the Tab stop
@@ -117,7 +116,21 @@ Item {
         //: (6.5): a Control's own `focusPolicy` decides, and NoFocus is its
         //: default.
         focusPolicy: Qt.StrongFocus
+        //: The plot is inset far enough that its square canvas cannot reach the
+        //: card's rounded corners, so the card needs no layer/OpacityMask. The
+        //: Other Forms card uses padding 14; the max keeps the inset >= the
+        //: theme's buttonRadius even if a theme grows the radius.
+        padding: Math.max(14, Theme.currentTheme.appearance.buttonRadius)
         Keys.forwardTo: root.plotViewItem ? [root.plotViewItem] : []
+
+        background: Rectangle {
+            objectName: "plotCard"
+
+            radius: Theme.currentTheme.appearance.buttonRadius
+            color: Theme.currentTheme.colors.cardColor
+            border.width: Theme.currentTheme.appearance.borderWidth
+            border.color: Theme.currentTheme.colors.cardBorderColor
+        }
 
         onActiveFocusChanged: {
             if (activeFocus)
@@ -139,39 +152,27 @@ Item {
 
         Rectangle {
             anchors.fill: parent
-            //: The graph is the surface, not a card inside a card.
+            anchors.margins: plotFrame.padding
             color: "transparent"
 
-            //: Qt's `clip` is rectangular, so `clip: true` would let the plot's
-            //: square canvas paint over this card's rounded corners. The contents
-            //: are rendered into a layer and masked with a rounded rectangle
-            //: instead.
-            Item {
+            //: The plot handles the mouse and the forwarded keys; the control
+            //: above owns the Tab stop. The Loader owns its GPU/RHI lifetime.
+            Loader {
+                id: plotLoader
                 anchors.fill: parent
-                layer.enabled: true
-                layer.effect: OpacityMask {
-                    maskSource: plotMask
-                }
+                active: calcVM.hasPlot
 
-                //: The plot handles the mouse and the forwarded keys; the control
-                //: above owns the Tab stop. The Loader owns its GPU/RHI lifetime.
-                Loader {
-                    id: plotLoader
-                    anchors.fill: parent
-                    active: calcVM.hasPlot
-
-                    sourceComponent: Component {
-                        PlotView {
-                            objectName: "plotView"
-                            anchors.fill: parent
-                            plot: calcVM.plot
-                            //: Not the Tab stop: the control above is, so the
-                            //: ring has one owner. A click still focuses the
-                            //: plot (PlotInput forces it), which is the mouse
-                            //: path the ring ignores.
-                            focus: false
-                            activeFocusOnTab: false
-                        }
+                sourceComponent: Component {
+                    PlotView {
+                        objectName: "plotView"
+                        anchors.fill: parent
+                        plot: calcVM.plot
+                        //: Not the Tab stop: the control above is, so the
+                        //: ring has one owner. A click still focuses the
+                        //: plot (PlotInput forces it), which is the mouse
+                        //: path the ring ignores.
+                        focus: false
+                        activeFocusOnTab: false
                     }
                 }
             }
@@ -190,18 +191,6 @@ Item {
                 color: Theme.currentTheme.colors.systemCriticalColor
                 typography: Typography.Caption
             }
-        }
-
-        //: The mask is outside the masked item (an effect may not include
-        //: itself) and never shown: the effect renders it offscreen and reads its
-        //: alpha.
-        Rectangle {
-            id: plotMask
-
-            objectName: "plotMask"
-            anchors.fill: parent
-            radius: Theme.currentTheme.appearance.buttonRadius
-            visible: false
         }
 
         //: The ring every other control raises, with the same rule: `visualFocus`
