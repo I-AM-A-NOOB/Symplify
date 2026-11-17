@@ -1,7 +1,7 @@
 """The UI/worker protocol: plain-data DTOs for variables, results and scope sync.
 
-This module is deliberately **zero Qt and zero SymPy**. The future variable
-Store worker imports it, and importing :mod:`python.model` would pull SymPy in
+This module is deliberately **zero Qt and zero SymPy**. The variable Store
+worker imports it, and importing :mod:`python.model` would pull SymPy in
 with the calculator. Everything here is a frozen dataclass of strings, integers,
 booleans and plain dicts, so the same objects cross a pickled worker pipe and
 serialize to JSON for a Store snapshot.

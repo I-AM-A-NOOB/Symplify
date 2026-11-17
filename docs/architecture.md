@@ -28,80 +28,82 @@ the Model decides nothing about display.
 
 ### 1.1 运行时执行域：主线程、渲染进程、worker 进程
 
-这张图回答“代码在哪跑”，而不是“数据长什么样”。`ProcessBackend` 仍在 Qt 主线程；
-计算 worker、Variables worker 和 LaTeX 渲染器都是独立进程。Calculator 的结果/变体、
-History 的卡片和键盘 keycap 共用渲染进程；Variables 详情面板仍在主线程同步渲染
-（短任务，且由 `render_data_url` 的内部锁串行化）。Variables worker 只在第一次变量写入时
-启动，空闲 60 s 或离开页面且无写入时回收，下一次编辑再重启。绘图计划也由计算 worker
-生成：`plot_programs.with_plot` 把 `plot_series` 转成 qmlmathplot `Program`，
-UI 只做 `Plot.add_program`，不解析表达式。
+这张图回答“代码在哪跑”，而不是“数据长什么样”。**生产路径**是：
+
+- UI 主线程只持有 Qt/ViewModel 状态、Store 镜像和 DTO；
+- `StoreClient` → Store worker 只保存字符串 `StoreEntry` 与 revision，**不 import Qt 或
+  SymPy**；
+- 两个独立的 `ProcessBackend` 各自启动 Compute worker（Calculator + SymPy +
+  `ScopeCache`）：一个服务 Calculator，一个服务 Variables 页；Variables worker 只在第一次
+  写入时启动，空闲 60 s 或离开页面且无写入时回收；
+- LaTeX 结果/变体/History/keycap 共用 Renderer worker；Variables 详情仍可能在主线程同步
+  渲染（短任务，受 `render_data_url` 的锁串行化）；
+- 绘图计划由 Calculator worker 生成：`plot_programs.with_plot` 把 `plot_series` 转成
+  qmlmathplot `Program`，UI 只做 `Plot.add_program`，不解析表达式。
 
 ```mermaid
 flowchart LR
-    subgraph UI["Qt UI 进程"]
+    subgraph UI["Qt UI 进程 — 不 import SymPy"]
         direction TB
-
-        subgraph MAIN["主线程"]
-            QML["QML / RinUI 页面<br/>Calculator · Variables · History · Log · Settings"]
-            VM["ViewModels<br/>状态与 Qt 信号"]
-            STATE["VariableManager · HistoryModel · LogViewModel<br/>内存状态，UI 持有"]
-            PLOT["qmlmathplot<br/>Plot / PlotView（GPU）"]
-            PB["ProcessBackend<br/>Calculator · 2 ms 轮询 · 超时 · 取消"]
-            VPB["Variables ProcessBackend<br/>独立 worker · 队列 · 超时"]
-            IB["InlineBackend<br/>测试 / headless"]
-            TEXS["LatexRenderService<br/>LRU 缓存 · token 映射"]
-            VARDET["Variables 详情<br/>latexFor 同步渲染"]
-        end
+        QML["QML / RinUI 页面<br/>Calculator · Variables · History · Log · Settings"]
+        VM["ViewModels<br/>状态与 Qt 信号"]
+        MIRROR["VariablesModel<br/>StoreEntry 镜像 · revision<br/>ScopeDelta 历史"]
+        SC["StoreClient<br/>同步 request/response"]
+        CALC["CalculatorViewModel"]
+        VARVM["VariablesViewModel"]
+        PB["ProcessBackend<br/>Calculator · 超时 · 取消"]
+        VPB["ProcessBackend<br/>Variables 写入 · 队列"]
+        TEXS["LatexRenderService<br/>LRU 缓存 · token 映射"]
+        PLOT["qmlmathplot<br/>Plot / PlotView（GPU）"]
     end
 
-    subgraph RENDER["LaTeX 渲染进程（零 Qt）"]
-        TEXW["render_worker_main<br/>ziamath"]
+    subgraph STOREW["Store worker — 零 Qt / 零 SymPy"]
+        SW["worker_main<br/>StoreEntry 字符串 + revisions<br/>原子 JSON 快照"]
     end
 
-    subgraph WORK["Calculator worker 进程（零 Qt）"]
-        W["worker_main<br/>Calculator"]
-        P["safe AST parser<br/>方法/属性白名单"]
-        S["SymPy"]
-        V["variants()<br/>simplify / doit / N / expand / factor"]
-        L["Job Object / rlimits<br/>资源与进程限制"]
+    subgraph COMPUTE["Calculator Compute worker — SymPy"]
+        CW["worker_main<br/>Calculator + ScopeCache"]
+        CP["safe AST parser<br/>方法/属性白名单"]
+        CS["SymPy"]
+        CV["variants()<br/>simplify / doit / N / expand / factor"]
     end
 
-    subgraph VARWORK["Variables worker 进程（零 Qt）"]
-        VW["worker_main<br/>Calculator"]
+    subgraph VARCOMPUTE["Variables Compute worker — SymPy"]
+        VW["worker_main<br/>Calculator + ScopeCache"]
         VP["safe AST parser<br/>方法/属性白名单"]
         VS["SymPy"]
     end
 
-    STORE["SettingsStore<br/>YAML，持久化"]
+    subgraph RENDER["LaTeX 渲染进程 — 零 Qt"]
+        TEXW["render_worker_main<br/>ziamath"]
+    end
 
     QML <-->|"属性 / 信号"| VM
-    VM <-->|"读写"| STATE
-    VM <-->|"设置"| STORE
+    VM <-->|"读写镜像"| MIRROR
+    MIRROR <-->|"snapshot / commit / rename / delete"| SC
+    SC <-->|"pickled duplex pipe"| SW
 
-    VM -->|"Calculator 请求：id, kind,<br/>payload, scope 快照"| PB
-    PB -->|"① 结果 finished"| VM
-    PB -->|"② variantsReady<br/>（可选，2 s）"| VM
-    VM -.->|"仅测试"| IB
+    CALC -->|"scope_for(): snapshot / delta"| MIRROR
+    CALC --> PB
+    VARVM --> VPB
+    MIRROR -->|"scope_for / _scope_for_write"| PB
+    MIRROR -->|"scope_for_write"| VPB
 
-    VM -->|"Variables add/update<br/>排队后逐个提交"| VPB
-    VPB -->|"结果 / 超时 / 失败"| VM
-
-    PB <-->|"pickled duplex pipe<br/>result / variants"| W
-    W --> P
-    P --> S
-    S --> V
-    L -.->|"资源限制"| W
-
-    VPB <-->|"pickled duplex pipe<br/>assign 结果"| VW
-    VW --> VP
-    VP --> VS
+    PB <-->|"ScopeSnapshot / ScopeDelta<br/>ResultView / VariantView / PlotSpec"| CW
+    VPB <-->|"ScopeSnapshot / ScopeDelta<br/>ResultView"| VW
+    CW --> CP --> CS --> CV
+    VW --> VP --> VS
 
     VM -->|"结果/变体/History/keycap<br/>LaTeX + style"| TEXS
     TEXS <-->|"pickled pipe"| TEXW
     TEXS -->|"token: SVG + 尺寸"| VM
-    VM -->|"Variables 详情"| VARDET
     VM -->|"曲线 / 主题 / 交互"| PLOT
 ```
+
+生产路径的两个 worker 是有意分开的（B 方案）：变量编辑不必排在长计算后面，代价是变量
+worker 活跃时出现第二份 SymPy/`ScopeCache`。Store 是唯一变量权威；Calculator 与
+Variables 两个 worker 都只从 Store 的 snapshot/delta 重建自己的对象缓存。测试/headless
+仍可使用进程内 `Calculator` + `VariableManager` + `InlineBackend`，那不是生产路径。
 
 ### 1.2 逻辑数据流：Model 语义
 
@@ -137,7 +139,7 @@ flowchart TB
     end
 
     subgraph STATE["③' UI 状态（主线程）"]
-        C6["VariableManager<br/>快照字典 name → VariableEntry"]
+        C6["Store mirror: VariablesModel<br/>name → StoreEntry 字符串 + revision<br/>（legacy: VariableManager → VariableEntry）"]
     end
 
     subgraph OUT["④ 输出与消费点"]
@@ -145,7 +147,7 @@ flowchart TB
         D2["LatexRenderService → render_worker_main（进程）→ token<br/>latexSvgUrl / latexWidth / latexHeight → LatexImage"]
         D3["HistoryModel.add_item → 历史卡片"]
         D4["LogViewModel → LogPage"]
-        D5["VariablesModel.save → 变量表"]
+        D5["StoreEntryCandidate → Store delta → 变量表<br/>（legacy: VariablesModel.save）"]
         D6["warningOccurred → 遮蔽 sympy 名字的警告 Dialog"]
     end
 
@@ -168,8 +170,8 @@ flowchart TB
     C4 --> C5
     C2 -.->|"语法 / 域错误"| C5
 
-    C3 -->|"赋值：写回（跨进程）"| C6
-    C6 -.->|"StoreClient.snapshot() / legacy list_all()"| C1
+    C3 -->|"赋值：StoreEntryCandidate；legacy: value"| C6
+    C6 -.->|"Store snapshot/delta；legacy: list_all()"| C1
     C6 -.->|"is_sympy_builtin(name)"| D6
     B6 -->|"异步 finished / timedOut / failed"| R["ViewModel 分发"]
 
@@ -208,20 +210,23 @@ What the diagram is saying:
   one `assign` at a time, applies the answer when it arrives, and
   `variableAdded(name, ok)` drives the page's selection. The in-process
   `Calculator` remains only for tests/headless.
-- **`scope` is the second input channel.** `VariableManager.list_all()` (valid
-  entries only) is handed to `parse_expr` as `local_dict`, so saved variables
-  resolve as symbols; names that resolve to nothing stay symbolic.
+- **`scope` is the second input channel.** The production path passes a Store
+  `ScopeSnapshot`/`ScopeDelta`; valid entries only, so saved variables resolve as
+  symbols and names that resolve to nothing stay symbolic. The headless/legacy
+  path hands `VariableManager.list_all()` to `parse_expr` as `local_dict`.
 - **The write path is validated before anything happens.** `assign` rejects a bad
   target or a missing augmented-assignment target *before* evaluating, so a
   rejected write cannot leave a variable or a success log line behind. What it
   *does* leave is an error card in the history — marked as an error, never as a
   result — because the input is what the user needs in order to fix it.
-- **`Success.value` is the only output that flows back in.** Assign mode stores
-  the sympy object as a `VariableEntry`, and the next request reads it back
-  through `list_all()` — the closed loop in the middle of the diagram. The value
-  is passed through `sympy.simplify` before it leaves the model (`_simplified`),
-  so the store and the next evaluation see the simplified form; lists (`solve`'s
-  roots) are exempt, and the plot's `origin` is recorded before the pass.
+- **The write result is string-only in production.** The worker returns a
+  `StoreEntryCandidate`; the UI commits it to the Store, and the next request
+  reads the resulting snapshot/delta. In the headless/legacy path the value is
+  stored as a `VariableEntry` and read back through `list_all()`. In both cases
+  the value is passed through `sympy.simplify` before it leaves the model
+  (`_simplified`), so the store and the next evaluation see the simplified form;
+  lists (`solve`'s roots) are exempt, and the plot's `origin` is recorded before
+  the pass.
 - **Text and LaTeX are terminal.** `str(value)` feeds the result line and the
   clipboard; the LaTeX source feeds the rendered image and the history entry
   (which re-renders lazily on its own).
@@ -249,7 +254,7 @@ flowchart LR
 
     R -->|"Success.value"| V["sympy 对象"]
     V --> V1["str(value) → resultText<br/>结果区文字 + Copy result"]
-    V --> V2["_save_variable → VariableManager.save<br/>VariableEntry.obj → list_all() → 下一轮 scope"]
+    V --> V2["worker: StoreEntryCandidate → Store delta<br/>（legacy: VariableManager.save → list_all()）"]
     V --> V3["变量表第 2/3 列<br/>expr_str / classify_type"]
     V --> V4["worker: plot_programs.with_plot(value, origin)<br/>→ Success.plot: Program[]<br/>UI: Plot.add_program → PlotView"]
 
@@ -324,7 +329,13 @@ Assignment(target="y", op="+=", expression="2y")
 - The target is validated *first*, which is why an invalid name now produces
   nothing at all instead of "success in the history, absent in the table".
 
-## 5. `VariableManager` — a snapshot store, not a dependency graph
+## 5. Store entries and the legacy `VariableManager`
+
+The production Store stores **strings**, not objects: `name`, `srepr`, `display`,
+`type_label`, `latex`, `revision`, `valid` (`StoreEntry`). A snapshot/delta is
+what the Compute worker restores into its `ScopeCache`; the Store itself never
+imports SymPy. The `VariableManager` below is the in-process/headless fallback
+kept for tests and the legacy backend.
 
 - Entries are **snapshots**: an assignment stores the sympy object it evaluated
   to at that moment. Nothing is re-evaluated when the sources of an expression
@@ -341,9 +352,10 @@ Assignment(target="y", op="+=", expression="2y")
 
 **`python/model/*` never imports Qt.** Every call from the UI crosses a
 ViewModel first, and every result comes back as plain data. `main.py` is the
-composition root: it builds `MainViewModel`, wires the shared `Calculator` and
-`VariableManager` into the ViewModels, and registers them as flat QML context
-properties.
+composition root: it creates the Store worker, the two `ProcessBackend`s, and
+`MainViewModel`, then registers the viewmodels as flat QML context properties.
+The in-process `Calculator`/`VariableManager` are created only when the
+composition root omits `store_client` (tests/headless).
 
 The behaviour contract is locked by tests (no framework needed):
 

@@ -588,11 +588,14 @@ transparent corner, not `srgba(255,255,255,1)`.
   `MAX_SCOPE_HISTORY` mutation deltas. `CalculatorViewModel` asks
   `scope_for(backend.generation, sent_revision)`: a new worker generation or no confirmed
   revision gets a `ScopeSnapshot`; otherwise the history is merged into one `ScopeDelta`.
-  `ProcessBackend.generation` changes on every worker replacement (including an idle worker found
-  dead); a failed/timed-out/cancelled calculation resets the confirmed revision, so the next
-  request falls back to a snapshot. `StoreClient` likewise stops and replaces its worker after a
-  timeout or a mismatched reply, and records `last_error` / `timeout_count` for the log/status
-  surface instead of leaving the pipe one answer behind.
+  The Variables worker has its own `_write_scope_generation`/`_write_scope_revision`: its
+  first write gets a snapshot, later writes send only the deltas committed since the
+  revision it was sent, and a worker replacement (idle stop, timeout, crash) gets a fresh
+  snapshot. `ProcessBackend.generation` changes on every worker replacement (including an idle
+  worker found dead); a failed/timed-out/cancelled calculation resets the confirmed revision,
+  so the next request falls back to a snapshot. `StoreClient` likewise stops and replaces its
+  worker after a timeout or a mismatched reply, and records `last_error` / `timeout_count` for
+  the log/status surface instead of leaving the pipe one answer behind.
 - **One request at a time.** A new submission cancels the old worker, including a worker that is
   only waiting to deliver variants; `clear_result` does the same. The poll timer (2 ms) drains every
   ready message per tick (the renderer's queue is drained the same way), and a cancel that only

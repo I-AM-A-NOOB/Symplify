@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from .child_process import ChildProcess
+from .names import PLOTTING_NAMES
 from .store_worker import worker_main
 from .worker_protocol import (
     CommitRequest,
@@ -25,11 +26,6 @@ from .worker_protocol import (
     StoreEntryCandidate,
     StoreReply,
 )
-
-#: A fresh install shows the plotting names in the Variables table. Marking
-#: them here keeps the composition root free of SymPy; `plotting.PLOT_SYMBOLS`
-#: is the model's copy of the same two names.
-PLOTTING_NAMES = ("x", "y")
 
 
 class StoreClientError(RuntimeError):

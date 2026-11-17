@@ -66,6 +66,7 @@ from python.viewmodel.search import (
 from python.viewmodel.variables_viewmodel import VariablesModel
 from python.worker_protocol import (
     CommitRequest,
+    ResultView,
     ScopeDelta,
     ScopeSnapshot,
     StoreEntryCandidate,
@@ -782,6 +783,50 @@ def test_scope_for_sends_deltas_and_falls_back_to_snapshot():
     replaced = model.scope_for(1, 1)
     assert isinstance(replaced, ScopeSnapshot)
     assert replaced.revision == 1
+
+
+def test_variable_worker_uses_store_deltas_after_its_first_write():
+    """The Variables worker reuses its own scope cache, not a full snapshot."""
+    store = VariableStore()
+    backend = _FakeVariablesBackend()
+    model = VariablesModel(None, backend=backend, store=store)
+
+    assert model.add("a", "1") is True
+    first = backend.requests[0][3]
+    assert isinstance(first, ScopeSnapshot)
+    assert first.revision == 0
+
+    request_id = backend.requests[0][0]
+    backend.finished.emit(
+        request_id,
+        ResultView(
+            request_id=request_id,
+            expression="1",
+            text="1",
+            latex="",
+            is_error=False,
+            error_message="",
+            hint="",
+            variants=(),
+            plot=(),
+            scope_revision=0,
+            profile_id="default",
+            entry=StoreEntryCandidate(
+                name="a",
+                srepr="Integer(1)",
+                display="1",
+                type_label="Integer",
+                latex="a = 1",
+            ),
+        ),
+    )
+    assert store.entry("a").display == "1"
+
+    assert model.add("b", "2") is True
+    second = backend.requests[1][3]
+    assert isinstance(second, ScopeDelta)
+    assert (second.base_revision, second.revision) == (0, 1)
+    assert [change.name for change in second.changes] == ["a"]
 
 
 class RecordingInlineBackend(InlineBackend):

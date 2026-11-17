@@ -146,6 +146,10 @@ class VariablesModel(QAbstractTableModel):
         #: changed since the last revision it confirmed.
         self._scope_history: list[ScopeDelta] = []
         self._last_scope_generation: int | None = None
+        #: The Variables worker has its own scope cache; keep its generation and
+        #: last sent revision separate from the Calculator worker's.
+        self._write_scope_generation: int | None = None
+        self._write_scope_revision: int | None = None
         if backend is not None:
             backend.finished.connect(self._on_finished)
             backend.timedOut.connect(self._on_timed_out)
@@ -196,6 +200,10 @@ class VariablesModel(QAbstractTableModel):
         if generation != self._last_scope_generation or sent_revision is None:
             self._last_scope_generation = generation
             return self.scope_snapshot()
+        return self._scope_since(sent_revision)
+
+    def _scope_since(self, sent_revision: int):
+        """The smallest Store scope after ``sent_revision``, or a snapshot."""
         if sent_revision > self._revision:
             return self.scope_snapshot()
         if sent_revision == self._revision:
@@ -208,6 +216,24 @@ class VariablesModel(QAbstractTableModel):
             for change in delta.changes:
                 latest[change.name] = change
         return ScopeDelta(sent_revision, self._revision, tuple(latest.values()))
+
+    def _scope_for_write(self):
+        """The Variables worker's scope, reusing deltas between writes.
+
+        The write worker is a separate process with its own scope cache. It
+        starts with a snapshot; after that, only the Store changes since the
+        revision it was sent are transmitted. A worker replacement (idle stop,
+        timeout, crash) gets a fresh snapshot.
+        """
+        if self._store is None:
+            return self.scope_snapshot()
+        generation = int(getattr(self._backend, "generation", 0))
+        if (generation != self._write_scope_generation
+                or self._write_scope_revision is None):
+            self._write_scope_generation = generation
+            self._write_scope_revision = self._revision
+            return self.scope_snapshot()
+        return self._scope_since(self._write_scope_revision)
 
     def _remember_scope_delta(self, delta: ScopeDelta | None) -> None:
         if delta is None:
@@ -353,14 +379,21 @@ class VariablesModel(QAbstractTableModel):
             return
         request = self._queue.popleft()
         self._active = request
+        scope = self._scope_for_write()
+        sent_revision = getattr(scope, "revision", self._revision)
+        # Publish it before `submit`: a synchronous backend can answer and start
+        # the next queued write before this call returns.
+        self._write_scope_revision = sent_revision
         try:
             self._backend.submit(
                 request.request_id,
                 "variable",
                 Assignment(request.name, "=", request.text),
-                self.scope_snapshot(),
+                scope,
             )
         except Exception as exc:  # noqa: BLE001 - start failure is a write failure
+            # The worker may have been replaced or never received the scope.
+            self._write_scope_revision = None
             self._finish(
                 request.request_id,
                 ResultView(
@@ -731,6 +764,8 @@ class VariablesModel(QAbstractTableModel):
         self._keys = list(self._entries)
         self._scope_history.clear()
         self._last_scope_generation = None
+        self._write_scope_generation = None
+        self._write_scope_revision = None
         self.endResetModel()
         self.countChanged.emit()
 

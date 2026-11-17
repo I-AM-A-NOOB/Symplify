@@ -28,10 +28,12 @@ from typing import Any
 
 import sympy as sp
 
+from ..names import PLOTTING_NAMES
+
 #: The only names a plotted expression may leave free. ``x`` is the abscissa;
 #: ``y`` turns the result into the level set ``F(x, y) = 0`` (which is what a
 #: result *is* — an expression, not an equation).
-PLOT_SYMBOLS = ("x", "y")
+PLOT_SYMBOLS = PLOTTING_NAMES
 
 #: The same ceiling the LaTeX renderer applies (``latex_render.MAX_LATEX_CHARS``),
 #: for the same reason: the expression becomes generated text (GLSL and LaTeX
