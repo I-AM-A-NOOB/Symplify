@@ -35,6 +35,7 @@ QQC2.ItemDelegate {
     required property string op
     required property string expression
     required property string result
+    required property string canonicalInput
     required property string error
     //: The LaTeX *source*, for the copy menu — cheap, so it stays a role.
     required property string latex
@@ -497,6 +498,13 @@ QQC2.ItemDelegate {
             text: qsTr("Send result to input")
             enabled: !card.isError && card.result !== ""
             onTriggered: vm.sendToResult(card.mode, card.name, card.result)
+        }
+
+        MenuItem {
+            text: qsTr("Send normalized input")
+            enabled: card.canonicalInput !== ""
+            onTriggered: vm.sendToCanonical(
+                card.mode, card.name, card.op, card.canonicalInput)
         }
 
         MenuSeparator {}

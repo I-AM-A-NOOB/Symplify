@@ -69,14 +69,20 @@ class InlineBackend(QObject):
         scope: Mapping[str, Any] | ScopeSnapshot | ScopeDelta,
     ) -> None:
         """Evaluate now and emit the outcome before returning."""
+        canonical_input = ""
         try:
             self._calculator.set_parse_policy(self._parse_policy)
             scope_objects = self._scope.sync(scope)
+            canonical_source = getattr(payload, "expression", str(payload))
+            canonical_input = self._calculator.canonical_input(
+                canonical_source, scope_objects
+            )
             if kind == "evaluate":
                 result = self._calculator.evaluate(payload, scope_objects)
             else:
                 result = self._calculator.assign(payload, scope_objects)
         except Exception as exc:  # noqa: BLE001 - a crash is a report, not a raise
+            canonical_input = ""
             self.failed.emit(request_id, f"{type(exc).__name__}: {exc}")
         else:
             result = with_plot(result)
@@ -93,6 +99,7 @@ class InlineBackend(QObject):
                     scope_revision=self._scope.revision,
                     profile_id=self._parse_policy.profile_id,
                     entry=entry,
+                    canonical_input=canonical_input,
                 ),
             )
             variant_rows = ()

@@ -145,8 +145,10 @@ def test_result_view_round_trips_with_variants_and_a_plot_program():
         plot=(PlotSpec("f", "result", program),),
         scope_revision=4,
         profile_id="default",
+        canonical_input="diff(x ** 2, x)",
     )
     assert wire(original) == original
+    assert wire(original).canonical_input == "diff(x ** 2, x)"
     assert wire(original).plot[0].program == program
 
     failure = ResultView(

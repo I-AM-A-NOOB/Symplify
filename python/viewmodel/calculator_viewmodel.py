@@ -920,6 +920,7 @@ class CalculatorViewModel(QObject):
             self._history.add_item(
                 pending["expression"], self._result_text, "Code",
                 latex=result.latex,
+                canonical_input=result.canonical_input,
             )
         else:
             self._history.add_item(
@@ -929,6 +930,7 @@ class CalculatorViewModel(QObject):
                 latex=result.latex,
                 name=pending["name"],
                 op=pending["operator"],
+                canonical_input=result.canonical_input,
             )
             self._save_variable(pending["name"], result, legacy)
         self._log.add_info(f"= {result.text}", "Calculator")
@@ -951,6 +953,7 @@ class CalculatorViewModel(QObject):
             self._history.add_item(
                 pending["expression"], "", "Code",
                 error=self._format_failure(failure),
+                canonical_input=failure.canonical_input,
             )
         else:
             self._history.add_item(
@@ -960,6 +963,7 @@ class CalculatorViewModel(QObject):
                 name=pending["name"],
                 op=pending["operator"],
                 error=self._format_failure(failure),
+                canonical_input=failure.canonical_input,
             )
         self._log.add_error(f"Error: {failure.error_message}", "Calculator")
 

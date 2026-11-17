@@ -134,7 +134,7 @@ python/
     inline_backend.py           #   InlineBackend (synchronous, legacy Success/Failure): tests
                                 #   and headless only; imported lazily when no backend is given.
     main_viewmodel.py           #   Root VM; aggregates children; signals sendToCode/sendToAssign/
-                                #   sendToResult (the canonical result text after a parser change).
+                                #   sendToResult/sendToCanonical (text fallbacks after a parser change).
     calculator_viewmodel.py      #   Result state, input persistence, clear_result, the `variants`
                                 #   rows, and the qmlmathplot.Plot (curves, legend, theme, error)
     latex_service.py             #   LatexRenderService: one spawned renderer (sandboxed, with a
@@ -978,11 +978,14 @@ transparent corner, not `srgba(255,255,255,1)`.
   `card.error` is `undefined`, and `card.error !== ""` marks **every** card as an error (the only
   clue is `Unable to assign [undefined] to QString` in the console).
 - **The result text is a second restore path.** The history card's menu keeps *Send to input*
-  (the original text, so the user can fix it under the current parser policy) and adds *Send result
-  to input*: the canonical result string is sent to Code mode, or to the same name as `name =
-  result` in Assign mode. It is disabled for error cards and empty results. This is the fallback
-  for a source written under transformations the user has since disabled — results use explicit
-  `**`/`*`/function calls and remain parseable.
+  (the original text, so the user can fix it under the current parser policy), adds *Send result
+  to input* (the canonical result string goes to Code mode, or to the same name as `name =
+  result` in Assign mode), and *Send normalized input* (`ResultView.canonical_input`, generated
+  in the worker). *Normalized input* is the original expression with parser syntax made explicit
+  (`2x` -> `2*x`, `x^2` -> `x**2`, `sin x` -> `sin(x)`) while calls such as `integrate` stay
+  unevaluated; it is the right fallback when the original text no longer parses but its computed
+  result is not what the user wants to continue editing. Both fallback actions are disabled when
+  their string is empty; normalized input can also be sent for an error card.
 - **A `ListView` has no `moveCurrentIndexUp/Down()`** — those methods belong to `GridView`; calling
   them on a ListView throws `TypeError: Property 'moveCurrentIndexDown' ... is not a function`. A
   ListView moves with `incrementCurrentIndex()` / `decrementCurrentIndex()`, which **clamp** at the
@@ -1908,7 +1911,8 @@ One lexer, one span list, two renderers. Anything that colours code contributes 
   disabled `convert_xor` makes bare `^` fail rather than mean XOR (the AST gate rejects BitXor), and
   a disabled `implicit_multiplication` makes `2x` fail. Existing variables are unaffected: the Store
   holds `srepr`, and the Compute cache restores objects, so a policy change only affects new text.
-  History keeps the original text plus the *Send result* fallback (see History).
+  History keeps the original text, a *Send result* fallback, and a worker-generated normalized
+  input (explicit `*`/`**`/calls, no evaluation) for continuing an expression after a policy change.
 - Character classes come from Python itself (`str.isidentifier` to continue a name, **`isdecimal`**
   for digits — never `isalnum`/`isdigit`, which accept superscripts). The parser tokenizes with
   Python's tokenizer, so this agrees with it for free.

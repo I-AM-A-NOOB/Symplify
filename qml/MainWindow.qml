@@ -553,6 +553,20 @@ FluentWindow {
             navigationView.push(Qt.resolvedUrl("pages/CalculatorPage.qml"))
         }
 
+        function onSendToCanonical(mode, name, op, expression) {
+            if (mode === "Assign") {
+                calcVM.assignName = name
+                calcVM.assignOperator = op
+                calcVM.assignValue = expression
+                calcVM.inputMode = 1
+            } else {
+                calcVM.inputText = expression
+                calcVM.inputMode = 0
+            }
+            calcVM.clear_result()
+            navigationView.push(Qt.resolvedUrl("pages/CalculatorPage.qml"))
+        }
+
         function onKeyboardLoadErrorChanged() {
             showKeyboardLoadError()
         }

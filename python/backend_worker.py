@@ -91,11 +91,20 @@ def worker_main(connection: Any) -> None:
                 # revision says changed; a bad sync is reported like any other
                 # internal failure and leaves the cache untouched.
                 scope_objects = scope_cache.sync(scope)
+                canonical_source = (
+                    payload.expression
+                    if isinstance(payload, Assignment)
+                    else str(payload)
+                )
+                canonical_input = calculator.canonical_input(
+                    canonical_source, scope_objects
+                )
                 if kind == "evaluate":
                     result = calculator.evaluate(payload, scope_objects)
                 else:
                     result = calculator.assign(payload, scope_objects)
             except Exception as exc:  # noqa: BLE001 - report, never escape
+                canonical_input = ""
                 expression = (
                     payload.expression
                     if isinstance(payload, Assignment)
@@ -114,6 +123,7 @@ def worker_main(connection: Any) -> None:
                 view = result_view(
                     result, request_id, scope_revision=scope_cache.revision,
                     profile_id=profile_id, entry=candidate,
+                    canonical_input=canonical_input,
                 )
                 try:
                     connection.send((request_id, "result", view, ()))
@@ -128,6 +138,7 @@ def worker_main(connection: Any) -> None:
             view = result_view(
                 result, request_id, scope_revision=scope_cache.revision,
                 profile_id=profile_id, entry=candidate,
+                canonical_input=canonical_input,
             )
             try:
                 connection.send((request_id, "result", view, ()))

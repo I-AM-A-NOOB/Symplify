@@ -187,6 +187,35 @@ def test_parser_settings_reach_new_requests():
     assert vm.calculator.resultText == "x**2"
 
 
+def test_canonical_input_normalizes_syntax_without_evaluating():
+    calculator = Calculator()
+    canonical = calculator.canonical_input("2x + x^2")
+    assert canonical == "2 * x + x ** 2"
+    assert calculator.canonical_input("x!") == "factorial(x)"
+    assert calculator.canonical_input("sin(x)") == "sin(x)"
+
+    integral = calculator.canonical_input("integrate(x**2, x)")
+    assert integral == "integrate(x ** 2, x)"
+    assert "x ** 3 / 3" not in integral
+
+    no_implicit = Calculator(policy_from_options({
+        **default_options(), "implicit_multiplication": False,
+    }))
+    assert no_implicit.canonical_input("2x") == ""
+
+
+def test_history_keeps_canonical_input_separate_from_result():
+    history = HistoryModel()
+    history.add_item(
+        "integrate(x**2, x)", "x**3/3", "Code",
+        canonical_input="integrate(x ** 2, x)",
+    )
+    index = history.index(0, 0)
+    assert history.data(index, history.CanonicalInputRole) == \
+        "integrate(x ** 2, x)"
+    assert history.data(index, history.ResultRole) == "x**3/3"
+
+
 def test_unknown_symbol_stays_symbolic():
     assert ok("z + 1") == Symbol("z") + 1
 

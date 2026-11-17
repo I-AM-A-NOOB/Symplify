@@ -249,6 +249,69 @@ def _safe_parse_expr(text: str, local_dict: dict, transformations: tuple) -> Any
             local_dict[name] = null
 
 
+class _CanonicalAst(ast.NodeTransformer):
+    """Turn parsed token wrappers back into editable, explicit expression text.
+
+    ``stringify_expr`` turns names into ``Symbol('x')`` and numbers into
+    ``Integer(2)`` before the parser evaluates the code. Keeping those wrappers
+    in a canonical-input string would be valid, but unreadable. This transformer
+    unwraps the wrappers only; it never evaluates the tree and leaves function
+    calls (``integrate``, ``sin``, ``factorial``) intact.
+    """
+
+    @staticmethod
+    def _name(value: str) -> ast.Name | None:
+        if (value.isidentifier() and not keyword.iskeyword(value)
+                and not value.startswith("__")):
+            return ast.Name(id=value, ctx=ast.Load())
+        return None
+
+    def visit_Call(self, node: ast.Call):
+        self.generic_visit(node)
+        if not isinstance(node.func, ast.Name) or node.keywords:
+            return node
+        name = node.func.id
+        if name in {"Symbol", "Dummy", "Wild", "Function"} and len(node.args) == 1:
+            argument = node.args[0]
+            if isinstance(argument, ast.Constant) and isinstance(argument.value, str):
+                converted = self._name(argument.value)
+                if converted is not None:
+                    return ast.copy_location(converted, node)
+        if name == "Integer" and len(node.args) == 1:
+            argument = node.args[0]
+            if isinstance(argument, ast.Constant) and isinstance(argument.value, int):
+                return ast.copy_location(ast.Constant(argument.value), node)
+        if name == "Float" and len(node.args) == 1:
+            argument = node.args[0]
+            if isinstance(argument, ast.Constant):
+                try:
+                    return ast.copy_location(ast.Constant(float(argument.value)), node)
+                except (TypeError, ValueError):
+                    return node
+        return node
+
+
+def _canonical_input(text: str, local_names: set[str], transformations: tuple) -> str:
+    """Return the parser's syntax-normalized view of ``text``, or ``""``.
+
+    This deliberately runs ``stringify_expr`` and only AST formatting. It does
+    not call the calculator, so ``integrate(x**2, x)`` stays an unevaluated
+    ``integrate(x**2, x)`` rather than becoming ``x**3/3``.
+    """
+    source = text.strip()
+    if not source:
+        return ""
+    local_dict = {name: sympy.Symbol(name) for name in local_names}
+    try:
+        code = stringify_expr(source, local_dict, _parser_globals(), transformations)
+        tree = ast.parse(code, mode="eval")
+        tree = _CanonicalAst().visit(tree)
+        ast.fix_missing_locations(tree)
+        return ast.unparse(tree)
+    except (SyntaxError, TypeError, ValueError, KeyError):
+        return ""
+
+
 @dataclass(frozen=True)
 class Success:
     """A request that produced a value.
@@ -407,6 +470,19 @@ class Calculator:
         self.transformations = tuple(
             _TRANSFORMATIONS[name] for name in policy.transformations
         )
+
+    def canonical_input(
+        self, expression: str, scope: Mapping[str, Any] | None = None
+    ) -> str:
+        """The input text with parser conveniences made explicit, or ``""``.
+
+        This is a display/edit aid, not a result: it preserves calls such as
+        ``integrate`` and only normalizes syntax (``2x`` -> ``2*x``,
+        ``x^2`` -> ``x**2``, ``sin x`` -> ``sin(x)``). It never evaluates the
+        expression, so it cannot be derived from ``Success.value``.
+        """
+        names = set(scope) if scope else set()
+        return _canonical_input(expression, names, self.transformations)
 
     def evaluate(
         self, expression: str, scope: Mapping[str, Any] | None = None

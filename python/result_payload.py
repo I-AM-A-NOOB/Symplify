@@ -40,6 +40,7 @@ def result_view(
     scope_revision: int = 0,
     profile_id: str = "default",
     entry: StoreEntryCandidate | None = None,
+    canonical_input: str = "",
 ) -> ResultView:
     """One result as the UI-facing DTO (no SymPy object)."""
     if isinstance(result, Success):
@@ -56,6 +57,7 @@ def result_view(
             scope_revision=scope_revision,
             profile_id=profile_id,
             entry=entry,
+            canonical_input=canonical_input,
         )
     return ResultView(
         request_id=request_id,
@@ -70,6 +72,7 @@ def result_view(
         scope_revision=scope_revision,
         profile_id=profile_id,
         error_kind=result.kind.name,
+        canonical_input=canonical_input,
     )
 
 

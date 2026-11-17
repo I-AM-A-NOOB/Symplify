@@ -613,6 +613,9 @@ class ResultView:
     #: An assignment's string-only Store candidate. ``None`` for a read or a
     #: failure; the UI commits it and never touches the SymPy value.
     entry: StoreEntryCandidate | None = None
+    #: Syntax-normalized input text, generated in the worker for History's
+    #: Send-normalized action. Empty when the input cannot be normalized.
+    canonical_input: str = ""
 
     def __post_init__(self) -> None:
         _as_int(self.request_id, "request_id")
@@ -642,6 +645,8 @@ class ResultView:
             raise ProtocolError("error_kind must be a string")
         if self.entry is not None and not isinstance(self.entry, StoreEntryCandidate):
             raise ProtocolError("entry must be a StoreEntryCandidate or None")
+        if not isinstance(self.canonical_input, str):
+            raise ProtocolError("canonical_input must be a string")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -659,6 +664,7 @@ class ResultView:
             "profile_id": self.profile_id,
             "error_kind": self.error_kind,
             "entry": None if self.entry is None else self.entry.to_dict(),
+            "canonical_input": self.canonical_input,
         }
 
     @classmethod
@@ -681,6 +687,7 @@ class ResultView:
             profile_id=_text(data, "profile_id", default="default", allow_empty=False),
             error_kind=_text(data, "error_kind", default=""),
             entry=None if entry is None else StoreEntryCandidate.from_dict(entry),
+            canonical_input=_text(data, "canonical_input", default=""),
         )
 
 

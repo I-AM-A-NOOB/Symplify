@@ -56,6 +56,9 @@ class MainViewModel(QObject):
     #: result whose source text no longer parses under the current policy.
     #: Args: mode, name, result.
     sendToResult = Signal(str, str, str)
+    #: Restore the canonical input text (syntax normalized, still unevaluated).
+    #: Args: mode, name, operator, canonical expression.
+    sendToCanonical = Signal(str, str, str, str)
     #: `keyboardRevision` changed: LaTeX keycaps must ask for new artwork.
     keyboardStyleChanged = Signal()
     #: A batch of keycap artwork arrived (a QML binding dependency: the cache

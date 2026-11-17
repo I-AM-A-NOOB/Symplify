@@ -40,6 +40,8 @@ class HistoryItem:
         name: Assignment target variable ("" for code entries).
         op: Assignment operator ("=", "+=", ...; "=" for code entries).
         latex: LaTeX source of the result (for rendering and copying).
+        canonical_input: Syntax-normalized input text, kept for the
+            Send-normalized action; empty when it could not be generated.
         svg_url: Cached rendered SVG data URL; rendered lazily.
         requested: True while this item's render is queued or running.
         created: Wall-clock time of the entry. Must be a ``default_factory``:
@@ -54,6 +56,7 @@ class HistoryItem:
     name: str = ""
     op: str = "="
     latex: str = ""
+    canonical_input: str = ""
     svg_url: str | None = None
     natural_w: int = 0
     natural_h: int = 0
@@ -64,10 +67,10 @@ class HistoryItem:
 class HistoryModel(QAbstractListModel):
     """List model of calculation history entries.
 
-    Roles: mode / name / op / expression / result / error / latexUrl / latex /
-    time. ``latexUrl`` is a cache lookup; the view queues the artwork through
-    ``requestLatex`` and receives it later via ``dataChanged``. ``error`` is
-    non-empty exactly for the entries whose request failed.
+    Roles: mode / name / op / expression / result / error / canonicalInput /
+    latexUrl / latex / time. ``latexUrl`` is a cache lookup; the view queues the
+    artwork through ``requestLatex`` and receives it later via ``dataChanged``.
+    ``error`` is non-empty exactly for the entries whose request failed.
 
     The list is bounded: an entry past ``MAX_HISTORY_ENTRIES`` evicts the oldest
     one, releasing its rendered SVG with it. History is a session buffer, not a
@@ -90,6 +93,7 @@ class HistoryModel(QAbstractListModel):
     NaturalHeightRole = Qt.UserRole + 9
     TimeRole = Qt.UserRole + 10
     ErrorRole = Qt.UserRole + 11
+    CanonicalInputRole = Qt.UserRole + 12
 
     countChanged = Signal()
 
@@ -120,6 +124,7 @@ class HistoryModel(QAbstractListModel):
             self.ExpressionRole: b"expression",
             self.ResultRole: b"result",
             self.ErrorRole: b"error",
+            self.CanonicalInputRole: b"canonicalInput",
             self.LatexUrlRole: b"latexUrl",
             self.LatexRole: b"latex",
             self.NaturalWidthRole: b"naturalWidth",
@@ -148,6 +153,8 @@ class HistoryModel(QAbstractListModel):
             return item.result
         if role == self.ErrorRole:
             return item.error
+        if role == self.CanonicalInputRole:
+            return item.canonical_input
         if role == self.LatexUrlRole:
             # Not `self._svg_url(...)`: rendering here would make every read — and
             # so every delegate that is built — render its entry. The view asks for
@@ -239,7 +246,7 @@ class HistoryModel(QAbstractListModel):
 
     def add_item(self, expression: str, result: str, mode: str = "Code",
                  latex: str = "", name: str = "", op: str = "=",
-                 error: str = "") -> None:
+                 error: str = "", canonical_input: str = "") -> None:
         """Insert a history entry at the TOP of the list.
 
         ``error`` marks a failed request: the card then shows the failure text
@@ -263,6 +270,7 @@ class HistoryModel(QAbstractListModel):
                 name=name,
                 op=op,
                 latex=latex,
+                canonical_input=canonical_input,
             ),
         )
         self.endInsertRows()
