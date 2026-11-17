@@ -82,6 +82,7 @@ class SettingsViewModel(
     fontsChanged = Signal()
     windowChanged = Signal()
     keyboardChanged = Signal()
+    layoutChanged = Signal()
     configChanged = Signal()
     latexSizeChanged = Signal()
     latexFontErrorChanged = Signal()
@@ -323,6 +324,30 @@ class SettingsViewModel(
     def _get_warning(self) -> str:
         return self._store.warning
 
+    def _get_input_panel_width(self) -> int:
+        return int(self._store.get("workspace.input_width"))
+
+    def _set_input_panel_width(self, width: int) -> None:
+        self._store.set("workspace.input_width", width)
+        self.layoutChanged.emit()
+        self.changed.emit()
+
+    def _get_result_share(self) -> float:
+        return float(self._store.get("workspace.result_share"))
+
+    def _set_result_share(self, share: float) -> None:
+        self._store.set("workspace.result_share", share)
+        self.layoutChanged.emit()
+        self.changed.emit()
+
+    def _get_keyboard_collapsed(self) -> bool:
+        return bool(self._store.get("workspace.keyboard_collapsed"))
+
+    def _set_keyboard_collapsed(self, collapsed: bool) -> None:
+        self._store.set("workspace.keyboard_collapsed", bool(collapsed))
+        self.layoutChanged.emit()
+        self.changed.emit()
+
     @Slot()
     def openConfigFolder(self) -> None:
         """Open the folder holding the settings file."""
@@ -350,6 +375,7 @@ class SettingsViewModel(
         self.fontsChanged.emit()
         self.windowChanged.emit()
         self.keyboardChanged.emit()
+        self.layoutChanged.emit()
         self.parseSettingsChanged.emit()
         self.configChanged.emit()
         self.changed.emit()
@@ -503,6 +529,18 @@ class SettingsViewModel(
     startupHeight = Property(int, WindowSettings._get_startup_height, constant=True)
     configPath = Property(str, _get_config_path, constant=True)
     configMode = Property(str, _get_config_mode, constant=True)
+    inputPanelWidth = Property(
+        int, _get_input_panel_width, _set_input_panel_width,
+        notify=layoutChanged,
+    )
+    resultShare = Property(
+        float, _get_result_share, _set_result_share,
+        notify=layoutChanged,
+    )
+    keyboardCollapsed = Property(
+        bool, _get_keyboard_collapsed, _set_keyboard_collapsed,
+        notify=layoutChanged,
+    )
     # `warning` notifies on `changed`, not on `configChanged`: the store raises it
     # from inside a *write*, and every setter emits `changed`, so the row appears
     # the moment a save fails. `configChanged` is the reset's announcement of the

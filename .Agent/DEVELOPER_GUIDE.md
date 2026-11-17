@@ -1630,8 +1630,20 @@ mode hides the input and most chrome, and the window-level side of it lives in
   result pane's slim top row owns the progress ring and the ready/timed out/
   failed text. The copy actions sit beside that status because they act on the
   result; the page toolbar is for the page's global actions.
-- **The outer splitter width and the result share are not persisted yet.** They
-  are live page state and reset with the page; persistence is roadmap P3.
+- **Small windows switch to Result/Plot tabs.** Below `620px` window height
+  `page.tabbedPanes` is true while a plot exists; a small `Segmented` row names
+  Result and Plot, only the selected pane is visible, and the divider is hidden.
+  This is the static fallback that avoids squeezing both panes and the
+  frame-by-frame plot resize qmlmathplot cannot take. The page's
+  `smallPaneIndex` selects the pane; the tab row is not persisted.
+- **The outer splitter width, result share and keyboard collapse persist.** The
+  page binds `SettingsViewModel.inputPanelWidth` / `resultShare` /
+  `keyboardCollapsed` (keys `workspace.input_width`, `workspace.result_share`,
+  `workspace.keyboard_collapsed`). Input width and result share are written
+  through 250ms debounce timers after drags/resizes, so a drag does not write
+  YAML per frame. The keyboard's collapse button toggles the Calculator
+  viewmodel immediately and writes the same setting; the panel collapses to its
+  54px toolbar and the key grid/tab row are hidden.
 - **The empty result pane carries a watermark with two kinds**
   (`workspace.result_watermark`, a writable `SettingsViewModel.resultWatermark`
   property): `icon` (default) draws the app's Σ monogram, `random` picks one
@@ -2241,7 +2253,7 @@ backdrop floats up from 10px below while fading in, and carries the page's own t
   values fall back or clamp, writes are atomic (temp file + `os.replace`), and a read-only location
   degrades to in-memory values with a warning the page displays. Keys:
   `appearance.theme|language|backdrop|accent|accent_mode|accent_shading|accent_os_shading`,
-  `workspace.code_theme|bracket_mode|bracket_colors|code_family|code_size|keyboard_family|keyboard_size|latex_font|latex_size|keyboard_layout|zen_fullscreen`,
+  `workspace.code_theme|bracket_mode|bracket_colors|code_family|code_size|keyboard_family|keyboard_size|latex_font|latex_size|keyboard_layout|zen_fullscreen|input_width|result_share|keyboard_collapsed`,
   `parser.factorial_notation|split_symbols|implicit_multiplication|convert_xor|implicit_application|function_exponentiation`,
   `window.remember|width|height|x|y|maximized`. The page groups them under the subtitles
   **Language / Interface / Workspace / Calculation / Settings file / About**, and a group is its

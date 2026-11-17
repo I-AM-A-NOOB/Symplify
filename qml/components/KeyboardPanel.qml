@@ -23,6 +23,8 @@ Rectangle {
 
     //: A different layout may have fewer tabs; start it at the first one rather
     //: than leaving the bar on an index that no longer exists.
+    readonly property bool collapsed: calcVM.keyboardCollapsed
+    Component.onCompleted: calcVM.keyboardCollapsed = settingsVM.keyboardCollapsed
     Connections {
         target: vm
 
@@ -38,7 +40,7 @@ Rectangle {
     border.width: 0
     // The 240px card grew by the toolbar (34) and its gap (8), so the key
     // rows keep the height they had before the cursor buttons existed.
-    implicitHeight: 290
+    implicitHeight: collapsed ? 54 : 290
 
     ColumnLayout {
         anchors.fill: parent
@@ -54,13 +56,13 @@ Rectangle {
         RowLayout {
             Layout.fillWidth: true
             Layout.preferredHeight: 34
-            spacing: 6
+            spacing: 2
 
             Rin.ToggleButton {
                 id: shiftButton
 
                 objectName: "keyboardShift"
-                Layout.preferredWidth: 34
+                Layout.preferredWidth: 30
                 Layout.preferredHeight: 34
                 Layout.alignment: Qt.AlignVCenter
                 //: Flat while off, a normal Accent ToggleButton while locked.
@@ -81,7 +83,7 @@ Rectangle {
 
             Rin.Button {
                 objectName: "keyboardCursorLeft"
-                Layout.preferredWidth: 34
+                Layout.preferredWidth: 30
                 Layout.preferredHeight: 34
                 Layout.alignment: Qt.AlignVCenter
                 flat: true
@@ -96,7 +98,7 @@ Rectangle {
 
             Rin.Button {
                 objectName: "keyboardCursorRight"
-                Layout.preferredWidth: 34
+                Layout.preferredWidth: 30
                 Layout.preferredHeight: 34
                 Layout.alignment: Qt.AlignVCenter
                 flat: true
@@ -116,7 +118,7 @@ Rectangle {
 
             Rin.Button {
                 objectName: "keyboardUndo"
-                Layout.preferredWidth: 34
+                Layout.preferredWidth: 30
                 Layout.preferredHeight: 34
                 Layout.alignment: Qt.AlignVCenter
                 flat: true
@@ -131,7 +133,7 @@ Rectangle {
 
             Rin.Button {
                 objectName: "keyboardRedo"
-                Layout.preferredWidth: 34
+                Layout.preferredWidth: 30
                 Layout.preferredHeight: 34
                 Layout.alignment: Qt.AlignVCenter
                 flat: true
@@ -148,7 +150,7 @@ Rectangle {
 
             Rin.Button {
                 objectName: "keyboardBackspace"
-                Layout.preferredWidth: 34
+                Layout.preferredWidth: 30
                 Layout.preferredHeight: 34
                 Layout.alignment: Qt.AlignVCenter
                 flat: true
@@ -160,6 +162,28 @@ Rectangle {
                 onClicked: root.backspacePressed()
                 Cmp.Tip { text: qsTr("Backspace") }
             }
+
+            Rin.Button {
+                id: collapseButton
+                objectName: "keyboardCollapse"
+                Layout.preferredWidth: 30
+                Layout.preferredHeight: 34
+                Layout.alignment: Qt.AlignVCenter
+                flat: true
+                focusPolicy: Qt.NoFocus
+                icon.name: root.collapsed
+                    ? "ic_fluent_chevron_up_20_regular"
+                    : "ic_fluent_chevron_down_20_regular"
+                onClicked: {
+                    calcVM.keyboardCollapsed = !calcVM.keyboardCollapsed
+                    settingsVM.keyboardCollapsed = calcVM.keyboardCollapsed
+                }
+                Cmp.Tip {
+                    text: root.collapsed
+                        ? qsTr("Expand keyboard")
+                        : qsTr("Collapse keyboard")
+                }
+            }
         }
 
         // Tab row: the gallery's home-row scrolling — wheel pans the row, no
@@ -169,6 +193,7 @@ Rectangle {
         Item {
             Layout.fillWidth: true
             Layout.preferredHeight: 40
+            visible: !root.collapsed
 
             Cmp.HScrollView {
                     id: tabScroll
@@ -304,6 +329,7 @@ Rectangle {
             id: keyGrid
             Layout.fillWidth: true
             Layout.fillHeight: true
+            visible: !root.collapsed
 
             readonly property var tab:
                 vm.keyboardTabs[root.currentTabIndex] || ({})

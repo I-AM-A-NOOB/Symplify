@@ -104,6 +104,11 @@ DEFAULTS: dict[str, Any] = {
         # Enter Windows full screen when Zen mode starts. Off keeps the window
         # frame and just hides the calculator chrome.
         "zen_fullscreen": False,
+        # Calculator layout: the input pane width, the result/plot ratio and
+        # whether the on-screen keyboard is collapsed.
+        "input_width": 320,
+        "result_share": 0.5,
+        "keyboard_collapsed": False,
         # The empty result pane's watermark: "icon" (the app's Σ monogram,
         # tinted neutral) or "random" (a random item from the pool drawn in the
         # result ink).
@@ -145,6 +150,7 @@ _CLAMPS = {
     "workspace.code_size": (6, 72),
     "workspace.keyboard_size": (6, 72),
     "workspace.latex_size": (8, 96),
+    "workspace.input_width": (280, 640),
     "window.width": (860, 20000),
     "window.height": (560, 20000),
 }
@@ -171,6 +177,9 @@ _KNOWN_KEYS = (
     "workspace.latex_size",
     "workspace.keyboard_layout",
     "workspace.zen_fullscreen",
+    "workspace.input_width",
+    "workspace.result_share",
+    "workspace.keyboard_collapsed",
     "workspace.result_watermark",
     "workspace.result_watermark_pool",
     "window.remember",
@@ -450,7 +459,14 @@ class SettingsStore:
                 return int(value)
             except (TypeError, ValueError):
                 return None
+        if key == "workspace.result_share":
+            try:
+                share = float(value)
+            except (TypeError, ValueError):
+                return default
+            return max(0.0, min(1.0, share))
         if key in ("workspace.zen_fullscreen",
+                   "workspace.keyboard_collapsed",
                    "window.maximized", "window.remember",
                    "appearance.accent_shading",
                    "appearance.accent_os_shading"):

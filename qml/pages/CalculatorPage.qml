@@ -12,7 +12,7 @@ Item {
     //: compact copy buttons, plus a readable width where the copy labels fit.
     //: The plot takes a fixed share when it sits beside the result and the spare
     //: height when it sits below it.
-    readonly property int inputPanelWidth: 320
+    readonly property int inputPanelWidth: settingsVM.inputPanelWidth
     readonly property int resultPaneMinWidth: 270
     readonly property int resultPaneReadableWidth: 340
     readonly property int resultPaneMinHeight: 140
@@ -35,7 +35,43 @@ Item {
     //: One ratio for both orientations. Dragging the result/plot divider writes
     //: it; rotating the layout reads it back, so the panes keep their relative
     //: share instead of snapping to a default.
-    property real resultShare: 0.5
+    property real resultShare: settingsVM.resultShare
+    property real pendingResultShare: 0.5
+    property real pendingInputWidth: 0
+
+    onResultShareChanged: {
+        if (Math.abs(resultShare - settingsVM.resultShare) > 0.0001) {
+            pendingResultShare = resultShare
+            resultShareSaveTimer.restart()
+        }
+    }
+
+    function scheduleInputWidth(width) {
+        if (width < 280)
+            return
+        if (Math.round(width) !== settingsVM.inputPanelWidth) {
+            pendingInputWidth = width
+            inputWidthSaveTimer.restart()
+        }
+    }
+
+    Timer {
+        id: resultShareSaveTimer
+        interval: 250
+        onTriggered: settingsVM.resultShare = pendingResultShare
+    }
+
+    Timer {
+        id: inputWidthSaveTimer
+        interval: 250
+        onTriggered: settingsVM.inputPanelWidth =
+            Math.round(pendingInputWidth)
+    }
+
+    //: Below this window height the side-by-side result/plot split squeezes
+    //: both panes; show one at a time behind a small tab row instead.
+    readonly property bool tabbedPanes: calcVM.hasPlot && Window.height < 620
+    property int smallPaneIndex: 0
 
     //: The toolbar labels fit at this content width; below it the two copy
     //: actions become icon-only buttons with their words in tooltips.
@@ -47,6 +83,7 @@ Item {
     //: nothing to draw, so this is also false then.
     readonly property bool plotBesideResult:
         calcVM.hasPlot
+        && !tabbedPanes
         && resultArea.width >= resultPaneReadableWidth + plotPanePreferredWidth
                                 + paneHandleWidth
         && page.width / Math.max(1, page.height) >= 1.2
@@ -248,6 +285,7 @@ Item {
 
                 SplitView.preferredWidth: page.inputPanelWidth
                 SplitView.minimumWidth: 280
+                onWidthChanged: page.scheduleInputWidth(width)
             }
 
             // Right area: result and plot. The result/plot divider is one
@@ -270,6 +308,9 @@ Item {
                         Math.max(0, width - page.paneHandleWidth)
                     readonly property real verticalLength:
                         Math.max(0, height - page.paneHandleWidth)
+                    //: The small-window Result/Plot tabs occupy this strip.
+                    readonly property real tabbedHeaderHeight:
+                        page.tabbedPanes ? 40 : 0
                     //: While the 16ms decision timer runs, keep the *old*
                     //: orientation visible. Otherwise the bindings would already
                     //: show the new layout, then jump back to animate from it.
@@ -340,7 +381,7 @@ Item {
                     }
 
                     readonly property real resultWidth: {
-                        if (!calcVM.hasPlot)
+                        if (page.tabbedPanes || !calcVM.hasPlot)
                             return width
                         if (layoutPending)
                             return targetHorizontal
@@ -352,6 +393,8 @@ Item {
                         return start + (end - start) * layoutProgress
                     }
                     readonly property real resultHeight: {
+                        if (page.tabbedPanes)
+                            return Math.max(0, height - tabbedHeaderHeight)
                         if (!calcVM.hasPlot)
                             return height
                         if (layoutPending)
@@ -364,11 +407,34 @@ Item {
                         return start + (end - start) * layoutProgress
                     }
 
+                    Segmented {
+                        id: paneTabs
+
+                        visible: page.tabbedPanes
+                        anchors.top: parent.top
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        width: 220
+                        height: 32
+                        z: 2
+                        currentIndex: page.smallPaneIndex
+
+                        SegmentedItem {
+                            text: qsTr("Result")
+                            onClicked: page.smallPaneIndex = 0
+                        }
+                        SegmentedItem {
+                            text: qsTr("Plot")
+                            onClicked: page.smallPaneIndex = 1
+                        }
+                    }
+
                     ResultPane {
                         id: resultPane
 
+                        y: splitArea.tabbedHeaderHeight
                         width: splitArea.resultWidth
                         height: splitArea.resultHeight
+                        visible: !page.tabbedPanes || page.smallPaneIndex === 0
                     }
 
             //: The divider writes the one result share both orientations read.
@@ -377,7 +443,7 @@ Item {
             Rectangle {
                 id: plotHandle
 
-                visible: calcVM.hasPlot
+                visible: calcVM.hasPlot && !page.tabbedPanes
                 color: plotSplitHover.containsMouse
                     ? page.splitterHoverFill : "transparent"
                 x: splitArea.targetHorizontal ? resultPane.width : 0
@@ -441,18 +507,25 @@ Item {
             PlotPane {
                 id: plotPane
 
-                x: splitArea.targetHorizontal
-                    ? resultPane.width + page.paneHandleWidth : 0
-                y: splitArea.targetHorizontal
-                    ? 0 : resultPane.height + page.paneHandleWidth
-                width: splitArea.targetHorizontal
-                    ? Math.max(0, splitArea.width - resultPane.width
-                        - page.paneHandleWidth)
-                    : splitArea.width
-                height: splitArea.targetHorizontal
-                    ? splitArea.height
-                    : Math.max(0, splitArea.height - resultPane.height
-                        - page.paneHandleWidth)
+                visible: calcVM.hasPlot
+                    && (!page.tabbedPanes || page.smallPaneIndex === 1)
+                x: page.tabbedPanes ? 0
+                    : splitArea.targetHorizontal
+                        ? resultPane.width + page.paneHandleWidth : 0
+                y: page.tabbedPanes ? splitArea.tabbedHeaderHeight
+                    : splitArea.targetHorizontal
+                        ? 0 : resultPane.height + page.paneHandleWidth
+                width: page.tabbedPanes ? splitArea.width
+                    : splitArea.targetHorizontal
+                        ? Math.max(0, splitArea.width - resultPane.width
+                            - page.paneHandleWidth)
+                        : splitArea.width
+                height: page.tabbedPanes
+                    ? Math.max(0, splitArea.height - splitArea.tabbedHeaderHeight)
+                    : splitArea.targetHorizontal
+                        ? splitArea.height
+                        : Math.max(0, splitArea.height - resultPane.height
+                            - page.paneHandleWidth)
             }
                     }
                 }

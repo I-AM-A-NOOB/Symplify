@@ -57,14 +57,9 @@ header, so neither toolbar covers the graph. The title-bar **Zen** control hides
 the input, most of the toolbar and the navigation bar, and can optionally use
 full screen with the window frame hidden (Settings → Workspace → *Full screen in
 Zen mode*); a top-edge strip restores Exit Zen in full screen. `F11` toggles
-full screen in any mode. The remaining work is:
-
-- **P1 — finish the keyboard.** Its undo/redo sit beside the cursor keys; the
-  on-screen keyboard still needs its own collapse control.
-- **P2 — small-window fallback.** When height is short, turn the right area into
-  `Result` / `Plot` tabs instead of squeezing both.
-- **P3 — remember layout state.** Persist the outer splitter width, the
-  result/plot ratio and the keyboard collapsed state across sessions.
+full screen in any mode. The workspace now includes the keyboard collapse
+control (P1), Result/Plot tabs for short windows (P2), and persisted input width,
+result/plot ratio and keyboard collapsed state (P3).
 
 ### Editor and language
 
@@ -73,10 +68,11 @@ full screen in any mode. The remaining work is:
   stable expression language and a completion service over the existing backend
   boundary; the Variables page's synchronous inline edit is a prerequisite to
   move through the same path.
-- **Parser switches in Settings.** Expose a small set of named semantic choices
-  (for example `^` as power vs XOR, implicit multiplication) rather than raw
-  `parse_expr` kwargs. The lexer, highlighting, bracket pairing and diagnostics
-  must follow the same rules, with migration notes for stored expressions.
+- **Parser switches in Settings (implemented).** Calculation exposes the
+  allowlisted syntax choices (`^` as power, implicit multiplication, implicit
+  application, function exponentiation, split symbols, factorial notation).
+  Existing values stay `srepr`-backed and are independent of the policy; History
+  keeps the original input plus *Send result* / *Send normalized input* fallbacks.
 
 ### AI assistance
 

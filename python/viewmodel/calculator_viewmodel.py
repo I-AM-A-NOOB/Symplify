@@ -68,6 +68,7 @@ class CalculatorViewModel(QObject):
     """
 
     inputModeChanged = Signal()
+    keyboardCollapsedChanged = Signal()
     inputTextChanged = Signal()
     assignInputChanged = Signal()
     resultChanged = Signal()
@@ -113,6 +114,7 @@ class CalculatorViewModel(QObject):
         self._log = log
         self._variables_model = variables_model
         self._input_mode = InputMode.CODE
+        self._keyboard_collapsed = False
         self._input_text = ""
         self._assign_name = ""
         self._assign_operator = "="
@@ -220,6 +222,16 @@ class CalculatorViewModel(QObject):
         if new_mode != self._input_mode:
             self._input_mode = new_mode
             self.inputModeChanged.emit()
+
+    def _get_keyboard_collapsed(self) -> bool:
+        return self._keyboard_collapsed
+
+    def _set_keyboard_collapsed(self, collapsed: bool) -> None:
+        """Collapse the keyboard to its toolbar without losing the page."""
+        collapsed = bool(collapsed)
+        if collapsed != self._keyboard_collapsed:
+            self._keyboard_collapsed = collapsed
+            self.keyboardCollapsedChanged.emit()
 
     def _get_input_text(self) -> str:
         return self._input_text
@@ -492,6 +504,10 @@ class CalculatorViewModel(QObject):
 
     inputMode = Property(
         int, _get_input_mode, _set_input_mode, notify=inputModeChanged
+    )
+    keyboardCollapsed = Property(
+        bool, _get_keyboard_collapsed, _set_keyboard_collapsed,
+        notify=keyboardCollapsedChanged,
     )
     inputText = Property(str, _get_input_text, _set_input_text, notify=inputTextChanged)
     assignName = Property(

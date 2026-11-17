@@ -119,6 +119,28 @@ def test_parser_settings_are_defaults_and_round_trip():
     assert reloaded.get("parser.convert_xor") is True
 
 
+def test_layout_settings_round_trip_and_clamp():
+    path = temp_dir() / CONFIG_FILENAME
+    store = store_at(path)
+    assert store.get("workspace.input_width") == 320
+    assert store.get("workspace.result_share") == 0.5
+    assert store.get("workspace.keyboard_collapsed") is False
+
+    store.update({
+        "workspace.input_width": 420,
+        "workspace.result_share": 0.25,
+        "workspace.keyboard_collapsed": True,
+    })
+    reloaded = store_at(path)
+    assert reloaded.get("workspace.input_width") == 420
+    assert reloaded.get("workspace.result_share") == 0.25
+    assert reloaded.get("workspace.keyboard_collapsed") is True
+
+    assert reloaded.set("workspace.input_width", 100) == 280
+    assert reloaded.set("workspace.result_share", 2.0) == 1.0
+    assert reloaded.set("workspace.result_share", -1.0) == 0.0
+
+
 def test_bracket_settings_round_trip_and_repair_what_cannot_be_painted():
     path = temp_dir() / CONFIG_FILENAME
     store = store_at(path)
