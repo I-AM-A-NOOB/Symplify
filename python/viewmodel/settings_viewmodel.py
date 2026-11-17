@@ -7,15 +7,16 @@ applies it live, so the file and the running UI cannot disagree.
 
 The methods are grouped by domain into mixins — ``AppearanceSettings`` (theme,
 accent, code colours, watermarks), ``FontSettings`` (the three faces, their
-fallback chains and coverage), ``WindowSettings`` (the remembered geometry) and
-``KeyboardSettings`` (the custom keyboard folder) — while every ``Property``,
-``Signal`` and piece of shared state stays on this ``QObject`` subclass, so
-shiboken registers them and QML sees one object.
+fallback chains and coverage), ``WindowSettings`` (the remembered geometry),
+``KeyboardSettings`` (the custom keyboard folder) and ``ParserSettings`` (the
+exposed transformation switches) — while every ``Property``, ``Signal`` and
+piece of shared state stays on this ``QObject`` subclass, so shiboken registers
+them and QML sees one object.
 
 Each domain has its own notify signal (``appearanceChanged``, ``fontsChanged``,
-``windowChanged``, ``keyboardChanged``, ``configChanged``); every setter emits
-its domain signal **and** ``changed``, which remains the "some setting moved"
-signal ``MainViewModel`` listens on.
+``windowChanged``, ``keyboardChanged``, ``parseSettingsChanged``,
+``configChanged``); every setter emits its domain signal **and** ``changed``,
+which remains the "some setting moved" signal ``MainViewModel`` listens on.
 
 Appearance is applied through RinUI's ``ThemeManager`` QObject (the QML ``Theme``
 singleton is a thin wrapper around it), which is why the window's theme manager is
@@ -51,6 +52,7 @@ from ..system_accent import SystemAccent
 from .settings_appearance import AppearanceSettings
 from .settings_fonts import FontSettings
 from .settings_keyboard import KeyboardSettings
+from .settings_parser import ParserSettings
 from .settings_window import WindowSettings
 
 
@@ -59,6 +61,7 @@ class SettingsViewModel(
     FontSettings,
     WindowSettings,
     KeyboardSettings,
+    ParserSettings,
     QObject,
 ):
     """Applies and persists the user settings.
@@ -86,6 +89,7 @@ class SettingsViewModel(
     languageChanged = Signal()
     keyboardLayoutsChanged = Signal()
     keyboardErrorChanged = Signal()
+    parseSettingsChanged = Signal()
 
     def __init__(
         self,
@@ -346,6 +350,7 @@ class SettingsViewModel(
         self.fontsChanged.emit()
         self.windowChanged.emit()
         self.keyboardChanged.emit()
+        self.parseSettingsChanged.emit()
         self.configChanged.emit()
         self.changed.emit()
 
@@ -517,4 +522,28 @@ class SettingsViewModel(
     )
     keyboardError = Property(
         str, KeyboardSettings._get_keyboard_error, notify=keyboardErrorChanged
+    )
+    factorialNotation = Property(
+        bool, ParserSettings._get_factorial_notation,
+        ParserSettings._set_factorial_notation, notify=parseSettingsChanged,
+    )
+    implicitMultiplication = Property(
+        bool, ParserSettings._get_implicit_multiplication,
+        ParserSettings._set_implicit_multiplication, notify=parseSettingsChanged,
+    )
+    convertXor = Property(
+        bool, ParserSettings._get_convert_xor,
+        ParserSettings._set_convert_xor, notify=parseSettingsChanged,
+    )
+    implicitApplication = Property(
+        bool, ParserSettings._get_implicit_application,
+        ParserSettings._set_implicit_application, notify=parseSettingsChanged,
+    )
+    functionExponentiation = Property(
+        bool, ParserSettings._get_function_exponentiation,
+        ParserSettings._set_function_exponentiation, notify=parseSettingsChanged,
+    )
+    splitSymbols = Property(
+        bool, ParserSettings._get_split_symbols,
+        ParserSettings._set_split_symbols, notify=parseSettingsChanged,
     )

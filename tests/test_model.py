@@ -25,7 +25,7 @@ import warnings
 
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QTextDocument
-from sympy import Integer, Integral, Matrix, Rational, Symbol, cos, sin
+from sympy import Integer, Integral, Matrix, Rational, Symbol, cos, factorial, sin
 
 from python.brackets import DEFAULT_COLORS, parse_colors, spans
 from python.code_style import (
@@ -51,6 +51,7 @@ from python.model.calculator import (
 from python.model.plotting import plot_series, plot_variables
 from python.model.variable import VariableManager, is_sympy_name, validate_name
 from python.model.variants import variants
+from python.parse_options import default_options, policy_from_options
 from python.settings import DEFAULTS, SettingsStore
 from python.store_client import plotting_seeds
 from python.store_worker import VariableStore
@@ -120,6 +121,70 @@ def test_juxtaposition_is_multiplication():
 
 def test_caret_is_power():
     assert ok("x^2") == X**2
+
+
+def test_parser_switches_are_allowlisted_and_change_syntax():
+    """The settings switches change only the named transformation."""
+    default = Calculator()
+    assert default.evaluate("2x").value == 2 * X
+    assert default.evaluate("x^2").value == X**2
+    assert default.evaluate("x!").value == factorial(X)
+
+    no_implicit = Calculator(policy_from_options({
+        **default_options(), "implicit_multiplication": False,
+    }))
+    assert isinstance(no_implicit.evaluate("2x"), Failure)
+    assert no_implicit.evaluate("2*x").value == 2 * X
+
+    no_xor = Calculator(policy_from_options({
+        **default_options(), "convert_xor": False,
+    }))
+    assert isinstance(no_xor.evaluate("x^2"), Failure)
+    assert no_xor.evaluate("x**2").value == X**2
+
+    no_factorial = Calculator(policy_from_options({
+        **default_options(), "factorial_notation": False,
+    }))
+    assert isinstance(no_factorial.evaluate("x!"), Failure)
+
+    implicit_application = Calculator(policy_from_options({
+        **default_options(), "implicit_application": True,
+    }))
+    assert implicit_application.evaluate("sin x").value == sin(X)
+    assert isinstance(default.evaluate("sin x"), Failure)
+
+    function_exponentiation = Calculator(policy_from_options({
+        **default_options(), "function_exponentiation": True,
+    }))
+    assert function_exponentiation.evaluate("sin^2(x)").value == sin(X)**2
+    assert isinstance(default.evaluate("sin^2(x)"), Failure)
+
+    split = Calculator(policy_from_options({
+        **default_options(), "split_symbols": True,
+    }))
+    assert split.evaluate("xy").value == X * Y
+    assert default.evaluate("xy").value == Symbol("xy")
+
+
+def test_parser_settings_reach_new_requests():
+    settings = SettingsStore(temp_dir() / "config.yaml")
+    settings.load()
+    vm = MainViewModel(settings)
+
+    vm.settings.implicitMultiplication = False
+    vm.calculator.calculate("2x")
+    assert vm.calculator.errorMessage
+    assert vm.calculator.resultText == ""
+
+    vm.settings.implicitMultiplication = True
+    vm.calculator.calculate("2x")
+    assert vm.calculator.resultText == "2*x"
+
+    vm.settings.convertXor = False
+    vm.calculator.calculate("x^2")
+    assert vm.calculator.errorMessage
+    vm.calculator.calculate("x**2")
+    assert vm.calculator.resultText == "x**2"
 
 
 def test_unknown_symbol_stays_symbolic():

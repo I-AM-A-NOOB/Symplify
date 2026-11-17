@@ -52,6 +52,10 @@ class MainViewModel(QObject):
 
     sendToCode = Signal(str)
     sendToAssign = Signal(str, str, str)
+    #: Restore the canonical result text instead of the original input, for a
+    #: result whose source text no longer parses under the current policy.
+    #: Args: mode, name, result.
+    sendToResult = Signal(str, str, str)
     #: `keyboardRevision` changed: LaTeX keycaps must ask for new artwork.
     keyboardStyleChanged = Signal()
     #: A batch of keycap artwork arrived (a QML binding dependency: the cache
@@ -227,6 +231,7 @@ class MainViewModel(QObject):
         self._settings.appearanceChanged.connect(self._apply_watermark)
         self._settings.appearanceChanged.connect(self._invalidate_palette)
         self._settings.keyboardChanged.connect(self._refresh_keyboard_layout)
+        self._settings.parseSettingsChanged.connect(self._apply_parse_policy)
         #: Any variable write changes what a name resolves to, so the markup memo
         #: and the highlighters' scope provider must see the new snapshot.
         model = self._variables_vm.model
@@ -240,6 +245,13 @@ class MainViewModel(QObject):
         self._load_keyboard()
         self._apply_latex_style()     # apply the persisted rendering settings now
         self._apply_watermark()       # and the empty-state watermark's kind/pool
+        self._apply_parse_policy()    # and the persisted parser switches
+
+    def _apply_parse_policy(self) -> None:
+        """Push the current parser policy into both calculation viewmodels."""
+        policy = self._settings.parse_policy()
+        self._calculator_vm.set_parse_policy(policy)
+        self._variables_vm.set_parse_policy(policy)
 
     def install_log_capture(self) -> None:
         """Take over Qt's and the interpreter's message streams.

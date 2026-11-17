@@ -119,6 +119,48 @@ def test_importing_the_entry_point_is_worker_safe():
     assert events == {"pyside": False, "sympy": False, "qmlmathplot": False}
 
 
+def test_process_backend_applies_parse_policy():
+    """The policy travels to the Compute worker; 2x becomes invalid when off."""
+    events = run_script(
+        r"""
+        import json
+        from PySide6.QtCore import QCoreApplication, QTimer
+        from python.parse_options import default_options, policy_from_options
+        from python.viewmodel.calculation_backend import ProcessBackend
+
+        def main():
+            app = QCoreApplication([])
+            backend = ProcessBackend(timeout_seconds=30.0)
+            backend.set_parse_policy(policy_from_options({
+                **default_options(), "implicit_multiplication": False
+            }))
+            events = []
+
+            def finished(request_id, result):
+                events.append([result.is_error, result.profile_id, result.text])
+                app.quit()
+
+            def variants(request_id, rows):
+                pass
+
+            backend.finished.connect(finished)
+            backend.variantsReady.connect(variants)
+            backend.failed.connect(lambda request_id, message: (
+                events.append(["failed", message]), app.quit()))
+            backend.submit(1, "evaluate", "2x", {})
+            QTimer.singleShot(15000, app.quit)
+            app.exec()
+            backend.shutdown()
+            print(json.dumps(events))
+
+        if __name__ == "__main__":
+            main()
+        """
+    )
+    assert events and events[0][0] is True
+    assert events[0][1] == "custom"
+
+
 def test_process_backend_attaches_plot_programs():
     """The worker builds qmlmathplot Programs; the UI never parses for the plot."""
     events = run_script(

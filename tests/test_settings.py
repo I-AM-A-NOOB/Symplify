@@ -105,6 +105,20 @@ def test_set_persists_and_round_trips():
     assert store_at(path).get("appearance.theme") == "Dark"
 
 
+def test_parser_settings_are_defaults_and_round_trip():
+    path = temp_dir() / CONFIG_FILENAME
+    store = store_at(path)
+    assert store.get("parser.implicit_multiplication") is True
+    assert store.get("parser.convert_xor") is True
+    assert store.get("parser.split_symbols") is False
+    assert store.get("parser.implicit_application") is False
+
+    assert store.set("parser.implicit_multiplication", False) is False
+    reloaded = store_at(path)
+    assert reloaded.get("parser.implicit_multiplication") is False
+    assert reloaded.get("parser.convert_xor") is True
+
+
 def test_bracket_settings_round_trip_and_repair_what_cannot_be_painted():
     path = temp_dir() / CONFIG_FILENAME
     store = store_at(path)

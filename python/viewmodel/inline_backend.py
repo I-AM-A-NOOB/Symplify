@@ -20,7 +20,7 @@ from ..model.variants import variants
 from ..plot_programs import with_plot
 from ..result_payload import assignment_candidate, result_view, variant_views
 from ..scope_cache import ScopeCache
-from ..worker_protocol import ScopeDelta, ScopeSnapshot
+from ..worker_protocol import ParsePolicy, ScopeDelta, ScopeSnapshot
 
 
 class InlineBackend(QObject):
@@ -47,7 +47,16 @@ class InlineBackend(QObject):
     def __init__(self, parent: QObject | None = None):
         super().__init__(parent)
         self._calculator = Calculator()
+        self._parse_policy = ParsePolicy()
         self._scope = ScopeCache(restore_srepr)
+
+    def set_parse_policy(self, policy: ParsePolicy) -> None:
+        """Set the parser policy used by the next in-process evaluation."""
+        if not isinstance(policy, ParsePolicy):
+            raise TypeError(
+                f"parse_policy must be ParsePolicy, got {type(policy).__name__}"
+            )
+        self._parse_policy = policy
 
     def warm_up(self) -> None:
         """Nothing to start: the inline backend runs in this process."""
@@ -61,6 +70,7 @@ class InlineBackend(QObject):
     ) -> None:
         """Evaluate now and emit the outcome before returning."""
         try:
+            self._calculator.set_parse_policy(self._parse_policy)
             scope_objects = self._scope.sync(scope)
             if kind == "evaluate":
                 result = self._calculator.evaluate(payload, scope_objects)
@@ -81,6 +91,7 @@ class InlineBackend(QObject):
                 result_view(
                     result, request_id,
                     scope_revision=self._scope.revision,
+                    profile_id=self._parse_policy.profile_id,
                     entry=entry,
                 ),
             )

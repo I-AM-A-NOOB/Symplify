@@ -90,12 +90,13 @@ VariableCellEditor 1.0 VariableCellEditor.qml
 # its two fields and the row's actions); the page hands it `host`.
 VariableDetailsPanel 1.0 VariableDetailsPanel.qml
 # SettingsSection is the subtitle + sticky-bar values every Settings section shares;
-# the five sections below declare their rows inside it.
+# the six sections below declare their rows inside it.
 SettingsSection 1.0 SettingsSection.qml
-# The Settings page's five sections, one component each: the page keeps the frame and
+# The Settings page's six sections, one component each: the page keeps the frame and
 # the order, and a section keeps its own state (its label/value pairs) and its own dialog.
 SettingsInterfaceSection 1.0 SettingsInterfaceSection.qml
 SettingsWorkspaceSection 1.0 SettingsWorkspaceSection.qml
+SettingsParserSection 1.0 SettingsParserSection.qml
 SettingsLanguageSection 1.0 SettingsLanguageSection.qml
 SettingsFileSection 1.0 SettingsFileSection.qml
 SettingsAboutSection 1.0 SettingsAboutSection.qml

@@ -30,6 +30,7 @@ from ..worker_protocol import (
     Assignment,
     CommitRequest,
     ErrorKind,
+    ParsePolicy,
     ResultView,
     ScopeChange,
     ScopeDelta,
@@ -150,6 +151,7 @@ class VariablesModel(QAbstractTableModel):
         #: last sent revision separate from the Calculator worker's.
         self._write_scope_generation: int | None = None
         self._write_scope_revision: int | None = None
+        self._parse_policy = ParsePolicy()
         if backend is not None:
             backend.finished.connect(self._on_finished)
             backend.timedOut.connect(self._on_timed_out)
@@ -234,6 +236,16 @@ class VariablesModel(QAbstractTableModel):
             self._write_scope_revision = self._revision
             return self.scope_snapshot()
         return self._scope_since(self._write_scope_revision)
+
+    def set_parse_policy(self, policy: ParsePolicy) -> None:
+        """Use ``policy`` for subsequent Variables-worker writes."""
+        if not isinstance(policy, ParsePolicy):
+            raise TypeError(
+                f"parse_policy must be ParsePolicy, got {type(policy).__name__}"
+            )
+        self._parse_policy = policy
+        if self._calculator is not None:
+            self._calculator.set_parse_policy(policy)
 
     def _remember_scope_delta(self, delta: ScopeDelta | None) -> None:
         if delta is None:
@@ -385,6 +397,9 @@ class VariablesModel(QAbstractTableModel):
         # the next queued write before this call returns.
         self._write_scope_revision = sent_revision
         try:
+            set_policy = getattr(self._backend, "set_parse_policy", None)
+            if set_policy is not None:
+                set_policy(self._parse_policy)
             self._backend.submit(
                 request.request_id,
                 "variable",
@@ -1082,6 +1097,10 @@ class VariablesViewModel(QObject):
     def scope_for(self, generation: int, sent_revision: int | None):
         """The delta/snapshot that brings a worker generation up to date."""
         return self._model.scope_for(generation, sent_revision)
+
+    def set_parse_policy(self, policy: ParsePolicy) -> None:
+        """Use ``policy`` for subsequent variable writes."""
+        self._model.set_parse_policy(policy)
 
     def _get_busy(self) -> bool:
         """True while the Variables worker is running or has queued writes."""

@@ -28,14 +28,21 @@ from typing import Any
 
 import sympy
 from sympy.parsing.sympy_parser import (
+    auto_number,
+    auto_symbol,
     convert_xor,
+    factorial_notation,
+    function_exponentiation,
+    implicit_application,
     implicit_multiplication,
+    lambda_notation,
     null,
-    standard_transformations,
+    repeated_decimals,
+    split_symbols,
     stringify_expr,
 )
 
-from ..worker_protocol import Assignment, ErrorKind
+from ..worker_protocol import Assignment, ErrorKind, ParsePolicy
 from .latex import render_latex, render_latex_definition
 from .plotting import Origin
 from .variable import is_sympy_name, sympy_callables, validate_name
@@ -92,6 +99,21 @@ _FLOAT_RE = re.compile(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?")
 #: ``symbols("x y")`` reads identifiers, not code. Separators/order marks are
 #: enough; quotes, parentheses, operators and backslashes stay out.
 _SYMBOLS_RE = re.compile(r"[\w\s,:]+")
+
+#: The only transformation names the parser may receive. The settings/protocol
+#: validate the names; this map is the one place a name becomes a callable.
+_TRANSFORMATIONS = {
+    "lambda_notation": lambda_notation,
+    "auto_symbol": auto_symbol,
+    "repeated_decimals": repeated_decimals,
+    "auto_number": auto_number,
+    "factorial_notation": factorial_notation,
+    "implicit_multiplication": implicit_multiplication,
+    "convert_xor": convert_xor,
+    "implicit_application": implicit_application,
+    "function_exponentiation": function_exponentiation,
+    "split_symbols": split_symbols,
+}
 
 
 class _UnsafeExpression(ValueError):
@@ -370,11 +392,20 @@ class Calculator:
     to a variable — and the name audit that keeps both honest.
     """
 
-    def __init__(self):
+    def __init__(self, parse_policy: ParsePolicy | None = None):
         """Initialize the parse transformations shared by every request."""
-        self.transformations = standard_transformations + (
-            implicit_multiplication,
-            convert_xor,
+        self.parse_policy = parse_policy or ParsePolicy()
+        self.set_parse_policy(self.parse_policy)
+
+    def set_parse_policy(self, policy: ParsePolicy) -> None:
+        """Replace the parser's allowlisted transformations in policy order."""
+        if not isinstance(policy, ParsePolicy):
+            raise TypeError(
+                f"parse_policy must be ParsePolicy, got {type(policy).__name__}"
+            )
+        self.parse_policy = policy
+        self.transformations = tuple(
+            _TRANSFORMATIONS[name] for name in policy.transformations
         )
 
     def evaluate(

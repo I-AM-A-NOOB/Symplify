@@ -100,6 +100,12 @@ python/
                                 # the static SymPy constants/callables table from
                                 # sympy_names.json (zero Qt/SymPy; shared by the lexer, model
                                 # and Store worker). Regenerate with scripts/update_sympy_names.py.
+                                # PLOTTING_NAMES lives here too, so the Store seeds and the plot
+                                # rule cannot drift.
+  parse_options.py              # The user-visible parser switches: core/exposed transformation
+                                # names, defaults, and policy_from_options() -> ParsePolicy in
+                                # canonical order (zero Qt/SymPy). Settings and the parser share
+                                # this vocabulary.
   plot_programs.py              # attach qmlmathplot display programs to a result (worker side)
   result_payload.py             # Success|Failure + Variant -> ResultView/VariantView/PlotSpec;
                                 # the one conversion at the Compute/UI boundary (no Qt).
@@ -127,7 +133,8 @@ python/
                                 #   the UI boundary does not load SymPy. See Calculation backend.
     inline_backend.py           #   InlineBackend (synchronous, legacy Success/Failure): tests
                                 #   and headless only; imported lazily when no backend is given.
-    main_viewmodel.py           #   Root VM; aggregates children; signals sendToCode/sendToAssign
+    main_viewmodel.py           #   Root VM; aggregates children; signals sendToCode/sendToAssign/
+                                #   sendToResult (the canonical result text after a parser change).
     calculator_viewmodel.py      #   Result state, input persistence, clear_result, the `variants`
                                 #   rows, and the qmlmathplot.Plot (curves, legend, theme, error)
     latex_service.py             #   LatexRenderService: one spawned renderer (sandboxed, with a
@@ -159,6 +166,8 @@ python/
     settings_fonts.py           #   FontSettings: the three faces, sizes, chains and coverage
     settings_window.py          #   WindowSettings: remembered geometry and Zen-fullscreen
     settings_keyboard.py        #   KeyboardSettings: the custom keyboard folder/layout
+    settings_parser.py          #   ParserSettings: the six exposed transformation switches and
+                                #   parse_policy(); parser Settings are QML-facing booleans.
     log_viewmodel.py            #   LogViewModel (formattedLogs)
     highlighter.py              #   CodeHighlighter (QSyntaxHighlighter) for TextArea.textDocument;
                                 #   paints code_style spans, knows nothing about the rules
@@ -257,12 +266,12 @@ qml/
                                 #     selected variable, its two fields and the row's actions — the
                                 #     page hands it `host`),
                                 #   SettingsSection (the subtitle + sticky-bar values every
-                                #     Settings section shares; the five sections below declare
+                                #     Settings section shares; the six sections below declare
                                 #     their rows inside it),
-                                #   Settings{Interface,Workspace,Language,File,About}Section (the
-                                #     Settings page's five sections, one component each: a section
-                                #     owns its state and its dialog, the page only its frame and
-                                #     order),
+                                #   Settings{Interface,Workspace,Parser,Language,File,About}Section
+                                #     (the Settings page's six sections, one component each: a
+                                #     section owns its state and its dialog, the page only its
+                                #     frame and order),
                                 #   MessageDialog / WarningDialog (the one message box, and that
                                 #     plus the wiring to a viewmodel's `warningOccurred`),
                                 #   Tip (a ToolTip with the app's delay and the control it is
@@ -541,8 +550,12 @@ transparent corner, not `srgba(255,255,255,1)`.
   changed between two Store revisions and `ScopeSnapshot` is the full-recovery message; the pure
   `ScopeState` applies either one and raises `ScopeStaleError` (caller behind), `ScopeGapError`
   (changes missing) or `ScopeConflictError` (a name the scope cannot accept) **before mutating**,
-  so a bad delta cannot leave the cache half-synced. `ParsePolicy` reserves the parser profile and
-  its transformation-name allowlist but is deliberately not connected to `Calculator` yet.
+  so a bad delta cannot leave the cache half-synced. `ParsePolicy` is the parser profile:
+  `parse_options.policy_from_options` builds it from the Settings switches, and
+  `Calculator.set_parse_policy` maps its allowlisted names to SymPy transformations. The
+  Compute worker receives it with each request; existing Store entries are `srepr`-restored
+  objects, so changing the policy never rewrites stored variables. `ParsePolicy.evaluate`
+  remains reserved (`True` in this app).
   `python/store_worker.py` is the authoritative Store process: it holds `StoreEntry` values only,
   allocates the next revision on every accepted mutation, rejects a stale `expected_revision`,
   returns the `ScopeDelta` the Compute cache should apply, and writes a versioned JSON snapshot
@@ -964,6 +977,12 @@ transparent corner, not `srgba(255,255,255,1)`.
   root, which is where roles land) — without that line the role lands nowhere,
   `card.error` is `undefined`, and `card.error !== ""` marks **every** card as an error (the only
   clue is `Unable to assign [undefined] to QString` in the console).
+- **The result text is a second restore path.** The history card's menu keeps *Send to input*
+  (the original text, so the user can fix it under the current parser policy) and adds *Send result
+  to input*: the canonical result string is sent to Code mode, or to the same name as `name =
+  result` in Assign mode. It is disabled for error cards and empty results. This is the fallback
+  for a source written under transformations the user has since disabled — results use explicit
+  `**`/`*`/function calls and remain parseable.
 - **A `ListView` has no `moveCurrentIndexUp/Down()`** — those methods belong to `GridView`; calling
   them on a ListView throws `TypeError: Property 'moveCurrentIndexDown' ... is not a function`. A
   ListView moves with `incrementCurrentIndex()` / `decrementCurrentIndex()`, which **clamp** at the
@@ -1881,6 +1900,15 @@ One lexer, one span list, two renderers. Anything that colours code contributes 
   (`Success` / `Failure`). That split is the point: `implicit_multiplication` turns `foo(1)` into
   `f*o**2`, so a highlighter deciding for itself would call it a function call while
   `unknown_calls` reports it as an unknown one.
+- **Parser conveniences are user settings, but stored values are not.** `parse_options.py` exposes
+  only the syntax switches that have a meaningful choice: `factorial_notation`, `split_symbols`,
+  `implicit_multiplication`, `convert_xor`, `implicit_application`, `function_exponentiation`;
+  tokenizer primitives (`auto_symbol`, `auto_number`, …) stay fixed. `MainViewModel` turns the six
+  booleans into one `ParsePolicy` and pushes it to both Compute backends before each request. A
+  disabled `convert_xor` makes bare `^` fail rather than mean XOR (the AST gate rejects BitXor), and
+  a disabled `implicit_multiplication` makes `2x` fail. Existing variables are unaffected: the Store
+  holds `srepr`, and the Compute cache restores objects, so a policy change only affects new text.
+  History keeps the original text plus the *Send result* fallback (see History).
 - Character classes come from Python itself (`str.isidentifier` to continue a name, **`isdecimal`**
   for digits — never `isalnum`/`isdigit`, which accept superscripts). The parser tokenizes with
   Python's tokenizer, so this agrees with it for free.
@@ -2203,10 +2231,12 @@ backdrop floats up from 10px below while fading in, and carries the page's own t
   degrades to in-memory values with a warning the page displays. Keys:
   `appearance.theme|language|backdrop|accent|accent_mode|accent_shading|accent_os_shading`,
   `workspace.code_theme|bracket_mode|bracket_colors|code_family|code_size|keyboard_family|keyboard_size|latex_font|latex_size|keyboard_layout|zen_fullscreen`,
+  `parser.factorial_notation|split_symbols|implicit_multiplication|convert_xor|implicit_application|function_exponentiation`,
   `window.remember|width|height|x|y|maximized`. The page groups them under the subtitles
-  **Language / Interface / Workspace / Settings file / About**, and a group is its section's: the
-  code theme and the bracket colours moved into `workspace` when their rows moved out of Interface
-  (they had lived in `appearance`).
+  **Language / Interface / Workspace / Calculation / Settings file / About**, and a group is its
+  section's: the code theme and the bracket colours moved into `workspace` when their rows moved
+  out of Interface (they had lived in `appearance`). The parser toggles are booleans; a missing
+  key takes the historical default, and a non-bool is coerced at the store boundary.
 - **The size spin boxes are live, but their file write and their re-render are coalesced.** The
   three sizes go through `SettingsStore.stage` (validated, in memory) and `SettingsViewModel._stage_size`:
   the first change of a burst is saved at once (a single setter still lands on disk immediately),
@@ -2219,7 +2249,7 @@ backdrop floats up from 10px below while fading in, and carries the page's own t
   (`examples/pages/Settings.qml`): a section is a `ColumnLayout { spacing: 3 }` holding a
   **`Typography.BodyStrong`** subtitle and then one card per row, and the sections are separated by
   the outer column's spacing. **Each section is its own component**
-  (`qml/components/Settings{Interface,Workspace,Language,File,About}Section.qml`), which is all the
+  (`qml/components/Settings{Interface,Workspace,Parser,Language,File,About}Section.qml`), which is all the
   page ever was: it keeps the frame (`PageBody` + `PageScaffold`) and the order, and a section keeps
   its own state — the label/value pairs its combos pass their index through, `indexOf` (three lines,
   and the one duplication left: Interface and Workspace each have a copy) and its own dialog (the

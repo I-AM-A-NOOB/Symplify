@@ -23,7 +23,7 @@ from PySide6.QtCore import QCoreApplication, QObject, QTimer, Signal
 
 from ..backend_entry import worker_main
 from ..child_process import ChildProcess
-from ..worker_protocol import ScopeDelta, ScopeSnapshot
+from ..worker_protocol import ParsePolicy, ScopeDelta, ScopeSnapshot
 
 
 class ProcessBackend(QObject):
@@ -60,6 +60,9 @@ class ProcessBackend(QObject):
     ):
         super().__init__(parent)
         self.timeout_seconds = float(timeout_seconds)
+        #: The parser policy sent with every request. The worker applies it
+        #: before evaluating; changing it never needs a worker restart.
+        self._parse_policy = ParsePolicy()
         #: The spawned worker and its pipe; the supervisor owns spawn, containment
         #: (Windows Job Object) and the reaper.
         self._worker = ChildProcess(worker_main, sandboxed=True)
@@ -97,6 +100,14 @@ class ProcessBackend(QObject):
             self._generation += 1
         return self._generation
 
+    def set_parse_policy(self, policy: ParsePolicy) -> None:
+        """Set the parser policy carried by subsequent requests."""
+        if not isinstance(policy, ParsePolicy):
+            raise TypeError(
+                f"parse_policy must be ParsePolicy, got {type(policy).__name__}"
+            )
+        self._parse_policy = policy
+
     def warm_up(self) -> None:
         """Start the worker before the first request, hiding SymPy's import.
 
@@ -121,7 +132,9 @@ class ProcessBackend(QObject):
         self.cancel()
         self._expect_variants = kind != "variable"
         try:
-            self._worker.send((request_id, kind, payload, scope))
+            self._worker.send(
+                (request_id, kind, payload, scope, self._parse_policy)
+            )
             self._worker_started = True
         except Exception as exc:  # noqa: BLE001 - start/pipe failure is a status
             self._stop_worker()

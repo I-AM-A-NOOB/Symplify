@@ -15,7 +15,7 @@ from qmlmathplot import Curve, Plot
 from qmlmathplot.protocol import Program
 
 from ..latex_render import LatexStyle, svg_data_url
-from ..worker_protocol import Assignment, ResultView, StoreEntryCandidate
+from ..worker_protocol import Assignment, ParsePolicy, ResultView, StoreEntryCandidate
 from .history_viewmodel import HistoryModel
 from .input_mode import InputMode
 from .latex_jobs import LatexJobs
@@ -108,6 +108,7 @@ class CalculatorViewModel(QObject):
         self._variable_manager = variable_manager
         self._scope_source = scope_source
         self._sent_scope_revision: int | None = None
+        self._parse_policy = ParsePolicy()
         self._history = history
         self._log = log
         self._variables_model = variables_model
@@ -750,6 +751,9 @@ class CalculatorViewModel(QObject):
         self._pending = pending
         self._set_backend_state(True, "calculating")
         try:
+            set_policy = getattr(self._backend, "set_parse_policy", None)
+            if set_policy is not None:
+                set_policy(self._parse_policy)
             scope = self._scope_for_request()
             pending["scope_revision"] = getattr(scope, "revision", None)
             self._backend.submit(
@@ -985,6 +989,14 @@ class CalculatorViewModel(QObject):
             self._log.add_warning(
                 f"Failed to store invalid entry: {exc}", "Calculator"
             )
+
+    def set_parse_policy(self, policy: ParsePolicy) -> None:
+        """Use ``policy`` for subsequent calculation requests."""
+        if not isinstance(policy, ParsePolicy):
+            raise TypeError(
+                f"parse_policy must be ParsePolicy, got {type(policy).__name__}"
+            )
+        self._parse_policy = policy
 
     @Slot()
     def warmUpBackend(self) -> None:

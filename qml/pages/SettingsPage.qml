@@ -9,10 +9,11 @@ import "../components"
 // column's own spacing.
 //
 // Each section is a component of its own — `SettingsLanguageSection`,
-// `SettingsInterfaceSection`, `SettingsWorkspaceSection`, `SettingsFileSection`,
-// `SettingsAboutSection` — because five of them is all this page ever was: the
-// page keeps the frame and the order, and every section keeps its own state (the
-// label/value pairs its combos pass their index through) and its own dialog.
+// `SettingsInterfaceSection`, `SettingsWorkspaceSection`, `SettingsParserSection`,
+// `SettingsFileSection`, `SettingsAboutSection` — because six of them is all this
+// page ever was: the page keeps the frame and the order, and every section keeps its
+// own state (the label/value pairs its combos pass their index through) and its own
+// dialog.
 //
 // API details worth remembering: the icon is set with `icon.name:` (assigning
 // `icon:` fails — it is a read-only alias); a `SettingCard`'s bare children land
@@ -62,6 +63,7 @@ Item {
             SettingsLanguageSection { id: languageSection }
             SettingsInterfaceSection { id: interfaceSection }
             SettingsWorkspaceSection { id: workspaceSection }
+            SettingsParserSection { id: parserSection }
             SettingsFileSection { id: fileSection }
             SettingsAboutSection { id: aboutSection }
         }
@@ -78,6 +80,6 @@ Item {
         //: The bar takes the name of whichever section the reader has scrolled to:
         //: the previous label leaves upward and the new one arrives from below.
         sections: [languageSection, interfaceSection, workspaceSection,
-                   fileSection, aboutSection]
+                   parserSection, fileSection, aboutSection]
     }
 }

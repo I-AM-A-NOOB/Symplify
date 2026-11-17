@@ -493,6 +493,12 @@ QQC2.ItemDelegate {
             }
         }
 
+        MenuItem {
+            text: qsTr("Send result to input")
+            enabled: !card.isError && card.result !== ""
+            onTriggered: vm.sendToResult(card.mode, card.name, card.result)
+        }
+
         MenuSeparator {}
 
         // A failed entry has no result and no LaTeX to copy, so the

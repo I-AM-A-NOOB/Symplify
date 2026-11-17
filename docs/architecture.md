@@ -102,8 +102,10 @@ flowchart LR
 
 生产路径的两个 worker 是有意分开的（B 方案）：变量编辑不必排在长计算后面，代价是变量
 worker 活跃时出现第二份 SymPy/`ScopeCache`。Store 是唯一变量权威；Calculator 与
-Variables 两个 worker 都只从 Store 的 snapshot/delta 重建自己的对象缓存。测试/headless
-仍可使用进程内 `Calculator` + `VariableManager` + `InlineBackend`，那不是生产路径。
+Variables 两个 worker 都只从 Store 的 snapshot/delta 重建自己的对象缓存。每个 Compute
+请求还携带一个 `ParsePolicy`（Settings 的 calculation 开关），但它只影响新文本的解析；
+Store 里的 `srepr` 是对象恢复格式，不受影响。测试/headless 仍可使用进程内
+`Calculator` + `VariableManager` + `InlineBackend`，那不是生产路径。
 
 ### 1.2 逻辑数据流：Model 语义
 

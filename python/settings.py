@@ -42,6 +42,7 @@ from .brackets import parse_colors
 from .code_themes import DEFAULT_FAMILY as DEFAULT_CODE_THEME
 from .code_themes import family_ids
 from .fonts import DEFAULT_CODE_FAMILY, DEFAULT_KEYBOARD_FAMILY
+from .parse_options import DEFAULT_OPTIONS
 
 #: Directory (next to the app) whose presence switches on portable mode.
 PORTABLE_DIRNAME = "data"
@@ -118,6 +119,7 @@ DEFAULTS: dict[str, Any] = {
             r"\nabla\cdot\mathbf{B}=0",
         ),
     },
+    "parser": dict(DEFAULT_OPTIONS),
     "window": {
         "remember": True,         # restore size/position on the next launch
         "width": 1180,
@@ -177,7 +179,7 @@ _KNOWN_KEYS = (
     "window.x",
     "window.y",
     "window.maximized",
-)
+) + tuple(f"parser.{name}" for name in DEFAULT_OPTIONS)
 
 #: The keys the ``workspace`` group owns — read off ``_KNOWN_KEYS`` so a key
 #: added to the group is migrated too. See :meth:`SettingsStore._migrate_workspace`.
@@ -452,6 +454,8 @@ class SettingsStore:
                    "window.maximized", "window.remember",
                    "appearance.accent_shading",
                    "appearance.accent_os_shading"):
+            return bool(value)
+        if key.startswith("parser."):
             return bool(value)
         if key == "workspace.result_watermark_pool":
             # A pool of LaTeX snippets, one item per empty-state watermark;

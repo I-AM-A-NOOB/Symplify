@@ -17,8 +17,10 @@ The boundary:
   store revisions with only the entries that changed. :class:`ScopeState` is the
   string half of the Compute worker's cache: it applies either one, refusing a
   stale delta, a revision gap, or a conflicting change.
-- :class:`ParsePolicy` reserves the parser configuration the Compute worker will
-  consume later. It is **not** wired to ``Calculator`` in this phase.
+- :class:`ParsePolicy` is the parser profile carried with each Compute request:
+  an ordered allowlist of transformation names plus a diagnostic ``profile_id``.
+  The Store never sees it; existing values are restored from ``srepr`` and are
+  independent of the policy.
 
 Every DTO carries ``schema`` in its wire dict. Fields are only ever added; a
 reader defaults the ones it does not know. Serialization never imports SymPy, so
@@ -121,11 +123,11 @@ KNOWN_TRANSFORMATIONS = (
     "repeated_decimals",
     "auto_number",
     "factorial_notation",
+    "split_symbols",
     "implicit_multiplication",
     "convert_xor",
     "implicit_application",
     "function_exponentiation",
-    "split_symbols",
 )
 
 #: What the current parser does. Kept here so a default request names exactly
@@ -967,12 +969,13 @@ class ScopeState:
 
 @dataclass(frozen=True)
 class ParsePolicy:
-    """Reserved parser configuration; not connected to ``Calculator`` yet.
+    """The parser configuration carried with one Compute request.
 
     ``transformations`` is an ordered subsequence of
     :data:`KNOWN_TRANSFORMATIONS` — names only, never callables, and never
     ``global_dict``/``local_dict``. ``profile_id`` is logged with results so a
-    later build can tell which rules produced an answer.
+    later build can tell which rules produced an answer. ``evaluate`` remains
+    reserved; this app always sends ``True``.
     """
 
     profile_id: str = "default"

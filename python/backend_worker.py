@@ -6,13 +6,15 @@ spawned interpreter must not import PySide6, and this file can be tested without
 a GUI.
 
 Protocol (both directions): ``(request_id, ...)``.
-- Parent → child: ``(request_id, "evaluate"|"assign"|"variable", payload, scope)``;
-  ``"assign"`` and ``"variable"`` both carry an :class:`Assignment`; ``"variable"``
-  is the Variables page's write and deliberately skips the optional variant
-  rows, because it has no cards to show. ``None`` asks the worker to exit.
-  ``scope`` is either the legacy mapping of already-built SymPy objects, a
-  :class:`~python.worker_protocol.ScopeSnapshot`, or a
-  :class:`~python.worker_protocol.ScopeDelta`.
+- Parent → child: ``(request_id, "evaluate"|"assign"|"variable", payload, scope,
+  parse_policy)``; older callers may omit the final field and get the default
+  policy. ``"assign"`` and ``"variable"`` both carry an :class:`Assignment`;
+  ``"variable"`` is the Variables page's write and deliberately skips the
+  optional variant rows, because it has no cards to show. ``None`` asks the
+  worker to exit. ``scope`` is either the legacy mapping of already-built SymPy
+  objects, a :class:`~python.worker_protocol.ScopeSnapshot`, or a
+  :class:`~python.worker_protocol.ScopeDelta`; ``parse_policy`` is a validated
+  :class:`~python.worker_protocol.ParsePolicy`.
 - Child → parent: ``(request_id, "result", ResultView, ())`` followed by
   ``(request_id, "variants", None, tuple[VariantView, ...])`` for
   ``evaluate``/``assign``. The result is sent first so the UI can display it
@@ -73,8 +75,17 @@ def worker_main(connection: Any) -> None:
             if request is None:
                 return
 
-            request_id, kind, payload, scope = request
+            if len(request) == 5:
+                request_id, kind, payload, scope, parse_policy = request
+            else:
+                # Older 4-field requests (tests, one-off callers) use the
+                # calculator's default policy.
+                request_id, kind, payload, scope = request
+                parse_policy = None
             try:
+                if parse_policy is not None:
+                    calculator.set_parse_policy(parse_policy)
+                profile_id = calculator.parse_policy.profile_id
                 # ``scope`` is either the legacy mapping of SymPy objects or a
                 # Store ScopeSnapshot/ScopeDelta. The cache parses only what the
                 # revision says changed; a bad sync is reported like any other
@@ -102,7 +113,7 @@ def worker_main(connection: Any) -> None:
                 candidate = _assignment_entry(kind, payload, result)
                 view = result_view(
                     result, request_id, scope_revision=scope_cache.revision,
-                    entry=candidate,
+                    profile_id=profile_id, entry=candidate,
                 )
                 try:
                     connection.send((request_id, "result", view, ()))
@@ -116,7 +127,7 @@ def worker_main(connection: Any) -> None:
             candidate = _assignment_entry(kind, payload, result)
             view = result_view(
                 result, request_id, scope_revision=scope_cache.revision,
-                entry=candidate,
+                profile_id=profile_id, entry=candidate,
             )
             try:
                 connection.send((request_id, "result", view, ()))
