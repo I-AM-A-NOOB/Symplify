@@ -383,16 +383,16 @@ wheels = [
 
 [[package]]
 name = "qmlmathplot"
-version = "0.7.0"
+version = "0.7.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "pyside6" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/60/8c/1a09778a5fafd6fee0e9d4dac18a250ddc8d7dda42d6f85cabb57c1a4cbf/qmlmathplot-0.7.0.tar.gz", hash = "sha256:bc773be63cddce083c5aa76b75436ef7787f29c310bcaa36c3857d131fd8ca67", size = 177948, upload-time = "2026-11-13T15:31:16.224Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/33/63/f235a7ab445fef998af701cd1ff0124311e954f7608de3073e4de02a83e1/qmlmathplot-0.7.1.tar.gz", hash = "sha256:e87b5f06b6fb030d9c0326317f3f807d0e95d152b6e0eb4f8aa9f22a40738332", size = 180080, upload-time = "2026-11-16T14:58:55.908Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/33/4a/51ef6a89de18bb0763b8fc967b3cd5bbae28361e0e70c9003d2b57f803f6/qmlmathplot-0.7.0-py3-none-any.whl", hash = "sha256:3e8b2d9506ee77ffe65ee8f253dd4298838d93b1bd8f8c5040bff73a9d5f7a90", size = 184954, upload-time = "2026-11-13T15:31:14.847Z" },
+    { url = "https://files.pythonhosted.org/packages/9e/bb/aa7d21be0c5648af6647922e372a5ccc5a7551bf823b71783821a8c1b463/qmlmathplot-0.7.1-py3-none-any.whl", hash = "sha256:169a1ad5a059170636089c7638b50e0375ee041c72286a57cbb4feef5b7e7b01", size = 187166, upload-time = "2026-11-16T14:58:54.247Z" },
 ]
 
 [package.optional-dependencies]
@@ -476,7 +476,7 @@ requires-dist = [
     { name = "fonttools", specifier = ">=4.0" },
     { name = "pyside6", specifier = ">=6.12,<6.13" },
     { name = "pyyaml", specifier = ">=6.0.3" },
-    { name = "qmlmathplot", extras = ["calc"], specifier = ">=0.7.0,<0.8" },
+    { name = "qmlmathplot", extras = ["calc"], specifier = ">=0.7.1,<0.8" },
     { name = "rinui", specifier = ">=0.5.0,<0.6" },
     { name = "sympy", specifier = ">=1.14.0" },
     { name = "ziamath", specifier = ">=0.13" },

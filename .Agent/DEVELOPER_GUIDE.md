@@ -231,7 +231,7 @@ qml/
                                 #   ResultPane / PlotPane / InputPane (the Calculator's three
                                 #     halves under its toolbar: the result surface — backend
                                 #     state, outcome, formula, alternatives and watermark — the
-                                #     plot with its header and masked frame, and the Code/Assign
+                                #     plot with its header and square 1px border, and the Code/Assign
                                 #     stage with both editors, the on-screen keyboard and the
                                 #     focus/cursor helpers it drives. The page owns the split
                                 #     geometry and sizes all three),
@@ -2776,9 +2776,10 @@ Data-file pitfalls for frozen builds (update this list when you add data-reading
   transitive resolution; the cap is what `pip install`/`uv sync --upgrade` need to see. The bindings
   that matter are the ones whose minor bump can break us: `pyside6>=6.12,<6.13` (the prune list is a
   whitelist and a new Qt minor can add or rename DLLs it deletes — see Building), and
-  `rinui>=0.5.0,<0.6` / `qmlmathplot[calc]>=0.7.0,<0.8` (RinUI's `WinEventManager`,
+  `rinui>=0.5.0,<0.6` / `qmlmathplot[calc]>=0.7.1,<0.8` (RinUI's `WinEventManager`,
   `init_config` and `save_config` are replaced; qmlmathplot 0.7 is the Program/CPU-fallback
-  boundary the app's worker targets). Lifting a cap is a verification step, not a dependency edit:
+  boundary the app's worker targets, and 0.7.1 supplies the 4x MSAA/lazy-furniture baseline
+  the plot card is measured against). Lifting a cap is a verification step, not a dependency edit:
   measure the new version, then bump the bound.
 - `python/version.py` is **rewritten wholesale** by `scripts/release.py` — never add code to it, the
   next release bump would erase it.
@@ -2945,16 +2946,19 @@ draw (`python/model/plotting.py`, zero Qt), the **object** every surface binds t
   `∫ f dx`) — and lives in the scene, so it follows the plot's theme (background, text, axis
   colours) and an export includes it. The page used to draw a `Repeater` legend row above the card;
   there is no `plotLegend` property any more, and nothing in QML knows the curves' colours.
-- **The plot card is a card, and the plot is inset instead of masked.** `plotFrame` is the
-  same `Control` the focus ring already needs; its `background` is a `Rectangle` with
-  `appearance.buttonRadius`, `cardColor` and `cardBorderColor` — the Other Forms card's
-  anatomy — so the pane gets RinUI's border and radius without a hand-authored mask. The
-  plot content is inset by `max(14, appearance.buttonRadius)`; a card's radius does not clip
-  its children, so the square canvas must stay inside the rounding. That inset is what makes
-  `layer.enabled`/`Qt5Compat.GraphicalEffects.OpacityMask` unnecessary here. Do not replace
-  it with `clip: true`: Qt's `Item.clip` is still rectangular and would put the canvas'
-  square corners over the card's rounded ones. If the inset is ever removed, the rounded
-  mask has to come back (and with it the full-pane offscreen texture).
+- **The plot surface is square, with the Card's 1px border and no radius.** `plotFrame` is the
+  same `Control` the focus ring already needs; its `background` is a transparent `Rectangle`
+  whose only chrome is `appearance.borderWidth` / `colors.cardBorderColor` (the Card border
+  token), with the default square corners. The plot content is inset by that border width so
+  the canvas cannot paint over it; the toolbar keeps an 8px margin. There is no
+  `layer`/`OpacityMask`, no rounded-mask rectangle and no corner overlay: with square corners
+  none of them is needed. Do not add a radius back without also adding a real rounded clip —
+  a card background's `radius` does not clip its children, and Qt's `Item.clip` is only
+  rectangular.
+- **The plot's MSAA level is explicit.** qmlmathplot 0.7.1 defaults to 4×; the viewmodel sets
+  `plot.sampleCount = 4` anyway, so a future library default cannot silently enlarge the
+  render target. 0.7.1's lazy grid/minor-tick/guide canvases and its RHI cache release are
+  used as-is; the plot still belongs to the viewmodel and its `PlotView` remains Loader-gated.
 - **The plot card is a `Control`, so its ring is the same one every other control raises.** Ctrl+Tab
   (the app's focus shortcut — a bare Tab belongs to the code input, which types it) lands on
   `plotFrame`, whose `visualFocus` + `focusReason` drive `ProjectFocusIndicator`; no
