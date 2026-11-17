@@ -1855,6 +1855,10 @@ def test_lexer_takes_the_longest_operator():
         (1, TokenKind.OPERATOR),
         (1, TokenKind.NAME),
     ]
+    assert [(token.length, token.kind) for token in tokenize("x!")] == [
+        (1, TokenKind.NAME),
+        (1, TokenKind.OPERATOR),
+    ]
 
 
 def _names(text, scope=None):

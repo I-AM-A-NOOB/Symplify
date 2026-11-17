@@ -1903,6 +1903,13 @@ One lexer, one span list, two renderers. Anything that colours code contributes 
   (`Success` / `Failure`). That split is the point: `implicit_multiplication` turns `foo(1)` into
   `f*o**2`, so a highlighter deciding for itself would call it a function call while
   `unknown_calls` reports it as an unknown one.
+- **The lexer stays policy-independent deliberately.** Most transformations change meaning, not
+  token boundaries: `2x`, `sin x`, `sin^2(x)`, `x^2` and `integrate(...)` tokenize the same under
+  every policy. `!` is an operator token because `factorial_notation` can accept it. `split_symbols`
+  can turn one `NAME` (`xy`) into two symbols only at parse time, so highlighting the whole name is
+  correct at the lexical layer; a highlighter that split it would be re-implementing the parser.
+  A disabled construct is reported by `Calculator.evaluate` (`^` with `convert_xor` off, `2x` with
+  implicit multiplication off), not by inventing lexical tokens for it.
 - **Parser conveniences are user settings, but stored values are not.** `parse_options.py` exposes
   only the syntax switches that have a meaningful choice: `factorial_notation`, `split_symbols`,
   `implicit_multiplication`, `convert_xor`, `implicit_application`, `function_exponentiation`;

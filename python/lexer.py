@@ -61,13 +61,14 @@ class Token(NamedTuple):
 
 
 #: Multi-character first, so ``**`` never lexes as two ``*``. Mirrors what the
-#: parser accepts: ``convert_xor`` makes ``^`` a power, and the augmented forms
-#: come from ``calculator.AUGMENTED_OPS``.
+#: parser accepts: ``convert_xor`` makes ``^`` a power, ``factorial_notation``
+#: makes ``!`` a postfix factorial, and the augmented forms come from
+#: ``calculator.AUGMENTED_OPS``.
 _OPERATORS: Sequence[str] = (
     "**=", "//=", ">>=", "<<=", "!=", "<=", ">=", "==",
     "**", "//", "<<", ">>",
     "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=",
-    "+", "-", "*", "/", "%", "^", "=", "<", ">", "~", "&", "|", "@",
+    "+", "-", "*", "/", "%", "^", "!", "=", "<", ">", "~", "&", "|", "@",
     ",", ".", ":", ";",
 )
 
