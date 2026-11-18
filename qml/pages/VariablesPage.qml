@@ -79,13 +79,35 @@ Item {
     //: its two fields is live.
     property var activeEditor: null
 
-    //: The details panel is a view toggle, closed by default; the toolbar button
-    //: says which way it goes.
-    property bool sidebarOpen: false
-    //: The details panel's width. A named number because 320 also appears on other
-    //: pages meaning something else entirely (History's prefetch margin, the
-    //: dialogs' width).
-    readonly property int panelWidth: 320
+    //: The details panel is a view toggle. Its open state and width persist in
+    //: config.yaml through settingsVM; the defaults are closed/320.
+    property bool sidebarOpen: settingsVM.variablesSidebarOpen
+    onSidebarOpenChanged: {
+        if (sidebarOpen !== settingsVM.variablesSidebarOpen)
+            settingsVM.variablesSidebarOpen = sidebarOpen
+    }
+    //: The details panel's width, dragged by the splitter. A named number
+    //: because 320 also appears on other pages meaning something else entirely
+    //: (History's prefetch margin, the dialogs' width).
+    property int panelWidth: settingsVM.variablesSidebarWidth
+    property int pendingPanelWidth: settingsVM.variablesSidebarWidth
+    readonly property int panelMinWidth: 240
+    readonly property int panelMaxWidth: Math.max(
+        panelMinWidth, Math.min(480, page.width - 360))
+    //: While the splitter drags, the panel's width must not animate frame by
+    //: frame or the pointer would fight the easing.
+    property bool panelResizing: false
+    onPanelWidthChanged: {
+        if (panelWidth !== settingsVM.variablesSidebarWidth) {
+            pendingPanelWidth = panelWidth
+            panelWidthSaveTimer.restart()
+        }
+    }
+    Timer {
+        id: panelWidthSaveTimer
+        interval: 250
+        onTriggered: settingsVM.variablesSidebarWidth = pendingPanelWidth
+    }
 
     //: Bumped on every model change. The panel's line is read through functions —
     //: `latexFor` and `cellAt` — and a call in a binding creates no dependency of
@@ -209,7 +231,7 @@ Item {
         anchors.left: parent.left
         anchors.top: parent.top
         anchors.bottom: parent.bottom
-        anchors.right: details.left
+        anchors.right: detailsSplitter.left
 
         Column {
             id: content
@@ -393,6 +415,84 @@ Item {
         }
     }
 
+    //: The details panel is a resizable sidebar. A plain splitter, like the
+    //: Calculator's pane divider, carries the same ContentSizer treatment rather
+    //: than a SplitView: the page body already owns its scroll and the panel's
+    //: open/close is a width animation, so a second SplitView would introduce a
+    //: competing handle/state machine. The 16px band is only present while the
+    //: panel is open; when it is closed the body runs to the window edge again.
+    Item {
+        id: detailsSplitter
+
+        objectName: "variablesSplitter"
+        visible: page.sidebarOpen
+        width: page.sidebarOpen ? 16 : 0
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        anchors.right: details.left
+        z: 1
+
+        Rectangle {
+            anchors.fill: parent
+            color: splitHover.containsMouse
+                ? (Theme.currentTheme.isDark
+                    ? Theme.currentTheme.colors.controlTertiaryColor
+                    : Theme.currentTheme.colors.subtleSecondaryColor)
+                : "transparent"
+
+            Behavior on color {
+                ColorAnimation {
+                    duration: 120
+                    easing.type: Easing.OutCubic
+                }
+            }
+        }
+
+        Rectangle {
+            anchors.centerIn: parent
+            width: 4
+            height: 24
+            radius: 2
+            color: Theme.currentTheme.colors.systemNeutralColor
+        }
+
+        MouseArea {
+            id: splitHover
+
+            anchors.fill: parent
+            hoverEnabled: true
+            preventStealing: true
+            cursorShape: Qt.SplitHCursor
+
+            property real pressPageX: 0
+            property int pressWidth: 0
+
+            onPressed: (mouse) => {
+                page.panelResizing = true
+                pressPageX = mapToItem(page, mouse.x, mouse.y).x
+                pressWidth = page.panelWidth
+                mouse.accepted = true
+            }
+
+            onPositionChanged: (mouse) => {
+                if (!pressed)
+                    return
+                const x = mapToItem(page, mouse.x, mouse.y).x
+                page.panelWidth = Math.max(
+                    page.panelMinWidth,
+                    Math.min(page.panelMaxWidth,
+                             pressWidth + pressPageX - x))
+            }
+
+            onReleased: {
+                page.panelResizing = false
+                page.refreshTableLayout()
+                panelWidthSaveTimer.stop()
+                settingsVM.variablesSidebarWidth = page.panelWidth
+            }
+        }
+    }
+
     // The details panel: the selected variable as one LaTeX line (or, when there
     // is nothing to typeset, the raw entry), the two fields that make it, and the
     // row's own actions. Fixed rather than scrolled: the table narrows beside it,
@@ -412,7 +512,7 @@ Item {
         flickable: varsScroll
         inlineRow: headerRow
         //: The floating bar belongs over the table, not over the panel beside it.
-        rightBoundary: details
+        rightBoundary: detailsSplitter
         //: The body is inset 12 (it is a table, not prose), so the bar's own inset
         //: has to match or the floating title would sit 12px off its inline self.
         inset: 12
@@ -497,8 +597,8 @@ Item {
         ToolSeparator {}
         ToolButton {
             icon.name: page.sidebarOpen
-                ? "ic_fluent_panel_left_contract_20_regular"
-                : "ic_fluent_panel_left_expand_20_regular"
+                ? "ic_fluent_panel_right_contract_20_filled"
+                : "ic_fluent_panel_right_expand_20_regular"
             icon.color: enabled
                 ? Theme.currentTheme.colors.textColor
                 : Theme.currentTheme.colors.textDisabledColor

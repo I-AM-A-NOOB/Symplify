@@ -23,7 +23,7 @@
   `=`, `+=`, `-=`, `*=`, `/=`; the mode and inputs survive page switches.
 - **Variables and history** — snapshot variables with inline editing and search;
   every calculation becomes a searchable history card with copy and *Send to
-  input*.
+  input*. Variables and history are persisted across launches.
 - **On-screen keyboard** — seven YAML-configured tabs plus user copies in the
   settings folder, an uppercase Shift layer, cursor keys and selection-aware
   Backspace; mathematical glyphs are typeset through the LaTeX renderer and
@@ -155,6 +155,7 @@ versioning and architecture rules.
 
 - [Architecture walkthrough](docs/architecture.md) — the model-first data flow and
   the backend boundary.
+- [数据持久化简介](docs/persistence.zh-CN.md) — 设置、变量 Store、便携模式和异常恢复的中文概览.
 - [Developer guide](.Agent/DEVELOPER_GUIDE.md) — source layout, invariants, known
   Qt/RinUI traps, build and release details.
 - [Command cheat sheet](scripts/cheat-sheet.md) — the day-to-day commands.

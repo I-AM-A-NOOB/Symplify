@@ -4,7 +4,7 @@ import RinUI
 
 //: The Variables page's details panel — the selected variable as one LaTeX line (or,
 //: when there is nothing to typeset, the raw entry), the two fields that make it, and
-//: the row's own actions. Fixed rather than scrolled: the table narrows beside it, so
+//: the row's own actions. Resizable rather than scrolled: the table narrows beside it, so
 //: both stay where the reader left them.
 //:
 //: It is the page's (`host`) because everything it shows is the page's state: which
@@ -72,12 +72,13 @@ Rectangle {
     //: that stayed visible would still take its clicks.
     width: host.sidebarOpen ? host.panelWidth : 0
     visible: width > 0
-    color: Theme.currentTheme.colors.cardColor
+    color: "transparent"
 
     Behavior on width {
+        enabled: !host.panelResizing
         NumberAnimation {
             duration: Utils.animationSpeed
-            easing.type: Easing.OutQuint
+            easing.type: Easing.OutCubic
 
             //: The table's columns are computed from its own width, and the
             //: provider runs whenever that changes — which, during this animation,
@@ -89,6 +90,19 @@ Rectangle {
             //: animation stops fixes it at the only moment that matters.
             onRunningChanged: if (!running) host.refreshTableLayout()
         }
+    }
+
+    //: The sidebar deliberately paints no surface: leaving it transparent lets
+    //: the native window backdrop (Mica/Acrylic) and RinUI's app layer show
+    //: through, instead of covering them with a card colour or an acrylic brush
+    //: sampled from the table. The splitter supplies the interaction and hover
+    //: band, and the hairline marks the edge against the table.
+    Rectangle {
+        anchors.left: parent.left
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        width: Theme.currentTheme.appearance.borderWidth
+        color: Theme.currentTheme.colors.cardBorderColor
     }
 
     ColumnLayout {
@@ -183,26 +197,23 @@ Rectangle {
             placeholderText: qsTr("name")
             onAccepted: applyDetails()
         }
-        //: Shaped exactly like the Calculator's Assign value box — the shared
-        //: `CodeArea`, wrapping, its own height — rather than a forced 40px: a
-        //: fixed height fights the content as soon as the expression wraps, and the
-        //: panel is narrower than any calculator row.
-        CodeArea {
+        //: The expression field is the same scrollable construction as the
+        //: Calculator's Code input: a `ScrollableTextArea` with an inner
+        //: `TextArea`, code surface/ink and top-aligned text. A bare `CodeArea`
+        //: centred its text vertically and only looked like a formula box.
+        CodeScrollArea {
             id: valueField
 
             Layout.fillWidth: true
             Layout.minimumWidth: 80
-            Layout.alignment: Qt.AlignVCenter
+            Layout.minimumHeight: 80
+            Layout.preferredHeight: 110
             enabled: host.selectedRow >= 0
             wrapMode: TextEdit.Wrap
             placeholderText: qsTr("expression")
             // Enter applies and never inserts a newline, as everywhere else.
-            Keys.onPressed: (event) => {
-                if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-                    event.accepted = true
-                    applyDetails()
-                }
-            }
+            submitOnEnter: true
+            onSubmitRequested: applyDetails()
         }
 
         //: The panel's whole vocabulary, as two plain buttons with their words on

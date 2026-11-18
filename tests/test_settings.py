@@ -125,20 +125,56 @@ def test_layout_settings_round_trip_and_clamp():
     assert store.get("workspace.input_width") == 320
     assert store.get("workspace.result_share") == 0.5
     assert store.get("workspace.keyboard_collapsed") is False
+    assert store.get("workspace.variables_sidebar_open") is False
+    assert store.get("workspace.variables_sidebar_width") == 320
 
     store.update({
         "workspace.input_width": 420,
         "workspace.result_share": 0.25,
         "workspace.keyboard_collapsed": True,
+        "workspace.variables_sidebar_open": True,
+        "workspace.variables_sidebar_width": 400,
     })
     reloaded = store_at(path)
     assert reloaded.get("workspace.input_width") == 420
     assert reloaded.get("workspace.result_share") == 0.25
     assert reloaded.get("workspace.keyboard_collapsed") is True
+    assert reloaded.get("workspace.variables_sidebar_open") is True
+    assert reloaded.get("workspace.variables_sidebar_width") == 400
 
     assert reloaded.set("workspace.input_width", 100) == 280
     assert reloaded.set("workspace.result_share", 2.0) == 1.0
     assert reloaded.set("workspace.result_share", -1.0) == 0.0
+    assert reloaded.set("workspace.variables_sidebar_width", 100) == 240
+    assert reloaded.set("workspace.variables_sidebar_width", 999) == 480
+
+
+def test_reset_workspace_layout_leaves_other_workspace_settings_alone():
+    from python.viewmodel.settings_viewmodel import SettingsViewModel
+
+    store = store_at(temp_dir() / CONFIG_FILENAME)
+    store.update({
+        "workspace.input_width": 500,
+        "workspace.result_share": 0.2,
+        "workspace.keyboard_collapsed": True,
+        "workspace.variables_sidebar_open": True,
+        "workspace.variables_sidebar_width": 440,
+        "workspace.code_theme": "one",
+        "workspace.zen_fullscreen": True,
+        "window.width": 1400,
+    })
+    vm = SettingsViewModel(store)
+    vm.resetWorkspaceLayout()
+
+    assert vm.inputPanelWidth == 320
+    assert vm.resultShare == 0.5
+    assert vm.keyboardCollapsed is False
+    assert vm.variablesSidebarOpen is False
+    assert vm.variablesSidebarWidth == 320
+    # These are workspace/window settings, but not layout, and must survive.
+    assert vm.codeTheme == "one"
+    assert vm.zenFullscreen is True
+    assert store.get("window.width") == 1400
 
 
 def test_bracket_settings_round_trip_and_repair_what_cannot_be_painted():

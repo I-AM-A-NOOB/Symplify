@@ -67,34 +67,63 @@ Item {
     readonly property string barTitle: header.section.length > 0
         ? header.section : header.title
     //: What is painted. It trails `barTitle` by one animation: the outgoing label
-    //: leaves upward, the text swaps, the incoming one arrives from below.
+    //: leaves, the text swaps, the incoming one arrives from the other side.
     property string paintedTitle: ""
+    //: Last observed `contentY`, so the swap can follow the reader's direction.
+    property real lastContentY: 0
+    //: 1 while the content moves down (revealing lower sections), -1 while it
+    //: moves back up. The label swap reads in the same direction as the scroll.
+    property int scrollDirection: 1
+    //: Captured when a swap starts, so a further scroll cannot reverse it midway.
+    property int swapDirection: 1
 
     Component.onCompleted: header.paintedTitle = header.barTitle
+    onFlickableChanged: {
+        if (header.flickable)
+            header.lastContentY = header.flickable.contentY
+    }
+    function captureScrollDirection() {
+        if (!header.flickable)
+            return
+        const current = header.flickable.contentY
+        const delta = current - header.lastContentY
+        if (delta !== 0)
+            header.scrollDirection = delta > 0 ? 1 : -1
+        header.lastContentY = current
+    }
+    Connections {
+        target: header.flickable
+        function onContentYChanged() { header.captureScrollDirection() }
+    }
     onBarTitleChanged: {
-        if (header.barTitle !== header.paintedTitle)
+        // `section` is a binding on `contentY`; the Connections handler and this
+        // one have no guaranteed order, so look for the delta here too.
+        header.captureScrollDirection()
+        if (header.barTitle !== header.paintedTitle) {
+            header.swapDirection = header.scrollDirection
             swapAnimation.restart()
+        }
     }
 
     SequentialAnimation {
         id: swapAnimation
 
-        //: Out: up and away, fading as it goes.
+        //: Out: away from the reader's direction of travel, fading as it goes.
         NumberAnimation {
             target: titleLabel
             property: "slide"
-            to: -7
+            to: header.swapDirection < 0 ? 7 : -7
             duration: 110
             easing.type: Easing.InCubic
         }
-        //: The swap happens while the label is invisible, so the jump from below
-        //: is never seen.
+        //: The swap happens while the label is invisible, so the jump from the
+        //: other side is never seen.
         ScriptAction { script: header.paintedTitle = header.barTitle }
-        //: In: from below, into place.
+        //: In: from the other side, into place.
         NumberAnimation {
             target: titleLabel
             property: "slide"
-            from: 7
+            from: header.swapDirection < 0 ? -7 : 7
             to: 0
             duration: 170
             easing.type: Easing.OutCubic

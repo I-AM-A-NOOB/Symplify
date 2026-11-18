@@ -107,6 +107,7 @@ def main() -> int:
         variables_backend=ProcessBackend(CALCULATION_TIMEOUT_SECONDS),
         translation_dir=ROOT / "i18n",
         icon_dir=ROOT / "icon",
+        history_path=runtime.settings.path.with_name("history.json"),
     )
     context = window.engine.rootContext()
     context.setContextProperty("vm", vm)

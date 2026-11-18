@@ -175,7 +175,7 @@ class CalculatorViewModel(QObject):
         # into its `PlotView`. The curves are its children and outlive the page
         # with it.
         self._plot = Plot(parent=self)
-        # qmlmathplot 0.7.1 defaults to 4x MSAA, but keep the memory/quality
+        # qmlmathplot 0.7.2 defaults to 4x MSAA, but keep the memory/quality
         # choice explicit: a future default change must not silently enlarge the
         # plot's largest render target.
         self._plot.sampleCount = 4

@@ -1649,6 +1649,34 @@ def test_main_view_model_hands_variables_its_backend():
     assert backend.requests[0][1] == "variable"
 
 
+def test_variables_worker_shutdown_tolerates_a_deleted_qtimer():
+    """Closing while the Variables page is active may run after Qt deleted the timer.
+
+    `ProcessBackend.shutdown` is reached twice in that path: once from
+    `aboutToQuit` and once from `VariablesPage.onDestruction`. The QTimer child
+    can already be gone by the second call; it must not raise.
+    """
+    from python.viewmodel.calculation_backend import ProcessBackend
+
+    class DeletedTimer:
+        def stop(self) -> None:
+            raise RuntimeError(
+                "libshiboken: Internal C++ object (PySide6.QtCore.QTimer) "
+                "already deleted."
+            )
+
+        def start(self) -> None:
+            raise RuntimeError(
+                "libshiboken: Internal C++ object (PySide6.QtCore.QTimer) "
+                "already deleted."
+            )
+
+    backend = ProcessBackend()
+    backend._poll_timer = DeletedTimer()
+    backend.shutdown()
+    backend.shutdown()
+
+
 def test_variables_worker_is_lazy_and_stops_when_idle():
     from python.viewmodel.log_viewmodel import LogViewModel
     from python.viewmodel.variables_viewmodel import VariablesViewModel
@@ -1778,6 +1806,53 @@ def test_history_is_bounded_and_evicts_the_oldest_entry():
     assert sizes == [1, 2, 3, 3, 3]
     assert [history.data(history.index(row, 0), HistoryModel.ExpressionRole)
             for row in range(3)] == ["e4", "e3", "e2"]
+
+
+def test_history_persists_durable_entries_and_restores_order():
+    path = temp_dir() / "history.json"
+    history = HistoryModel(path=path)
+    history.add_item(
+        "x + 1", "x + 1", mode="Code", latex="x+1",
+        canonical_input="x + 1",
+    )
+    history.add_item(
+        "a", "4", mode="Assign", name="a", op="=", latex="a=4",
+        canonical_input="a = 4",
+    )
+    history.add_item("bad(", "", mode="Code", error="syntax", latex="")
+
+    restored = HistoryModel(path=path)
+    assert restored.load_error == ""
+    assert restored.count == 3
+    rows = {
+        restored.data(restored.index(row, 0), HistoryModel.ExpressionRole): row
+        for row in range(restored.count)
+    }
+    assert rows == {"bad(": 0, "a": 1, "x + 1": 2}
+    error_row = rows["bad("]
+    assert restored.data(restored.index(error_row, 0), HistoryModel.ErrorRole) == "syntax"
+    assign_row = rows["a"]
+    assert restored.data(restored.index(assign_row, 0), HistoryModel.ModeRole) == "Assign"
+    assert restored.data(restored.index(assign_row, 0), HistoryModel.NameRole) == "a"
+    assert restored.data(restored.index(assign_row, 0), HistoryModel.ResultRole) == "4"
+    assert restored.data(
+        restored.index(assign_row, 0), HistoryModel.CanonicalInputRole
+    ) == "a = 4"
+    assert restored.data(restored.index(assign_row, 0), HistoryModel.TimeRole) != ""
+
+    # Clear is durable too: a restart must not bring the entries back.
+    restored.clear()
+    assert HistoryModel(path=path).count == 0
+
+
+def test_a_corrupt_history_file_is_set_aside():
+    path = temp_dir() / "history.json"
+    path.write_text("{ not json", encoding="utf-8")
+    history = HistoryModel(path=path)
+    assert history.count == 0
+    assert "history not loaded" in history.load_error
+    assert not path.exists()
+    assert path.with_suffix(".json.corrupt").exists()
 
 
 def test_count_is_a_notifying_property():

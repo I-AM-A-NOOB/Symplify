@@ -5,6 +5,7 @@ import QtQuick.Layouts
 import QtQuick.Templates as T
 import QtQuick.Window 2.15
 import RinUI
+import RinUI as Rin
 
 //: The Calculator's input half: the Code / Assign stage, both editors and the
 //: on-screen keyboard, plus the focus and cursor helpers the keyboard drives.
@@ -27,11 +28,27 @@ Item {
     //: The inner text item of the Code box; the helpers below address it.
     readonly property Item codeInput: codeArea.textArea
 
+    //: True after a focus jump triggered by an operator/Backspace. The OS keeps
+    //: delivering auto-repeated events to the *new* focus item; swallow those
+    //: until a fresh (non-repeat) press so holding the key cannot keep editing
+    //: or jumping in the destination field.
+    property bool repeatGuard: false
+
+    function consumeRepeat(event) {
+        if (event.isAutoRepeat) {
+            if (root.repeatGuard) {
+                event.accepted = true
+                return true
+            }
+        } else {
+            root.repeatGuard = false
+        }
+        return false
+    }
+
     Component.onCompleted: {
-        // Code colouring on the input. The item hands over its document, and the
-        // palette follows the ACTIVE theme — RinUI resolves Auto against the OS,
-        // so ask it rather than the setting.
-        vm.attachCodeHighlighting(codeArea.textArea.textDocument, Theme.isDark())
+        // CodeScrollArea owns the highlighter, so Code and Variables expression
+        // boxes cannot attach two highlighters to the same document.
         codeInput.forceActiveFocus()
     }
 
@@ -68,7 +85,7 @@ Item {
     }
 
     function fallbackTarget() {
-        return calcVM.inputMode === 0 ? codeInput : assignValueField
+        return calcVM.inputMode === 0 ? codeInput : assignValueField.textArea
     }
 
     function keyboardTarget() {
@@ -123,10 +140,33 @@ Item {
         target.cursorPosition = position
     }
 
+    //: Empty one editor through an undoable text operation. `clear()` resets
+    //: the document in one go and can drop the edit history; `remove()` is the
+    //: same replacement expressed as an edit, so the expression just cleared
+    //: remains the next Undo step.
+    function clearEditor(editor) {
+        if (!editor || editor.length === 0)
+            return
+        if (editor.remove)
+            editor.remove(0, editor.length)
+        else if (editor.clear)
+            editor.clear()
+        else
+            editor.text = ""
+    }
+
     function clearInput() {
         const target = keyboardTarget()
-        if (target && target.clear)
-            target.clear()
+        // "Clear" resets the whole workspace, not just the field that happens
+        // to have focus. Both modes' editors are emptied through their own
+        // undoable operation, then the result/plot/variants are reset.
+        clearEditor(codeInput)
+        clearEditor(assignNameField)
+        clearEditor(assignValueField.textArea)
+        calcVM.assignOperator = "="
+        calcVM.clear_result()
+        if (target)
+            target.forceActiveFocus()
     }
 
     function undoInput() {
@@ -178,7 +218,7 @@ Item {
             const value = calcVM.assignValue.trim()
             if (name && value) {
                 calcVM.calculateAssign(name, calcVM.assignOperator, value)
-                assignValueField.forceActiveFocus()
+                assignValueField.textArea.forceActiveFocus()
             }
         }
     }
@@ -229,12 +269,13 @@ Item {
             // as its wrapping value needs. The spacer after the keyboard takes
             // the sidebar's spare height, so the keys stay above it instead of
             // floating.
+            //: Code and Assign share one fixed stage height. The mode slide
+            //: must not resize the workspace (and move the keyboard/result)
+            //: when it switches; the value field scrolls inside this box.
             Layout.minimumHeight: 110
-            Layout.preferredHeight: calcVM.inputMode === 0
-                    ? 110
-                    : Math.min(240, Math.max(110, assignRow.implicitHeight + 8))
+            Layout.preferredHeight: 110
 
-            ScrollableTextArea {
+            CodeScrollArea {
                 id: codeArea
 
                 objectName: "codeInput"
@@ -259,44 +300,22 @@ Item {
                 placeholderText: qsTr("Enter expression...")
                 wrapMode: TextEdit.Wrap
                 onTextChanged: calcVM.inputText = text
-                // The box takes the code theme's own surface, and the inner
-                // area's background has to go or it would cover it. Text the
-                // palette leaves unpainted (a free symbol) then reads in the
-                // theme's ink rather than the UI's, which is what keeps it
-                // legible there.
-                background: CodeSurface {
-                    focused: codeArea.textArea.activeFocus
-                }
-                textArea.background: null
-                textArea.color: look.ink
-                // The theme's own placeholder colour, which the family states or
-                // VSCode derives from its foreground. "" keeps RinUI's, for a
-                // family with no surface of its own.
-                textArea.placeholderTextColor: look.placeholder
-                // The inner area is the text item: it draws the glyphs, so the
-                // code font has to reach it, and it holds the keystrokes, so the
-                // '=' shortcut does too.
-                textArea.font: look.font
+                //: The inner area is the text item: it draws the glyphs and
+                //: holds the keystrokes, so the '=' shortcut lives here. Code
+                //: and Variables expression boxes share this whole component.
                 textArea.Keys.onPressed: (event) => {
+                    if (root.consumeRepeat(event))
+                        return
                     if (event.key === Qt.Key_Equal
                             && !event.modifiers
                             && calcVM.inputText.trim().length === 0) {
-                        root.switchToAssign()
                         event.accepted = true
+                        if (!event.isAutoRepeat) {
+                            root.repeatGuard = true
+                            root.switchToAssign()
+                        }
                     }
                 }
-            }
-
-            //: The app's context menu for the Code box (see `CodeContextMenu`):
-            //: a sibling of the box rather than a child, because the box is
-            //: RinUI's `ScrollableTextArea` and this has to sit *over* it — ahead
-            //: of the menu its own inner `TextArea` opens from a vendored
-            //: `MouseArea`. It covers what the box covers, and shows when the
-            //: box does.
-            CodeContextMenu {
-                editor: codeArea.textArea
-                anchors.fill: codeArea
-                visible: calcVM.inputMode === 0
             }
 
             ColumnLayout {
@@ -330,7 +349,9 @@ Item {
                     CodeField {
                         id: assignNameField
 
-                        Layout.preferredWidth: 130
+                        objectName: "assignNameInput"
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 80
                         Layout.alignment: Qt.AlignVCenter
                         text: calcVM.assignName
                         placeholderText: qsTr("name")
@@ -338,45 +359,60 @@ Item {
 
                         // Smart navigation: an operator typed at the end of the
                         // name sets the combo and jumps to the value; backspace at
-                        // position 0 returns to Code mode.
+                        // position 0 returns to Code mode. Auto-repeat must not
+                        // perform either jump: holding a key should type/repeat in
+                        // one field, and the next press after release can move.
                         Keys.onPressed: (event) => {
+                            if (root.consumeRepeat(event))
+                                return
                             const opMap = { "=": 0, "+": 1, "-": 2,
                                             "*": 3, "/": 4, "%": 5 }
                             const opIndex = opMap[event.text]
                             const mods = event.modifiers & ~Qt.ShiftModifier
                             if (opIndex !== undefined && mods === 0
                                     && cursorPosition === length) {
-                                calcVM.assignOperator = operatorCombo.model[opIndex]
-                                assignValueField.forceActiveFocus()
+                                if (event.isAutoRepeat) {
+                                    event.accepted = true
+                                    return
+                                }
+                                calcVM.assignOperator = operatorCombo.operators[opIndex]
+                                root.repeatGuard = true
+                                assignValueField.textArea.forceActiveFocus()
                                 event.accepted = true
                             } else if (event.key === Qt.Key_Backspace
                                        && cursorPosition === 0
                                        && selectedText === "") {
+                                if (event.isAutoRepeat) {
+                                    event.accepted = true
+                                    return
+                                }
+                                root.repeatGuard = true
                                 root.switchToCode()
                                 event.accepted = true
                             }
                         }
                     }
 
-                    ComboBox {
+                    Rin.ComboBox {
                         id: operatorCombo
 
-                        Layout.preferredWidth: 96
+                        objectName: "assignOperatorCombo"
+                        readonly property var operators:
+                            ["=", "+=", "-=", "*=", "/=", "%="]
                         Layout.alignment: Qt.AlignVCenter
-                        model: ["=", "+=", "-=", "*=", "/=", "%="]
+                        model: operators
                         currentIndex: {
                             const i = model.indexOf(calcVM.assignOperator)
                             return i >= 0 ? i : 0
                         }
                         onActivated: (index) => calcVM.assignOperator = model[index]
                     }
-
-                    Item { Layout.fillWidth: true }
                 }
 
-                // The shared highlighted code area — full width on the second
-                // line; it fills the Assign stage's spare height.
-                CodeArea {
+                // The same scrollable construction as Code mode and the
+                // Variables expression field: an inner TextArea keeps the text
+                // top-aligned, and the shared code surface/highlighter applies.
+                CodeScrollArea {
                     id: assignValueField
 
                     Layout.fillWidth: true
@@ -388,19 +424,19 @@ Item {
                     wrapMode: TextEdit.Wrap
                     onTextChanged: calcVM.assignValue = text
 
-                    Keys.onPressed: (event) => {
-                        // Enter calculates, never inserts a newline.
-                        if (event.key === Qt.Key_Return
-                                || event.key === Qt.Key_Enter) {
-                            root.runCalculation()
-                            event.accepted = true
-                        } else if (event.key === Qt.Key_Backspace
-                                   && cursorPosition === 0
-                                   && length === 0) {
-                            // Backspace in an empty value -> focus the name
-                            assignNameField.forceActiveFocus()
-                            event.accepted = true
-                        }
+                    textArea.objectName: "assignValueInput"
+                    submitOnEnter: true
+                    emptyBackspaceJumps: true
+                    autoRepeatBlocked: root.repeatGuard
+                    onSubmitRequested: root.runCalculation()
+                    onNonAutoRepeatPressed: root.repeatGuard = false
+                    onEmptyBackspacePressed: (autoRepeat) => {
+                        // Holding Backspace must not leave the field: consume the
+                        // repeated event; release, then press again to jump.
+                        if (autoRepeat)
+                            return
+                        root.repeatGuard = true
+                        assignNameField.forceActiveFocus()
                     }
                 }
             }

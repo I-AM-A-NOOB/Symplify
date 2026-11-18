@@ -103,6 +103,7 @@ Item {
 
     ColumnLayout {
         anchors.fill: parent
+        anchors.margins: 8
         spacing: 8
 
         //: The backend state belongs to the result it governs, so it sits above
@@ -112,7 +113,7 @@ Item {
             id: resultHeaderRow
 
             Layout.fillWidth: true
-            Layout.rightMargin: 8
+            Layout.preferredHeight: 32
             spacing: 6
 
             ProgressRing {
@@ -146,7 +147,7 @@ Item {
             ToolButton {
                 objectName: "resultCopyButton"
                 flat: true
-                icon.name: "ic_fluent_copy_20_regular"
+                icon.name: "ic_fluent_clipboard_letter_20_regular"
                 icon.color: enabled
                     ? Theme.currentTheme.colors.textColor
                     : Theme.currentTheme.colors.textDisabledColor

@@ -93,8 +93,144 @@ Item {
     //: layout of the *current* container rather than stale pixel sizes.
     property bool layoutFromHorizontal: false
     property bool wasPlotBesideResult: false
+    //: A plot appearing for the first time has no previous orientation: start
+    //: directly at its target. Animating from `layoutFromHorizontal == false`
+    //: used to paint the result full-width with the plot below it for one
+    //: decision timer, then flip to the side-by-side layout in fullscreen.
+    //: Set after the first plot's appearance animation, or immediately when a
+    //: page is rebuilt with a plot already present. A later orientation change
+    //: still uses the normal layout transition.
+    property bool plotWasVisible: false
+    //: True while the first plot is growing from the no-plot state into its
+    //: target layout. It reuses `layoutProgress`/`layoutAnimation`; the result
+    //: starts at full size and the plot starts at zero.
+    property bool plotAppearing: false
+    //: True while an existing plot is shrinking out after `hasPlot` turns
+    //: false. The result grows back to the full area with the same tween.
+    property bool plotCollapsing: false
+    property bool plotCollapseFromHorizontal: false
+    property real plotCollapseShare: 0.5
+
+    Component.onCompleted: {
+        if (calcVM.hasPlot) {
+            plotWasVisible = true
+            settlePlotLayout()
+        }
+    }
+
+    function settlePlotLayout() {
+        layoutFromHorizontal = plotBesideResult
+        wasPlotBesideResult = plotBesideResult
+        if (!splitArea)
+            return
+        splitArea.stopLayoutAnimation()
+        splitArea.layoutPending = false
+        splitArea.layoutProgress = 1
+    }
+
+    function beginPlotAppearance() {
+        if (!calcVM.hasPlot || plotAppearing)
+            return
+        plotAppearing = true
+        layoutFromHorizontal = plotBesideResult
+        wasPlotBesideResult = plotBesideResult
+        plotCollapsing = false
+        if (!splitArea)
+            return
+        splitArea.prepareLayoutAnimation()
+        plotLayoutSettleTimer.restart()
+    }
+
+    function finishPlotAppearance() {
+        plotAppearing = false
+        plotWasVisible = true
+        wasPlotBesideResult = plotBesideResult
+    }
+
+    function beginPlotCollapse() {
+        if (!plotWasVisible || plotAppearing || plotCollapsing)
+            return
+        if (!splitArea)
+            return
+        plotWasVisible = false
+        plotCollapsing = true
+        plotCollapseFromHorizontal = wasPlotBesideResult
+        plotCollapseShare = plotCollapseFromHorizontal
+            ? splitArea.horizontalShare : splitArea.verticalShare
+        plotLayoutSettleTimer.stop()
+        splitArea.prepareLayoutAnimation()
+        splitArea.startLayoutAnimation()
+    }
+
+    function finishPlotCollapse() {
+        plotCollapsing = false
+        plotWasVisible = false
+    }
+
+    //: Let the first target settle (the split area/layout width arrives in a
+    //: later frame) before starting the tween. This is only a settle delay; the
+    //: tween itself is the same `layoutProgress` animation used for a flip.
+    Timer {
+        id: plotLayoutSettleTimer
+        interval: 50
+        onTriggered: {
+            if (!calcVM.hasPlot)
+                return
+            if (page.tabbedPanes) {
+                page.finishPlotAppearance()
+                splitArea.layoutPending = false
+                splitArea.layoutProgress = 1
+                return
+            }
+            page.layoutFromHorizontal = page.plotBesideResult
+            page.wasPlotBesideResult = page.plotBesideResult
+            splitArea.startLayoutAnimation()
+        }
+    }
+
+    Connections {
+        target: calcVM
+
+        function onPlotChanged() {
+            if (calcVM.hasPlot) {
+                if (page.plotCollapsing) {
+                    page.plotCollapsing = false
+                    page.plotWasVisible = false
+                }
+                if (!page.plotWasVisible)
+                    page.beginPlotAppearance()
+            } else {
+                plotLayoutSettleTimer.stop()
+                page.plotAppearing = false
+                if (page.plotWasVisible && !page.plotCollapsing)
+                    page.beginPlotCollapse()
+                else if (!page.plotCollapsing) {
+                    page.plotWasVisible = false
+                    if (splitArea)
+                        splitArea.stopLayoutAnimation()
+                    if (splitArea) {
+                        splitArea.layoutPending = false
+                        splitArea.layoutProgress = 1
+                    }
+                }
+            }
+        }
+    }
 
     onPlotBesideResultChanged: {
+        if (!calcVM.hasPlot)
+            return
+        if (plotAppearing) {
+            // The target may still be settling during the delay or tween.
+            wasPlotBesideResult = plotBesideResult
+            if (!splitArea.layoutAnimationRunning)
+                plotLayoutSettleTimer.restart()
+            return
+        }
+        if (!plotWasVisible) {
+            beginPlotAppearance()
+            return
+        }
         layoutFromHorizontal = wasPlotBesideResult
         wasPlotBesideResult = plotBesideResult
         splitArea.beginLayoutTransition()
@@ -285,7 +421,13 @@ Item {
 
                 SplitView.preferredWidth: page.inputPanelWidth
                 SplitView.minimumWidth: 280
-                onWidthChanged: page.scheduleInputWidth(width)
+            }
+
+            Connections {
+                target: inputPane
+                function onWidthChanged() {
+                    page.scheduleInputWidth(inputPane.width)
+                }
             }
 
             // Right area: result and plot. The result/plot divider is one
@@ -316,32 +458,65 @@ Item {
                     //: show the new layout, then jump back to animate from it.
                     property bool layoutPending: false
                     readonly property bool targetHorizontal:
-                        layoutPending ? page.layoutFromHorizontal
-                                      : page.plotBesideResult
+                        page.plotCollapsing
+                            ? page.plotCollapseFromHorizontal
+                            : layoutPending ? page.layoutFromHorizontal
+                                            : page.plotBesideResult
                     readonly property real splitLength:
                         targetHorizontal ? horizontalLength : verticalLength
-                    readonly property real minShare: splitLength <= 0 ? 0
-                        : targetHorizontal
-                            ? page.resultPaneMinWidth / splitLength
-                            : page.resultPaneMinHeight / splitLength
-                    readonly property real maxShare: splitLength <= 0 ? 1
-                        : targetHorizontal
-                            ? 1 - page.plotPaneMinWidth / splitLength
-                            : 1 - page.plotPaneMinHeight / splitLength
+                    //: Clamp each orientation against its own dimensions. Using
+                    //: the raw share during a flip made the plot overshoot when
+                    //: its share was over half (the result share was below the
+                    //: result minimum), then snap back to the clamped size at
+                    //: the end of the animation.
+                    readonly property real horizontalShare: {
+                        if (horizontalLength <= 0)
+                            return page.resultShare
+                        const low = page.resultPaneMinWidth / horizontalLength
+                        const high = 1 - page.plotPaneMinWidth / horizontalLength
+                        return Math.max(low, Math.min(high, page.resultShare))
+                    }
+                    readonly property real verticalShare: {
+                        if (verticalLength <= 0)
+                            return page.resultShare
+                        const low = page.resultPaneMinHeight / verticalLength
+                        const high = 1 - page.plotPaneMinHeight / verticalLength
+                        return Math.max(low, Math.min(high, page.resultShare))
+                    }
                     readonly property real effectiveShare:
-                        Math.max(minShare, Math.min(maxShare, page.resultShare))
-                    //: During a flip, interpolate the raw share so the pending
-                    //: old layout and the p=0 frame match. Minimums clamp only
-                    //: the settled, interactive layout (and the drag itself).
-                    readonly property real geometryShare:
-                        (layoutPending || layoutProgress < 1)
-                            ? page.resultShare : effectiveShare
+                        targetHorizontal ? horizontalShare : verticalShare
 
                     //: 0 at the old orientation, 1 at the new one. The panes'
                     //: geometry is interpolated from normalized dimensions of
                     //: the *current* split area, not from stale pixel sizes, so
                     //: a window resize cannot push the plot height negative.
                     property real layoutProgress: 1
+                    readonly property bool layoutAnimationRunning:
+                        layoutAnimation.running
+                    onLayoutProgressChanged: {
+                        if (layoutProgress >= 1) {
+                            if (page.plotAppearing)
+                                page.finishPlotAppearance()
+                            else if (page.plotCollapsing)
+                                page.finishPlotCollapse()
+                        }
+                    }
+
+                    function stopLayoutAnimation() {
+                        layoutAnimation.stop()
+                    }
+
+                    function prepareLayoutAnimation() {
+                        layoutAnimation.stop()
+                        layoutPending = false
+                        layoutProgress = 0
+                    }
+
+                    function startLayoutAnimation() {
+                        layoutPending = false
+                        layoutProgress = 0
+                        layoutAnimation.restart()
+                    }
 
                     function beginLayoutTransition() {
                         layoutAnimation.stop()
@@ -378,32 +553,53 @@ Item {
                         to: 1
                         duration: Utils.animationSpeed
                         easing.type: Easing.OutCubic
+
+                        onFinished: {
+                            if (page.plotCollapsing)
+                                page.finishPlotCollapse()
+                            else if (page.plotAppearing)
+                                page.finishPlotAppearance()
+                        }
                     }
 
                     readonly property real resultWidth: {
-                        if (page.tabbedPanes || !calcVM.hasPlot)
+                        if (page.tabbedPanes || (!calcVM.hasPlot && !page.plotCollapsing))
                             return width
+                        if (page.plotCollapsing) {
+                            const start = page.plotCollapseFromHorizontal
+                                ? horizontalLength * page.plotCollapseShare : width
+                            return start + (width - start) * layoutProgress
+                        }
                         if (layoutPending)
                             return targetHorizontal
-                                ? horizontalLength * geometryShare : width
+                                ? horizontalLength * horizontalShare : width
                         const end = targetHorizontal
-                            ? horizontalLength * geometryShare : width
-                        const start = page.layoutFromHorizontal
-                            ? horizontalLength * geometryShare : width
+                            ? horizontalLength * horizontalShare : width
+                        const start = page.plotAppearing
+                            ? width
+                            : page.layoutFromHorizontal
+                                ? horizontalLength * horizontalShare : width
                         return start + (end - start) * layoutProgress
                     }
                     readonly property real resultHeight: {
                         if (page.tabbedPanes)
                             return Math.max(0, height - tabbedHeaderHeight)
-                        if (!calcVM.hasPlot)
+                        if (!calcVM.hasPlot && !page.plotCollapsing)
                             return height
+                        if (page.plotCollapsing) {
+                            const start = page.plotCollapseFromHorizontal
+                                ? height : verticalLength * page.plotCollapseShare
+                            return start + (height - start) * layoutProgress
+                        }
                         if (layoutPending)
                             return targetHorizontal
-                                ? height : verticalLength * geometryShare
+                                ? height : verticalLength * verticalShare
                         const end = targetHorizontal
-                            ? height : verticalLength * geometryShare
-                        const start = page.layoutFromHorizontal
-                            ? height : verticalLength * geometryShare
+                            ? height : verticalLength * verticalShare
+                        const start = page.plotAppearing
+                            ? height
+                            : page.layoutFromHorizontal
+                                ? height : verticalLength * verticalShare
                         return start + (end - start) * layoutProgress
                     }
 
@@ -507,8 +703,9 @@ Item {
             PlotPane {
                 id: plotPane
 
-                visible: calcVM.hasPlot
+                visible: (calcVM.hasPlot || page.plotCollapsing)
                     && (!page.tabbedPanes || page.smallPaneIndex === 1)
+                keepAlive: page.plotCollapsing
                 x: page.tabbedPanes ? 0
                     : splitArea.targetHorizontal
                         ? resultPane.width + page.paneHandleWidth : 0

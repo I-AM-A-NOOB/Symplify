@@ -109,6 +109,9 @@ DEFAULTS: dict[str, Any] = {
         "input_width": 320,
         "result_share": 0.5,
         "keyboard_collapsed": False,
+        # Variables page details panel: whether it is open and how wide it is.
+        "variables_sidebar_open": False,
+        "variables_sidebar_width": 320,
         # The empty result pane's watermark: "icon" (the app's Σ monogram,
         # tinted neutral) or "random" (a random item from the pool drawn in the
         # result ink).
@@ -151,6 +154,7 @@ _CLAMPS = {
     "workspace.keyboard_size": (6, 72),
     "workspace.latex_size": (8, 96),
     "workspace.input_width": (280, 640),
+    "workspace.variables_sidebar_width": (240, 480),
     "window.width": (860, 20000),
     "window.height": (560, 20000),
 }
@@ -180,6 +184,8 @@ _KNOWN_KEYS = (
     "workspace.input_width",
     "workspace.result_share",
     "workspace.keyboard_collapsed",
+    "workspace.variables_sidebar_open",
+    "workspace.variables_sidebar_width",
     "workspace.result_watermark",
     "workspace.result_watermark_pool",
     "window.remember",

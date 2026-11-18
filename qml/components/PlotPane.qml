@@ -16,6 +16,10 @@ Item {
 
     objectName: "plotPane"
     visible: calcVM.hasPlot
+    //: Keep the PlotView's RHI surface alive while the page animates the panel
+    //: out; `calcVM.hasPlot` is already false when the collapse starts, and a
+    //: loader dropped immediately would remove the visible panel contents too.
+    property bool keepAlive: false
     //: The PlotView only exists while there is something to draw. Its GPU/RHI
     //: resources are the expensive part of this pane, and an empty calculator
     //: must not pay for them.
@@ -41,7 +45,6 @@ Item {
             text: qsTr("Plot")
             typography: Typography.Caption
             color: Theme.currentTheme.colors.textSecondaryColor
-            Layout.leftMargin: 4
         }
 
         Item { Layout.fillWidth: true }
@@ -102,7 +105,7 @@ Item {
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.margins: 3
-        anchors.topMargin: 0
+        anchors.topMargin: 8
 
         //: The same focus arrangement the Segmented items use: a Control is the
         //: Tab stop, so the shared ring can read `visualFocus`/`focusReason` and
@@ -157,7 +160,7 @@ Item {
             Loader {
                 id: plotLoader
                 anchors.fill: parent
-                active: calcVM.hasPlot
+                active: calcVM.hasPlot || root.keepAlive
 
                 sourceComponent: Component {
                     PlotView {

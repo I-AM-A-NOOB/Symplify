@@ -82,6 +82,7 @@ class MainViewModel(QObject):
         store_client: StoreClient | None = None,
         translation_dir: Path | None = None,
         icon_dir: Path | None = None,
+        history_path: Path | None = None,
     ):
         """Initialize all models and viewmodels.
 
@@ -113,6 +114,8 @@ class MainViewModel(QObject):
                 watermark is built from; defaults to the ``icon/`` folder beside
                 the resolved translation folder (``ROOT/icon`` both in a
                 checkout and next to the frozen exe).
+            history_path: Optional ``history.json``. The app passes the file
+                beside ``config.yaml``; tests/headless callers leave it None.
         """
         super().__init__(parent)
         self._calculator: Any | None = None
@@ -129,8 +132,12 @@ class MainViewModel(QObject):
         # One renderer process for both result/variant artwork and history
         # cards. The service owns the cache and invalidates queued work by owner.
         self._latex_service = LatexRenderService(self)
-        self._history = HistoryModel(parent=self, latex_service=self._latex_service)
+        self._history = HistoryModel(
+            parent=self, latex_service=self._latex_service, path=history_path
+        )
         self._log = LogViewModel(parent=self)
+        if self._history.load_error:
+            self._log.add_warning(self._history.load_error, "History")
         self._variables_vm = VariablesViewModel(
             self._variable_manager,
             self._log,

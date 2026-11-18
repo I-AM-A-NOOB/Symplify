@@ -238,7 +238,7 @@ SettingsSection {
 
                     SettingCard {
                         Layout.fillWidth: true
-                        title: qsTr("Reset to default")
+                        title: qsTr("Reset window geometry")
                         description: qsTr("Forget the saved geometry and let the system place the window.")
                         icon.name: "ic_fluent_arrow_reset_20_regular"
                         clickable: true

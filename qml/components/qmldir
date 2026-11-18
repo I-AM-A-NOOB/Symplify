@@ -15,6 +15,7 @@ CodeInputLook 1.0 CodeInputLook.qml
 # highlighter on the area's document — so the calculator's Assign row and the Variables
 # editors cannot drift apart. Each page keeps its own keys.
 CodeArea 1.0 CodeArea.qml
+CodeScrollArea 1.0 CodeScrollArea.qml
 CodeField 1.0 CodeField.qml
 # CodeContextMenu is the app's context menu for a text input, and the press that opens
 # it: every code and text field gets one (Qt's own attached menu anchors to the caret,
@@ -76,6 +77,9 @@ TitleBarButtons 1.0 TitleBarButtons.qml
 SettingRowBase 1.0 SettingRowBase.qml
 RadioSettingRow 1.0 RadioSettingRow.qml
 RadioSettingGroup 1.0 RadioSettingGroup.qml
+# CheckboxSettingRow/Group are the multi-choice siblings used by Calculation.
+CheckboxSettingRow 1.0 CheckboxSettingRow.qml
+CheckboxSettingGroup 1.0 CheckboxSettingGroup.qml
 SettingFieldRow 1.0 SettingFieldRow.qml
 SearchBar 1.0 SearchBar.qml
 # ProjectFocusIndicator is the focus ring both shadows below use (the radius and the

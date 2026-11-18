@@ -47,7 +47,7 @@ from ..localization import (
     resolve_language,
     translation_file,
 )
-from ..settings import SettingsStore
+from ..settings import DEFAULTS, SettingsStore
 from ..system_accent import SystemAccent
 from .settings_appearance import AppearanceSettings
 from .settings_fonts import FontSettings
@@ -348,12 +348,48 @@ class SettingsViewModel(
         self.layoutChanged.emit()
         self.changed.emit()
 
+    def _get_variables_sidebar_open(self) -> bool:
+        return bool(self._store.get("workspace.variables_sidebar_open"))
+
+    def _set_variables_sidebar_open(self, open_: bool) -> None:
+        self._store.set("workspace.variables_sidebar_open", bool(open_))
+        self.layoutChanged.emit()
+        self.changed.emit()
+
+    def _get_variables_sidebar_width(self) -> int:
+        return int(self._store.get("workspace.variables_sidebar_width"))
+
+    def _set_variables_sidebar_width(self, width: int) -> None:
+        self._store.set("workspace.variables_sidebar_width", width)
+        self.layoutChanged.emit()
+        self.changed.emit()
+
     @Slot()
     def openConfigFolder(self) -> None:
         """Open the folder holding the settings file."""
         folder = self._store.path.parent
         folder.mkdir(parents=True, exist_ok=True)
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
+
+    @Slot()
+    def resetWorkspaceLayout(self) -> None:
+        """Restore only the Calculator/Variables layout settings.
+
+        Other workspace settings (theme, fonts, keyboard layout, watermark, Zen)
+        are deliberately left alone; window geometry is a separate reset.
+        """
+        defaults = DEFAULTS["workspace"]
+        self._store.update({
+            "workspace.input_width": defaults["input_width"],
+            "workspace.result_share": defaults["result_share"],
+            "workspace.keyboard_collapsed": defaults["keyboard_collapsed"],
+            "workspace.variables_sidebar_open":
+                defaults["variables_sidebar_open"],
+            "workspace.variables_sidebar_width":
+                defaults["variables_sidebar_width"],
+        })
+        self.layoutChanged.emit()
+        self.changed.emit()
 
     @Slot()
     def resetToDefaults(self) -> None:
@@ -539,6 +575,14 @@ class SettingsViewModel(
     )
     keyboardCollapsed = Property(
         bool, _get_keyboard_collapsed, _set_keyboard_collapsed,
+        notify=layoutChanged,
+    )
+    variablesSidebarOpen = Property(
+        bool, _get_variables_sidebar_open, _set_variables_sidebar_open,
+        notify=layoutChanged,
+    )
+    variablesSidebarWidth = Property(
+        int, _get_variables_sidebar_width, _set_variables_sidebar_width,
         notify=layoutChanged,
     )
     # `warning` notifies on `changed`, not on `configChanged`: the store raises it

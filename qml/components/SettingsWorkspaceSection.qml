@@ -660,6 +660,15 @@ SettingsSection {
                         }
                     }
 
+                    SettingCard {
+                        Layout.fillWidth: true
+                        title: qsTr("Reset workspace layout")
+                        description: qsTr("Restore the Calculator and Variables panel layout to defaults. Other workspace settings are unaffected.")
+                        icon.name: "ic_fluent_arrow_reset_20_regular"
+                        clickable: true
+                        onClicked: settingsVM.resetWorkspaceLayout()
+                    }
+
                     // The kind stays the header's control; the pool is the
                     // collapsible body, laid out like the font rows above it:
                     // label, hint, one full-width field.

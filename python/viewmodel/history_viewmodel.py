@@ -9,8 +9,12 @@ sent to the input area and fixed. The rendered SVG data URL is produced
 lazily per visible row and re-tinted when the theme color changes.
 """
 
+import json
+import os
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
+from typing import Any
 
 from PySide6.QtCore import (
     Property,
@@ -63,6 +67,61 @@ class HistoryItem:
     requested: bool = False
     created: datetime = field(default_factory=datetime.now)
 
+    def to_dict(self) -> dict[str, Any]:
+        """The durable half of an entry, for ``history.json``.
+
+        The rendered SVG and its natural size are deliberately absent: they are
+        a cache for the current style and are regenerated lazily after a reload.
+        """
+        return {
+            "expression": self.expression,
+            "result": self.result,
+            "error": self.error,
+            "mode": self.mode,
+            "name": self.name,
+            "op": self.op,
+            "latex": self.latex,
+            "canonical_input": self.canonical_input,
+            "created": self.created.isoformat(),
+        }
+
+    @classmethod
+    def from_dict(cls, data: Any) -> "HistoryItem":
+        """Build an entry from persisted JSON, rejecting a non-object.
+
+        Unknown fields are ignored so a newer/older writer can still be read;
+        missing strings default to the same empty values as a new entry. A bad
+        timestamp starts a new one rather than dropping the whole entry.
+        """
+        if not isinstance(data, dict):
+            raise ValueError("history entry is not an object")
+
+        def text(name: str) -> str:
+            value = data.get(name, "")
+            return value if isinstance(value, str) else ""
+
+        mode = text("mode")
+        if mode not in ("Code", "Assign"):
+            mode = "Code"
+        created = datetime.now()
+        raw_created = data.get("created")
+        if isinstance(raw_created, str):
+            try:
+                created = datetime.fromisoformat(raw_created)
+            except ValueError:
+                pass
+        return cls(
+            expression=text("expression"),
+            result=text("result"),
+            error=text("error"),
+            mode=mode,
+            name=text("name"),
+            op=text("op") or "=",
+            latex=text("latex"),
+            canonical_input=text("canonical_input"),
+            created=created,
+        )
+
 
 class HistoryModel(QAbstractListModel):
     """List model of calculation history entries.
@@ -73,9 +132,10 @@ class HistoryModel(QAbstractListModel):
     ``error`` is non-empty exactly for the entries whose request failed.
 
     The list is bounded: an entry past ``MAX_HISTORY_ENTRIES`` evicts the oldest
-    one, releasing its rendered SVG with it. History is a session buffer, not a
-    persistence layer; an unbounded list is where a stress session's SVG data
-    URLs turned into hundreds of megabytes.
+    one, releasing its rendered SVG with it. When a ``path`` is supplied, the
+    durable fields are written atomically to ``history.json`` after every add or
+    clear and loaded at startup; the SVG data URLs are cache, not persisted.
+    The bound is what keeps rendered artwork from growing without limit.
     """
 
     #: Oldest entries are dropped past this many. Large enough for a real
@@ -97,15 +157,20 @@ class HistoryModel(QAbstractListModel):
 
     countChanged = Signal()
 
-    def __init__(self, parent=None, latex_service=None):
+    def __init__(self, parent=None, latex_service=None, path: Path | str | None = None):
         """Initialize the history model.
 
         Args:
             latex_service: Shared renderer. None creates one; with no
                 QCoreApplication it renders inline, which keeps the model tests
                 synchronous.
+            path: Optional ``history.json``. The application passes the file
+                beside ``config.yaml``; tests/headless callers leave it None.
         """
         super().__init__(parent)
+        self._path = Path(path) if path is not None else None
+        self.load_error = ""
+        self.save_error = ""
         self._items: list[HistoryItem] = []
         #: Theme ink, font size and LaTeX font file, in one value.
         self._latex_style = LatexStyle()
@@ -115,6 +180,7 @@ class HistoryModel(QAbstractListModel):
         self._latex_jobs = LatexJobs(self._latex_service, "history", self)
         self._latex_jobs.rendered.connect(self._on_latex_rendered)
         self._latex_jobs.failed.connect(self._on_latex_failed)
+        self._load()
 
     def roleNames(self):
         return {
@@ -275,6 +341,7 @@ class HistoryModel(QAbstractListModel):
         )
         self.endInsertRows()
         self.countChanged.emit()
+        self._save()
 
     @Slot()
     def clear(self) -> None:
@@ -286,6 +353,57 @@ class HistoryModel(QAbstractListModel):
         self._items.clear()
         self.endRemoveRows()
         self.countChanged.emit()
+        self._save()
+
+    # --- persistence ------------------------------------------------------
+    def _load(self) -> None:
+        """Load ``history.json`` if a path was supplied.
+
+        A corrupt file is moved aside (``.corrupt``) rather than overwritten, so
+        the app starts with an empty history but the failed data remains for
+        inspection. Loading never touches the renderer cache.
+        """
+        path = self._path
+        if path is None or not path.exists():
+            return
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            entries = raw.get("entries") if isinstance(raw, dict) else raw
+            if not isinstance(entries, list):
+                raise ValueError("history file has no entries list")
+            loaded = [
+                HistoryItem.from_dict(entry)
+                for entry in entries[: self.MAX_HISTORY_ENTRIES]
+            ]
+        except (OSError, ValueError, TypeError) as exc:
+            self.load_error = f"history not loaded: {exc}"
+            try:
+                os.replace(path, path.with_suffix(path.suffix + ".corrupt"))
+            except OSError:
+                pass
+            return
+        self._items = loaded
+
+    def _save(self) -> None:
+        """Write the durable entries atomically, ignoring a write failure."""
+        path = self._path
+        if path is None:
+            return
+        payload = {
+            "version": 1,
+            "entries": [item.to_dict() for item in self._items],
+        }
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = path.with_suffix(path.suffix + ".tmp")
+            temporary.write_text(
+                json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+                encoding="utf-8",
+            )
+            os.replace(temporary, path)
+            self.save_error = ""
+        except OSError as exc:
+            self.save_error = f"history not written: {exc}"
 
     def _get_count(self) -> int:
         """Number of entries."""

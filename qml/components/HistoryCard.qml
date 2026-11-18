@@ -495,16 +495,16 @@ QQC2.ItemDelegate {
         }
 
         MenuItem {
-            text: qsTr("Send result to input")
-            enabled: !card.isError && card.result !== ""
-            onTriggered: vm.sendToResult(card.mode, card.name, card.result)
-        }
-
-        MenuItem {
             text: qsTr("Send normalized input")
             enabled: card.canonicalInput !== ""
             onTriggered: vm.sendToCanonical(
                 card.mode, card.name, card.op, card.canonicalInput)
+        }
+
+        MenuItem {
+            text: qsTr("Send result to input")
+            enabled: !card.isError && card.result !== ""
+            onTriggered: vm.sendToResult(card.mode, card.name, card.result)
         }
 
         MenuSeparator {}

@@ -1,6 +1,6 @@
 [project]
 name = "symplify"
-version = "0.10.0"
+version = "0.11.0"
 description = "A modern symbolic calculator built with SymPy and PySide6 (QML)."
 readme = "README.md"
 requires-python = ">=3.11,<3.15"
@@ -16,7 +16,7 @@ dependencies = [
     "sympy>=1.14.0",
     "ziamath>=0.13",
     "fonttools>=4.0",
-    "qmlmathplot[calc]>=0.7.1,<0.8",
+    "qmlmathplot[calc]>=0.7.2,<0.8",
 ]
 
 [dependency-groups]

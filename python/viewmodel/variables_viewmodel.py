@@ -1214,7 +1214,19 @@ class VariablesViewModel(QObject):
         if (QCoreApplication.instance() is not None
                 and QAbstractEventDispatcher.instance() is not None
                 and not QCoreApplication.closingDown()):
+            self._start_idle_timer()
+
+    def _start_idle_timer(self) -> None:
+        try:
             self._idle_timer.start()
+        except RuntimeError:
+            pass
+
+    def _stop_idle_timer(self) -> None:
+        try:
+            self._idle_timer.stop()
+        except RuntimeError:
+            pass
 
     @Slot()
     def stopBackendIfIdle(self) -> None:
@@ -1226,7 +1238,7 @@ class VariablesViewModel(QObject):
             return
         if self._model.is_idle():
             self._backend.shutdown()
-            self._idle_timer.stop()
+            self._stop_idle_timer()
         else:
             # A write is still queued/running; check again after another window.
             self._touch_backend()

@@ -383,16 +383,16 @@ wheels = [
 
 [[package]]
 name = "qmlmathplot"
-version = "0.7.1"
+version = "0.7.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "pyside6" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/33/63/f235a7ab445fef998af701cd1ff0124311e954f7608de3073e4de02a83e1/qmlmathplot-0.7.1.tar.gz", hash = "sha256:e87b5f06b6fb030d9c0326317f3f807d0e95d152b6e0eb4f8aa9f22a40738332", size = 180080, upload-time = "2026-11-16T14:58:55.908Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/bd/81/eae35fe51a894d622d7f65645984724ee0cf249688357993823986372a54/qmlmathplot-0.7.2.tar.gz", hash = "sha256:58e1902c93f1535b053224f91ce6b658c2ddfb1ceaf1ff92ead6297264f91aa4", size = 180283, upload-time = "2026-11-17T16:18:18.979Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/9e/bb/aa7d21be0c5648af6647922e372a5ccc5a7551bf823b71783821a8c1b463/qmlmathplot-0.7.1-py3-none-any.whl", hash = "sha256:169a1ad5a059170636089c7638b50e0375ee041c72286a57cbb4feef5b7e7b01", size = 187166, upload-time = "2026-11-16T14:58:54.247Z" },
+    { url = "https://files.pythonhosted.org/packages/e3/e0/47877cda247626029ce6140d0b34222f707938c3945d5c6151333b845587/qmlmathplot-0.7.2-py3-none-any.whl", hash = "sha256:e0b3ab7e1bf386a7a9cf38bea4f9dc4c1672511b16375d6b559c052f701f4e0c", size = 187369, upload-time = "2026-11-17T16:18:17.303Z" },
 ]
 
 [package.optional-dependencies]
@@ -453,7 +453,7 @@ wheels = [
 
 [[package]]
 name = "symplify"
-version = "0.10.0"
+version = "0.11.0"
 source = { virtual = "." }
 dependencies = [
     { name = "fonttools" },
@@ -476,7 +476,7 @@ requires-dist = [
     { name = "fonttools", specifier = ">=4.0" },
     { name = "pyside6", specifier = ">=6.12,<6.13" },
     { name = "pyyaml", specifier = ">=6.0.3" },
-    { name = "qmlmathplot", extras = ["calc"], specifier = ">=0.7.1,<0.8" },
+    { name = "qmlmathplot", extras = ["calc"], specifier = ">=0.7.2,<0.8" },
     { name = "rinui", specifier = ">=0.5.0,<0.6" },
     { name = "sympy", specifier = ">=1.14.0" },
     { name = "ziamath", specifier = ">=0.13" },

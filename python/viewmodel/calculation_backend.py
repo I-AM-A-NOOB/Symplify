@@ -139,7 +139,7 @@ class ProcessBackend(QObject):
         except Exception as exc:  # noqa: BLE001 - start/pipe failure is a status
             self._stop_worker()
             self._active_id = None
-            self._poll_timer.stop()
+            self._stop_poll_timer()
             self.failed.emit(request_id, f"{type(exc).__name__}: {exc}")
             return
 
@@ -149,7 +149,7 @@ class ProcessBackend(QObject):
             if self.timeout_seconds > 0
             else float("inf")
         )
-        self._poll_timer.start()
+        self._start_poll_timer()
 
     def cancel(self, *, notify: bool = False) -> None:
         """Abandon the current request and terminate its worker, if any.
@@ -158,7 +158,7 @@ class ProcessBackend(QObject):
         slow optional computation from the previous result. ``notify`` is only
         for the user's Cancel button; internal replacement stays silent.
         """
-        self._poll_timer.stop()
+        self._stop_poll_timer()
         if self._active_id is None and self._variants_id is None:
             return
         active_id = self._active_id
@@ -177,9 +177,30 @@ class ProcessBackend(QObject):
 
     def shutdown(self) -> None:
         """Stop the poll and terminate the worker (application exit)."""
-        self._poll_timer.stop()
+        self._stop_poll_timer()
         self._active_id = None
         self._stop_worker()
+
+    def _stop_poll_timer(self) -> None:
+        """Stop the poll timer if Qt's C++ object still exists.
+
+        The QML page's `Component.onDestruction` can run after Qt has already
+        deleted this backend's QTimer child during application teardown. The
+        wrapper remains alive long enough for `shutdown` to be called from both
+        `aboutToQuit` and the page, and calling `stop()` on the deleted C++
+        object raises rather than being a no-op.
+        """
+        try:
+            self._poll_timer.stop()
+        except RuntimeError:
+            pass
+
+    def _start_poll_timer(self) -> None:
+        """Start polling, unless teardown has already deleted the timer."""
+        try:
+            self._poll_timer.start()
+        except RuntimeError:
+            pass
 
     def _stop_worker(self) -> None:
         """Terminate and reap the child; idempotent and never raises."""
@@ -213,7 +234,7 @@ class ProcessBackend(QObject):
         active_id = self._active_id
         variants_id = self._variants_id
         if active_id is None and variants_id is None:
-            self._poll_timer.stop()
+            self._stop_poll_timer()
             return
 
         connection = self._worker.connection
@@ -242,7 +263,7 @@ class ProcessBackend(QObject):
                     else:
                         self._variants_id = None
                         self._variants_deadline = 0.0
-                        self._poll_timer.stop()
+                        self._stop_poll_timer()
                     self.finished.emit(active_id, payload)
                     return
 
@@ -252,7 +273,7 @@ class ProcessBackend(QObject):
                     return
                 self._variants_id = None
                 self._variants_deadline = 0.0
-                self._poll_timer.stop()
+                self._stop_poll_timer()
                 self.variantsReady.emit(variants_id, rows)
                 return
         except (EOFError, OSError) as exc:
@@ -265,7 +286,7 @@ class ProcessBackend(QObject):
         now = time.monotonic()
         if active_id is not None:
             if now >= self._deadline:
-                self._poll_timer.stop()
+                self._stop_poll_timer()
                 self._active_id = None
                 self._stop_worker()
                 self.timedOut.emit(active_id)
@@ -274,7 +295,7 @@ class ProcessBackend(QObject):
 
     def _finish_variants(self, request_id: int) -> None:
         """Give up on optional rows without touching the delivered result."""
-        self._poll_timer.stop()
+        self._stop_poll_timer()
         self._variants_id = None
         self._variants_deadline = 0.0
         self._retire_worker_async()
@@ -282,7 +303,7 @@ class ProcessBackend(QObject):
 
     def _fail(self, request_id: int, message: str) -> None:
         """Report a dead/unsynchronised worker and drop it."""
-        self._poll_timer.stop()
+        self._stop_poll_timer()
         self._active_id = None
         self._stop_worker()
         self.failed.emit(request_id, message)

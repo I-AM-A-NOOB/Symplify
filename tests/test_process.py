@@ -338,7 +338,8 @@ def test_the_keyboard_target_uses_the_windows_active_focus_item():
                 id: second
                 interval: 120
                 onTriggered: {
-                    probe.record("focused name", pane.keyboardTarget().placeholderText === "name")
+                    probe.record("focused name",
+                        pane.keyboardTarget().objectName === "assignNameInput")
                     outsideField.forceActiveFocus()
                     third.start()
                 }
@@ -347,7 +348,8 @@ def test_the_keyboard_target_uses_the_windows_active_focus_item():
                 id: third
                 interval: 120
                 onTriggered: {
-                    probe.record("mode fallback", pane.keyboardTarget().placeholderText === "expression")
+                    probe.record("mode fallback",
+                        pane.keyboardTarget().objectName === "assignValueInput")
                     probe.finish()
                 }
             }

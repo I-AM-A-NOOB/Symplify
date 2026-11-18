@@ -1,4 +1,4 @@
 """Symplify version — kept in sync with pyproject.toml by
 ``scripts/release.py`` (pyproject remains the canonical source)."""
 
-__version__ = "0.10.0"
+__version__ = "0.11.0"

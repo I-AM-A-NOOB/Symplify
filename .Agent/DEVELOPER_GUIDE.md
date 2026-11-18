@@ -152,8 +152,9 @@ python/
                                 #   candidates; with no Store it keeps the VariableManager path
                                 #   for tests/headless.
     history_viewmodel.py        #   HistoryModel (QAbstractListModel, newest first, lazy LaTeX
-                                #   through LatexJobs) + HistoryWindowModel, the row-limited proxy
-                                #   the History page's Repeater is cut to
+                                #   through LatexJobs; optional atomic history.json persistence) +
+                                #   HistoryWindowModel, the row-limited proxy the History page's
+                                #   Repeater is cut to
     search.py                   #   SearchFilterModel + Variables/HistoryFilterModel: the pages'
                                 #   search boxes (proxies only filter and map rows)
     settings_viewmodel.py       #   Settings QObject: signals, properties, language, config path,
@@ -211,7 +212,9 @@ qml/
                                 #   CodeField / CodeArea (the two code inputs themselves — font,
                                 #     surface, ink, and the highlighter on the area's document — so
                                 #     the calculator's Assign row and the Variables editors cannot
-                                #     drift apart; each page keeps its own keys),
+                                #     drift apart; each page keeps its own keys), CodeScrollArea
+                                #     (the Code input's ScrollableTextArea construction, shared by
+                                #     Code mode, Assign's value and the Variables details field),
                                 #   CodeContextMenu (the app's context menu for a text input, and
                                 #     the press that opens it: one line per field, and the field's
                                 #     own Qt menu switched off with it — see the context-menu
@@ -246,7 +249,9 @@ qml/
                                 #     geometry and sizes all three),
                                 #   RadioSettingRow / RadioSettingGroup / SettingFieldRow (the
                                 #     settings-row shapes RinUI's own SettingItem cannot express;
-                                #     SettingRowBase is the SettingItem both rows are built on),
+                                #     SettingRowBase is the SettingItem both rows are built on;
+                                #     CheckboxSettingRow / CheckboxSettingGroup are the
+                                #     multi-choice sibling used by the Calculation list),
                                 #   KeyboardPanel (tab row scrolls by mouse wheel, gallery-style;
                                 #     two NoFocus acrylic caret pills step it by one wheel notch and
                                 #     hide at its ends — see HScrollView below), SearchBar, CommandBar (a row of
@@ -523,8 +528,9 @@ transparent corner, not `srgba(255,255,255,1)`.
     rebuilt from a `ScopeSnapshot` after a worker restart, and a stale/gapped `ScopeDelta` is
     refused rather than guessed. A timeout, crash or EOF can therefore discard a pending
     assignment but cannot erase existing Store variables or history. Variables **are persisted**
-    in a versioned `variables.json` beside the settings file; history and the log remain UI-only
-    and are not persisted. A snapshot written by another SymPy version is set aside rather than
+    in a versioned `variables.json` beside the settings file; history is persisted in
+    `history.json` beside them (durable fields only; SVG artwork is regenerated lazily). The log
+    remains UI-only and is not persisted. A snapshot written by another SymPy version is set aside rather than
     restored. Tests lock the failure-survival path in
     `test_backend_failure_keeps_existing_variables_history_and_log` and the Store-backed path in
     `test_store_backed_variables_and_assignments_share_one_source`.
@@ -537,7 +543,11 @@ transparent corner, not `srgba(255,255,255,1)`.
   signals `finished(int, object)`, `variantsReady(int, object)`, `timedOut(int)`,
   `failed(int, str)`. `payload` is the
   expression text (`evaluate`) or an `Assignment` (`assign`) — never a display string assembled
-  in the VM, and never a sympy object interpreted by QML.
+  in the VM, and never a sympy object interpreted by QML. `shutdown()` is idempotent and must
+  tolerate a QTimer whose C++ object Qt already deleted: closing with the Variables page active
+  runs it from both `aboutToQuit` and `VariablesPage.onDestruction`, and the page's call can be
+  the later one. `_stop_poll_timer` / `_start_poll_timer` are the guarded accessors; do not call
+  the QTimer directly.
 - **Protocol DTOs, the Store worker and the result boundary.** `python/worker_protocol.py`
   is the shared boundary for the Store/Compute split. It imports **neither Qt nor SymPy** —
   importing `python/model` would load SymPy, which is exactly what the Store worker must not do.
@@ -1492,7 +1502,13 @@ mode hides the input and most chrome, and the window-level side of it lives in
   then Code/Assign, Calculate, Examples and Clear. It carries no result or plot
   actions: the result pane header owns the copy buttons (status stays next to
   them) and the plot pane header owns reset/zoom, so neither overlays the
-  drawing surface. Zen is the title bar's control.
+  drawing surface. Zen is the title-bar's control.
+  Clear resets the whole workspace, not just the focused editor: both modes'
+  fields are emptied through an undoable `remove(0, length)` (so the cleared
+  expression remains the next Undo entry), the Assign operator returns to `=`,
+  and `clear_result()` cancels any request and empties the outcome, formula,
+  variants and plot. It then returns focus to the active editor so the keyboard
+  Undo button targets it.
   Undo/Redo do **not** live here — they are normal buttons in `KeyboardPanel`,
   after the cursor pair and before Backspace. The vertical separators sit after
   Shift and after the cursor pair, exactly as the mock-up groups them. Examples
@@ -1500,14 +1516,31 @@ mode hides the input and most chrome, and the window-level side of it lives in
 - **The input is the first `SplitView` item, not a sidebar card.** Its width is
   the splitter's; the handle is hidden with the pane in Zen. Normal mode always
   shows the input; there is no second collapse toggle competing with Zen.
-- **The editor does not grow; the spacer does.** `inputStage` keeps its 110px
-  (or Assign's content height) and the keyboard stays at 282px. A
-  `Layout.fillHeight: true` spacer after the keyboard absorbs the input pane's spare
-  height, matching the mock-up. Do not put the spacer before the keyboard.
-- **Assign is a two-line field.** Name and operator share the first line; the
-  value is a full-width `CodeArea` on the second and takes the stage's remaining
-  height. Putting it in the first row made it the narrow leftover between the
-  fixed name and operator.
+- **The editor does not grow; the spacer does.** `inputStage` keeps one fixed
+  110px in both Code and Assign, and the keyboard stays at 282px; the Assign
+  value box scrolls inside that fixed stage. Switching modes must not resize the
+  workspace and move the keyboard/result. A `Layout.fillHeight: true` spacer
+  after the keyboard absorbs the input pane's spare height, matching the mock-up.
+  Do not put the spacer before the keyboard.
+- **Assign is a two-line field.** The name is the flexible half of the first row
+  (`Layout.fillWidth: true`, minimum 80), the operator takes its natural
+  ComboBox width, and the value is a full-width `CodeScrollArea` on the second
+  line; the name therefore grows with the input pane instead of leaving a dead
+  spacer. Putting the value in the first row made it the narrow leftover between
+  the fixed controls. The operator uses the standard RinUI `ComboBox`, imported
+  explicitly as `Rin.ComboBox`: leaving it unqualified in `InputPane` resolves
+  to a different ComboBox and its popup never gets the RinUI menu.
+  The smart jumps between the Assign fields ignore key auto-repeat. An operator
+  at the end of the name or Backspace at the start/empty value sets a
+  `repeatGuard` while focus moves; repeated events are swallowed until a fresh
+  key press, so holding a key cannot keep editing or jumping in the destination
+  field.
+- **The Variables expression editor is the same `CodeScrollArea` construction
+  as the formula inputs.** The details panel's value field uses the scrollable
+  construction, so its text is top-aligned like Code mode; the table's inline
+  editor uses `CodeArea` because the row constrains its height. Both share the
+  code ink/surface and highlighter. The Assign value field uses
+  `CodeScrollArea` too, so all three follow the same scrollable construction.
 - **The inactive editor is hidden except during a mode slide.** Both panes must
   be visible while `inputStage` runs its 180ms `x` transition; after that, the
   pane for the other mode is `visible: false`. `beginModeTransition()` must run
@@ -1609,13 +1642,27 @@ mode hides the input and most chrome, and the window-level side of it lives in
   the plot follows the same interpolation each frame, so the two never overlap.
   Start the tween from a 16ms timer, not the orientation-change handler, and
   keep `layoutPending` true until then: `targetHorizontal` stays on the *old*
-  orientation, and `geometryShare` uses the raw `resultShare` rather than the
-  min-clamped one so the pending frame equals the tween's p=0 frame. Without
-  that, the first layout frame shows the new/clamped layout and then jumps back
-  to animate. Decide with `Window.height`, not `page.height` (the page is shorter
+  orientation. Each endpoint uses that orientation's **own clamped share**
+  (`horizontalShare` / `verticalShare`), not the raw `resultShare`: a raw share
+  below the result minimum (plot over half) made the plot overshoot and then
+  snap back at the end of the tween. The pending frame and the p=0 frame both
+  use the old orientation's clamped share, so the first frame still matches.
+  Decide with `Window.height`, not `page.height` (the page is shorter
   than the window); skip the tween below 620px window height. qmlmathplot hangs
   when its plot is resized frame-by-frame in a short window, while the static
   1:1 layout is fine.
+  **A plot's first appearance reuses the same layout tween.** When
+  `calcVM.hasPlot` turns true, `plotAppearing` waits 50ms for the target
+  width/ratio to settle, then starts the same `layoutProgress` animation from
+  the no-plot state: the result starts full-area and the plot grows from zero
+  into `plotBesideResult`. No opacity fade is involved. A page rebuilt with a
+  plot already present starts settled (`plotWasVisible`), and a tabbed
+  small-window plot appears without a geometry tween. This is what avoids the
+  old fullscreen result-over-plot flash while still animating the appearance.
+  When `hasPlot` turns false again, the same tween runs in reverse:
+  `plotCollapsing` keeps the plot pane and its RHI loader alive while the result
+  grows back to the full area; the pane is hidden only when `layoutProgress`
+  reaches 1. There is no separate fade or width animation.
 - **Orientation is chosen from usable width.** `plotBesideResult` is true only
   when `resultArea.width` can afford the readable result width (340), the plot's
   preferred width (340) and the handle, and the page is at least 1.2× as wide as
@@ -1639,7 +1686,10 @@ mode hides the input and most chrome, and the window-level side of it lives in
 - **The outer splitter width, result share and keyboard collapse persist.** The
   page binds `SettingsViewModel.inputPanelWidth` / `resultShare` /
   `keyboardCollapsed` (keys `workspace.input_width`, `workspace.result_share`,
-  `workspace.keyboard_collapsed`). Input width and result share are written
+  `workspace.keyboard_collapsed`). The Variables page's details panel has the
+  same treatment through `variablesSidebarOpen` / `variablesSidebarWidth`
+  (`workspace.variables_sidebar_open` / `workspace.variables_sidebar_width`);
+  its width uses the same 250ms write debounce. Input width and result share are written
   through 250ms debounce timers after drags/resizes, so a drag does not write
   YAML per frame. The keyboard's collapse button toggles the Calculator
   viewmodel immediately and writes the same setting; the panel collapses to its
@@ -1895,8 +1945,10 @@ mode hides the input and most chrome, and the window-level side of it lives in
   the cap removes the oldest row before inserting the new one, so that entry's `HistoryItem` and
   its cached SVG data URL are released. The cards' window above limits construction, not the
   stored list; without this cap a stress session of repeated examples retained every SVG and
-  accounted for ~150 MB. `test_history_is_bounded_and_evicts_the_oldest_entry` locks the eviction
-  and the `countChanged` sequence.
+  accounted for ~150 MB. The optional `history.json` beside the config stores only the durable
+  fields and is written atomically after each add/clear; loaded SVGs are always regenerated lazily.
+  `test_history_is_bounded_and_evicts_the_oldest_entry` locks eviction/count changes, and the
+  persistence tests cover reload, clear and a corrupt file (`history.json.corrupt`).
 - **Set the LaTeX colour before any page is built.** The pages used to do it in their own
   `Component.onCompleted`, which runs after their delegates exist: every entry rendered once in the
   default black, then the colour arrived, dropped the whole cache, and every entry rendered again.
@@ -2253,13 +2305,19 @@ backdrop floats up from 10px below while fading in, and carries the page's own t
   values fall back or clamp, writes are atomic (temp file + `os.replace`), and a read-only location
   degrades to in-memory values with a warning the page displays. Keys:
   `appearance.theme|language|backdrop|accent|accent_mode|accent_shading|accent_os_shading`,
-  `workspace.code_theme|bracket_mode|bracket_colors|code_family|code_size|keyboard_family|keyboard_size|latex_font|latex_size|keyboard_layout|zen_fullscreen|input_width|result_share|keyboard_collapsed`,
+  `workspace.code_theme|bracket_mode|bracket_colors|code_family|code_size|keyboard_family|keyboard_size|latex_font|latex_size|keyboard_layout|zen_fullscreen|input_width|result_share|keyboard_collapsed|variables_sidebar_open|variables_sidebar_width`,
   `parser.factorial_notation|split_symbols|implicit_multiplication|convert_xor|implicit_application|function_exponentiation`,
   `window.remember|width|height|x|y|maximized`. The page groups them under the subtitles
   **Language / Interface / Workspace / Calculation / Settings file / About**, and a group is its
   section's: the code theme and the bracket colours moved into `workspace` when their rows moved
   out of Interface (they had lived in `appearance`). The parser toggles are booleans; a missing
   key takes the historical default, and a non-bool is coerced at the store boundary.
+- **The workspace-layout reset is deliberately scoped.** `SettingsViewModel.resetWorkspaceLayout()`
+  writes only `input_width`, `result_share`, `keyboard_collapsed`,
+  `variables_sidebar_open`, and `variables_sidebar_width` back to their defaults; code theme,
+  fonts, keyboard layout, watermark, Zen and window geometry are untouched. The Workspace card
+  says that in its description. The separate window reset is now titled **Reset window geometry**
+  (it only forgets the saved window rect), so the two reset actions cannot be confused.
 - **The size spin boxes are live, but their file write and their re-render are coalesced.** The
   three sizes go through `SettingsStore.stage` (validated, in memory) and `SettingsViewModel._stage_size`:
   the first change of a burst is saved at once (a single setter still lands on disk immediately),
@@ -2282,9 +2340,13 @@ backdrop floats up from 10px below while fading in, and carries the page's own t
   **The bar's label sticks to the section.** `PageHeader` takes `sections` (the page's section
   items, each exposing `sectionTitle` and `subtitleOffset` — where its subtitle sits inside the
   scrolling column). It shows the *last* section whose subtitle has reached the bar's bottom edge,
-  and the page title before the first one does; when the label changes, the outgoing one slides up
-  and fades while the incoming one rises in from below (`swapAnimation`), so scrolling announces
-  each section at the top instead of leaving the page title stuck there. The arithmetic is in
+  and the page title before the first one does; when the label changes, the outgoing one leaves
+  in the reader's scroll direction and the incoming one arrives from the opposite side — scrolling
+  down sends it up and brings the new title in from below; scrolling up sends it down and brings
+  the new title in from above. `PageHeader.scrollDirection` is taken from `contentY` changes and
+  captured in `swapDirection` when a swap starts, so further scrolling cannot reverse it midway.
+  This announces each section at the top instead of leaving the page title stuck there. The
+  arithmetic is in
   *content* coordinates (`inset + section.y + subtitleOffset - contentY`), never `mapToItem`: the
   snapshot problem in the `barShown` note above applies here too. Two layout traps cost a round of
   debugging here: (a) reading `titleLabel.implicitWidth` for the slot's maximum width self-locks at
@@ -2303,10 +2365,15 @@ backdrop floats up from 10px below while fading in, and carries the page's own t
   Subtitle size is the gallery's, not a guess — `BodyStrong` renders at
   the theme's `bodyStrongSize` (14 pt, weight 600), i.e. *the same size as a card title but bolder*;
   `Typography.Subtitle` (20 pt) is one size too large and reads as a second page heading. Most rows
-  are `SettingCard`s; a `SettingExpander` is used only where a row carries a second row of its own
-    (the code theme, accent and About groups). The code theme's body is a `RadioSettingGroup` of
-  `RadioSettingRow`s, one per family. `load()` migrates both older shapes of the keys the Workspace
-  group owns: `workspace.*` was `fonts.*` (and `latex_size` before that `rendering.latex_size`), and
+  are `SettingCard`s; a `SettingExpander` is used for a list (the code theme and Calculation) or
+  where a row carries a second row of its own (accent and About groups). The code theme's body is
+  a `RadioSettingGroup` of `RadioSettingRow`s, one per family. The Calculation section is the one
+  *multi-choice* list: one `ExpanderRow` whose header reports `%1 of %2 enabled` and whose body is a
+  `CheckboxSettingGroup` of six `CheckboxSettingRow`s, one per independent parser transformation.
+  They are checkboxes rather than radios because turning on implicit multiplication must not turn
+  off caret-as-power; the rows still use the same title/hint column as the radio list.
+  `load()` migrates both older shapes of the keys the Workspace group owns: `workspace.*` was
+  `fonts.*` (and `latex_size` before that `rendering.latex_size`), and
   the code theme and the bracket colours were `appearance.*`. A key the new group already has wins,
   and the nearer of the two old homes wins when a file has both — `SettingsStore._migrate_workspace`.
   `version` (2 now) is a marker the store writes and never reads.
@@ -2832,10 +2899,11 @@ Data-file pitfalls for frozen builds (update this list when you add data-reading
   transitive resolution; the cap is what `pip install`/`uv sync --upgrade` need to see. The bindings
   that matter are the ones whose minor bump can break us: `pyside6>=6.12,<6.13` (the prune list is a
   whitelist and a new Qt minor can add or rename DLLs it deletes — see Building), and
-  `rinui>=0.5.0,<0.6` / `qmlmathplot[calc]>=0.7.1,<0.8` (RinUI's `WinEventManager`,
+  `rinui>=0.5.0,<0.6` / `qmlmathplot[calc]>=0.7.2,<0.8` (RinUI's `WinEventManager`,
   `init_config` and `save_config` are replaced; qmlmathplot 0.7 is the Program/CPU-fallback
-  boundary the app's worker targets, and 0.7.1 supplies the 4x MSAA/lazy-furniture baseline
-  the plot card is measured against). Lifting a cap is a verification step, not a dependency edit:
+  boundary the app's worker targets, and 0.7.2 supplies the 4x MSAA/lazy-furniture baseline
+  plus the endpoint tick inset the plot card is measured against). Lifting a cap is a
+  verification step, not a dependency edit:
   measure the new version, then bump the bound.
 - `python/version.py` is **rewritten wholesale** by `scripts/release.py` — never add code to it, the
   next release bump would erase it.
@@ -3011,9 +3079,13 @@ draw (`python/model/plotting.py`, zero Qt), the **object** every surface binds t
   none of them is needed. Do not add a radius back without also adding a real rounded clip —
   a card background's `radius` does not clip its children, and Qt's `Item.clip` is only
   rectangular.
-- **The plot's MSAA level is explicit.** qmlmathplot 0.7.1 defaults to 4×; the viewmodel sets
+  qmlmathplot 0.7.2 fixes the endpoint tick labels: `PlotFurniture._edgeInset` is
+  `max(1, plot.tick_pad, plot.axis_width)`, and both axes clamp their labels inside that inset,
+  so an edge tick no longer touches the host card border. The app requires 0.7.2 for this reason;
+  do not downgrade to 0.7.1, whose labels sat flush against the edge.
+- **The plot's MSAA level is explicit.** qmlmathplot 0.7.2 defaults to 4×; the viewmodel sets
   `plot.sampleCount = 4` anyway, so a future library default cannot silently enlarge the
-  render target. 0.7.1's lazy grid/minor-tick/guide canvases and its RHI cache release are
+  render target. 0.7.2's lazy grid/minor-tick/guide canvases and its RHI cache release are
   used as-is; the plot still belongs to the viewmodel and its `PlotView` remains Loader-gated.
 - **The plot card is a `Control`, so its ring is the same one every other control raises.** Ctrl+Tab
   (the app's focus shortcut — a bare Tab belongs to the code input, which types it) lands on
@@ -3074,8 +3146,13 @@ table has no card around it — no outline, no rounding, no plate behind the row
 the table, and the page inset is 12 rather than the usual 24 (`PageScaffold.inset` is set to match,
 or the floating title would sit off its inline self — and the body reads that same value back for
 its own `x`/`y`/`width`). Its details panel is `page.panelWidth`, a named number because 320 means
-something unrelated on other pages (History's prefetch margin, the dialogs' width). What holds the table is a plain `Item` sized to
-`max(table, what the viewport leaves)`, which is also what the empty state centres in.
+something unrelated on other pages (History's prefetch margin, the dialogs' width); it is resizable
+(240–480, capped by the page width) through the same 16px ContentSizer splitter the rest of the app
+uses, and the body ends at `detailsSplitter.left`. The panel deliberately has **no fill**
+(`color: "transparent"`): the native window backdrop (Mica/Acrylic) and RinUI's app layer show
+through instead of a card colour or an acrylic brush sampled from the table. A hairline at its left
+edge and the splitter keep the boundary legible. What holds the table is a plain
+`Item` sized to `max(table, what the viewport leaves)`, which is also what the empty state centres in.
 
 **The bar's title and its actions are one row, with a spacer between them.** They used to be two
 independent items — the title anchored left, the actions anchored right — and a narrow window (or the
@@ -3165,9 +3242,14 @@ reader had clicked — two selected rows, one of them stale. `selectRow` uses
 its two fields, and duplicates or deletes the row. It is its own component,
 `qml/components/VariableDetailsPanel.qml` — the page hands it `host` (everything it shows is the
 page's state: which row is selected, the definition read through `dataRevision`, `sidebarOpen`,
-`panelWidth`, and the row's two actions), it owns the two fields and the `syncDetails`/`applyDetails`
-pair that reads and writes them, and it calls `host.refreshTableLayout()` when its width animation
-stops (see the traps above — the animation's last frame is not the final width). One thing about the
+the mutable `panelWidth`, and the row's two actions), it owns the two fields and the
+`syncDetails`/`applyDetails` pair that reads and writes them,
+and it calls `host.refreshTableLayout()` when its width animation stops (see the traps above — the
+animation's last frame is not the final width). The page's 16px `detailsSplitter` drags
+`panelWidth` (240–480, capped by the page) and is hidden with the panel; while it drags, the
+panel's width `Behavior` is disabled so the pointer is not fighting the easing. Both the open
+state and width persist through `workspace.variables_sidebar_open` /
+`workspace.variables_sidebar_width`, restored by the page bindings on the next visit. One thing about the
 move: the two functions are called by the *page* (its `onSelectedRowChanged` and the proxy's
 `onDataChanged`), so a page that keeps calling `page.syncDetails()` gets a `ReferenceError:
 nameField is not defined` — the fields live in the panel now. Four more things about it are worth
