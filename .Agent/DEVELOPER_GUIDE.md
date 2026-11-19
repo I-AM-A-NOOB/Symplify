@@ -1631,19 +1631,23 @@ mode hides the input and most chrome, and the window-level side of it lives in
 - **The result/plot divider is a ratio, not two layouts.** A single
   `resultShare` (default **0.5**, so the two panes are 1:1) drives both a vertical
   and a horizontal binding; dragging the divider writes that property, and an
-  orientation change reads it back. The custom 8px `MouseArea` replaces a
-  `SplitView` precisely so the ratio survives the flip. Result and plot minimums
-  clamp the effective share; the plot and divider hide when `calcVM.hasPlot` is
-  false. Both this divider and the outer SplitView handle are WinUI3-style
-  ContentSizers: a 20px transparent hit band that gains a neutral hover fill
-  (`subtleSecondaryColor` light, `controlTertiaryColor` dark), plus an opaque
-  `systemNeutralColor` pill fixed at 8x36 (or 36x8 when horizontal). Those are
-  **physical** pixels; the QML values divide by the page's
-  `Screen.devicePixelRatio` (so 20/36/8 physical is 13.3/24/5.3 logical at 150%).
-  Do not use the `Utils.dpiScale` singleton here: it can stay on the primary
-  screen when the window moves to a monitor with a different scale. The pill does not resize or change
+  orientation change reads it back. The custom 16px handle replaces a
+  `SplitView` precisely so the ratio survives the flip. Result and plot
+  minimums clamp the effective share; the plot and divider hide when
+  `calcVM.hasPlot` is false. Both this divider and the outer SplitView handle
+  are WinUI3-style ContentSizers: a 16px transparent hit band that gains a
+  neutral hover fill (`subtleSecondaryColor` light, `controlTertiaryColor`
+  dark), plus an opaque `systemNeutralColor` pill 4x24 (24x4 when horizontal).
+  Those are logical pixels used directly — do not reintroduce the old
+  physical-pixel division through `Utils.dpiScale`: that singleton can stay on
+  the primary screen when the window moves to a monitor with a different
+  scale. The pill does not resize or change
   colour on hover; it is hidden for the outer one in Zen and for the inner one
-  while a layout flip is running.
+  while a layout flip is running. **The horizontal (result/plot) band runs
+  through the page's right inset to the page edge**, and its pill stays centred
+  on the content boundary (`splitArea.width / 2`), not on the wider band; that
+  is why `resultArea` does not clip and `plotHandle.width` adds `page.pageInset`.
+  The panes inside still clip their own scrollers.
 - **A flip is a normalized progress animation, never pixel Behaviors.** On an
   orientation change, `layoutProgress` runs 0→1 and the result's width/height
   interpolate from the old orientation's *fractional* geometry to the new one,

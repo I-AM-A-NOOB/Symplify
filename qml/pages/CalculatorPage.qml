@@ -22,6 +22,10 @@ Item {
     readonly property real paneHandleWidth: 16
     readonly property real splitterPillThickness: 4
     readonly property real splitterPillLength: 24
+    //: The page's own inset on the top and both sides. The workspace keeps it,
+    //: except at the bottom (see the column) and for the result/plot handle,
+    //: which reaches the right edge so it is draggable all the way there.
+    readonly property int pageInset: vm.zenMode ? 16 : 24
 
     //: WinUI3 ContentSizer tones: the rest state is the page surface, the hover
     //: band is the closest neutral fill, and the pill is the opaque system
@@ -238,7 +242,7 @@ Item {
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: vm.zenMode ? 16 : 24
+        anchors.margins: page.pageInset
         //: The workspace is the page's floor: the split handle and both panes
         //: reach the bottom edge. The 16px gap this used to carry left the
         //: ContentSizer pill and the pane boundary floating above the frame.
@@ -441,7 +445,10 @@ Item {
 
                 SplitView.fillWidth: true
                 SplitView.minimumWidth: page.resultPaneMinWidth
-                clip: true
+                //: The result/plot handle extends into the page's right inset
+                //: (see `plotHandle.width`), so this pane must not clip it.
+                //: Every pane inside still clips its own content.
+                clip: false
 
                 Item {
                     id: splitArea
@@ -647,8 +654,13 @@ Item {
                     ? page.splitterHoverFill : "transparent"
                 x: splitArea.targetHorizontal ? resultPane.width : 0
                 y: splitArea.targetHorizontal ? 0 : resultPane.height
+                //: A vertical handle is the full split height. The horizontal
+                //: one runs to the page's right edge, through the inset the
+                //: panes keep, so it can be grabbed beside the last pixel of
+                //: the content rather than stopping at the plot card.
                 width: splitArea.targetHorizontal
-                    ? page.paneHandleWidth : splitArea.width
+                    ? page.paneHandleWidth
+                    : splitArea.width + page.pageInset
                 height: splitArea.targetHorizontal
                     ? splitArea.height : page.paneHandleWidth
 
@@ -686,7 +698,15 @@ Item {
                 //: result/plot layout. It is hidden during the flip so it cannot
                 //: float across the content.
                 Rectangle {
-                    anchors.centerIn: parent
+                    //: Centred on the *pane*, not on the handle: the horizontal
+                    //: handle extends through the right inset, and the pill has
+                    //: to stay on the content boundary it represents.
+                    x: splitArea.targetHorizontal
+                        ? (page.paneHandleWidth - width) / 2
+                        : (splitArea.width - width) / 2
+                    y: splitArea.targetHorizontal
+                        ? (splitArea.height - height) / 2
+                        : (page.paneHandleWidth - height) / 2
                     visible: !splitArea.layoutPending
                         && splitArea.layoutProgress >= 1
                     width: splitArea.targetHorizontal
