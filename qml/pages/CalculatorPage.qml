@@ -115,11 +115,39 @@ Item {
     property bool plotCollapseFromHorizontal: false
     property real plotCollapseShare: 0.5
 
+    //: 0 = the split result/plot layout, 1 = the small-window Segmented pane.
+    //: Animated when `tabbedPanes` flips, so the split panel collapses into the
+    //: tabbed pane (and back) instead of switching in one frame.
+    property real tabbedProgress: 0
+    //: The split orientation to interpolate *from* while entering the tabbed
+    //: mode. `plotBesideResult` turns false as soon as `tabbedPanes` does, so it
+    //: cannot be read then; the last settled orientation is what the result
+    //: panel is actually leaving.
+    property bool tabbedFromHorizontal: false
+    //: False during component construction: the first target is set without an
+    //: entrance animation (a page rebuilt while already tabbed must open settled).
+    property bool tabbedReady: false
+    Behavior on tabbedProgress {
+        enabled: page.tabbedReady
+        NumberAnimation {
+            duration: 220
+            easing.type: Easing.OutCubic
+        }
+    }
+    onTabbedPanesChanged: {
+        if (tabbedPanes)
+            tabbedFromHorizontal = wasPlotBesideResult
+        tabbedProgress = tabbedPanes ? 1 : 0
+    }
+
     Component.onCompleted: {
         if (calcVM.hasPlot) {
             plotWasVisible = true
             settlePlotLayout()
         }
+        tabbedFromHorizontal = wasPlotBesideResult
+        tabbedProgress = tabbedPanes ? 1 : 0
+        tabbedReady = true
     }
 
     function settlePlotLayout() {
@@ -468,17 +496,25 @@ Item {
                     readonly property real verticalLength:
                         Math.max(0, height - page.paneHandleWidth)
                     //: The small-window Result/Plot tabs occupy this strip.
+                    //: It grows with the tabbed-mode tween, so the result pane
+                    //: slides down under it instead of jumping 40px.
+                    readonly property int tabbedHeaderTargetHeight: 40
                     readonly property real tabbedHeaderHeight:
-                        page.tabbedPanes ? 40 : 0
+                        tabbedHeaderTargetHeight * page.tabbedProgress
                     //: While the 16ms decision timer runs, keep the *old*
                     //: orientation visible. Otherwise the bindings would already
                     //: show the new layout, then jump back to animate from it.
+                    //: Entering tabbed mode freezes the last split orientation:
+                    //: `plotBesideResult` turns false with `tabbedPanes`, and
+                    //: the tween has to start from where the panes actually were.
                     property bool layoutPending: false
                     readonly property bool targetHorizontal:
-                        page.plotCollapsing
-                            ? page.plotCollapseFromHorizontal
-                            : layoutPending ? page.layoutFromHorizontal
-                                            : page.plotBesideResult
+                        page.tabbedPanes
+                            ? page.tabbedFromHorizontal
+                            : page.plotCollapsing
+                                ? page.plotCollapseFromHorizontal
+                                : layoutPending ? page.layoutFromHorizontal
+                                                : page.plotBesideResult
                     readonly property real splitLength:
                         targetHorizontal ? horizontalLength : verticalLength
                     //: Clamp each orientation against its own dimensions. Using
@@ -579,8 +615,11 @@ Item {
                         }
                     }
 
-                    readonly property real resultWidth: {
-                        if (page.tabbedPanes || (!calcVM.hasPlot && !page.plotCollapsing))
+                    //: The split layout's own geometry, before the tabbed
+                    //: transition is mixed in. Every existing plot/flip tween
+                    //: still drives these two values.
+                    readonly property real splitResultWidth: {
+                        if (!calcVM.hasPlot && !page.plotCollapsing)
                             return width
                         if (page.plotCollapsing) {
                             const start = page.plotCollapseFromHorizontal
@@ -598,9 +637,7 @@ Item {
                                 ? horizontalLength * horizontalShare : width
                         return start + (end - start) * layoutProgress
                     }
-                    readonly property real resultHeight: {
-                        if (page.tabbedPanes)
-                            return Math.max(0, height - tabbedHeaderHeight)
+                    readonly property real splitResultHeight: {
                         if (!calcVM.hasPlot && !page.plotCollapsing)
                             return height
                         if (page.plotCollapsing) {
@@ -620,10 +657,49 @@ Item {
                         return start + (end - start) * layoutProgress
                     }
 
+                    //: What is actually painted: the split geometry mixed with
+                    //: the full-width/height tabbed target by the same tween.
+                    readonly property real resultWidth:
+                        splitResultWidth
+                        + (width - splitResultWidth) * page.tabbedProgress
+                    readonly property real resultHeight:
+                        splitResultHeight
+                        + (Math.max(0, height - tabbedHeaderHeight)
+                            - splitResultHeight) * page.tabbedProgress
+
+                    //: The plot's split geometry (the existing side-by-side or
+                    //: below shapes). The tabbed target is applied in one step
+                    //: when `tabbedPanes` flips: qmlmathplot hangs when its
+                    //: canvas is resized frame by frame in a short window, so
+                    //: the tabbed transition fades/moves the *result* and the
+                    //: tab strip, not the plot canvas.
+                    readonly property real splitPlotX:
+                        targetHorizontal ? splitResultWidth + page.paneHandleWidth : 0
+                    readonly property real splitPlotY:
+                        targetHorizontal ? 0 : splitResultHeight + page.paneHandleWidth
+                    readonly property real splitPlotWidth:
+                        targetHorizontal
+                            ? Math.max(0, width - splitResultWidth
+                                - page.paneHandleWidth)
+                            : width
+                    readonly property real splitPlotHeight:
+                        targetHorizontal
+                            ? height
+                            : Math.max(0, height - splitResultHeight
+                                - page.paneHandleWidth)
+
                     Segmented {
                         id: paneTabs
 
-                        visible: page.tabbedPanes
+                        visible: page.tabbedPanes || opacity > 0
+                        opacity: page.tabbedPanes ? 1 : 0
+                        Behavior on opacity {
+                            enabled: page.tabbedReady
+                            NumberAnimation {
+                                duration: 180
+                                easing.type: Easing.OutCubic
+                            }
+                        }
                         anchors.top: parent.top
                         anchors.horizontalCenter: parent.horizontalCenter
                         width: 220
@@ -647,7 +723,18 @@ Item {
                         y: splitArea.tabbedHeaderHeight
                         width: splitArea.resultWidth
                         height: splitArea.resultHeight
-                        visible: !page.tabbedPanes || page.smallPaneIndex === 0
+                        //: The pane fades rather than vanishing when the Segmented
+                        //: switches to Plot; a page built with Result selected has
+                        //: opacity 1 from the start.
+                        opacity: !page.tabbedPanes || page.smallPaneIndex === 0 ? 1 : 0
+                        Behavior on opacity {
+                            enabled: page.tabbedReady
+                            NumberAnimation {
+                                duration: 180
+                                easing.type: Easing.OutCubic
+                            }
+                        }
+                        visible: opacity > 0
                     }
 
             //: The divider writes the one result share both orientations read.
@@ -656,7 +743,17 @@ Item {
             Rectangle {
                 id: plotHandle
 
-                visible: calcVM.hasPlot && !page.tabbedPanes
+                //: Fades with the tabbed transition instead of vanishing: the
+                //: handle is still visible while the result/plot split collapses.
+                opacity: page.tabbedPanes ? 0 : 1
+                Behavior on opacity {
+                    enabled: page.tabbedReady
+                    NumberAnimation {
+                        duration: 180
+                        easing.type: Easing.OutCubic
+                    }
+                }
+                visible: calcVM.hasPlot && (!page.tabbedPanes || opacity > 0)
                 color: plotSplitHover.containsMouse
                     ? page.splitterHoverFill : "transparent"
                 x: splitArea.targetHorizontal ? resultPane.width : 0
@@ -733,26 +830,34 @@ Item {
             PlotPane {
                 id: plotPane
 
-                visible: (calcVM.hasPlot || page.plotCollapsing)
-                    && (!page.tabbedPanes || page.smallPaneIndex === 1)
+                //: The half of the split that fades out when the tabbed mode is
+                //: showing Result (and stays for its own tab); its geometry is
+                //: the split shape or the tabbed full-pane target, applied in
+                //: one step by `tabbedPanes` so qmlmathplot is never resized
+                //: frame by frame.
+                opacity: (calcVM.hasPlot || page.plotCollapsing)
+                    && (!page.tabbedPanes || page.smallPaneIndex === 1) ? 1 : 0
+                Behavior on opacity {
+                    enabled: page.tabbedReady
+                    NumberAnimation {
+                        duration: 180
+                        easing.type: Easing.OutCubic
+                    }
+                }
+                visible: opacity > 0
                 keepAlive: page.plotCollapsing
-                x: page.tabbedPanes ? 0
-                    : splitArea.targetHorizontal
-                        ? resultPane.width + page.paneHandleWidth : 0
-                y: page.tabbedPanes ? splitArea.tabbedHeaderHeight
-                    : splitArea.targetHorizontal
-                        ? 0 : resultPane.height + page.paneHandleWidth
-                width: page.tabbedPanes ? splitArea.width
-                    : splitArea.targetHorizontal
-                        ? Math.max(0, splitArea.width - resultPane.width
-                            - page.paneHandleWidth)
-                        : splitArea.width
+                x: page.tabbedPanes ? 0 : splitArea.splitPlotX
+                //: The plot snaps to the *final* header height, not the
+                //: animated one: a height that changes every frame while the
+                //: tab strip grows is the frame-by-frame qmlmathplot resize the
+                //: guide warns about.
+                y: page.tabbedPanes
+                    ? splitArea.tabbedHeaderTargetHeight : splitArea.splitPlotY
+                width: page.tabbedPanes ? splitArea.width : splitArea.splitPlotWidth
                 height: page.tabbedPanes
-                    ? Math.max(0, splitArea.height - splitArea.tabbedHeaderHeight)
-                    : splitArea.targetHorizontal
-                        ? splitArea.height
-                        : Math.max(0, splitArea.height - resultPane.height
-                            - page.paneHandleWidth)
+                    ? Math.max(0, splitArea.height
+                        - splitArea.tabbedHeaderTargetHeight)
+                    : splitArea.splitPlotHeight
             }
                     }
                 }

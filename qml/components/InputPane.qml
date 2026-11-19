@@ -445,10 +445,11 @@ Item {
             id: keyboardPanel
 
             Layout.fillWidth: true
-            Layout.preferredHeight: calcVM.keyboardCollapsed
-                ? keyboardPanel.collapsedHeight : keyboardPanel.expandedHeight
-            Layout.minimumHeight: calcVM.keyboardCollapsed
-                ? keyboardPanel.collapsedHeight : keyboardPanel.minimumExpandedHeight
+            //: The panel animates its own implicit height; the layout follows
+            //: it frame by frame instead of toggling between the two constants.
+            Layout.preferredHeight: keyboardPanel.implicitHeight
+            Layout.minimumHeight: Math.min(keyboardPanel.implicitHeight,
+                                           keyboardPanel.minimumExpandedHeight)
             onKeyPressed: (key) => root.insertToInput(key)
             onBackspacePressed: root.backspaceInput()
             onCursorLeftPressed: root.moveInputCursor(-1)

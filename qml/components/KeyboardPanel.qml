@@ -29,6 +29,7 @@ Rectangle {
         target: vm
 
         function onKeyboardTabsChanged() {
+            root.previousTabIndex = 0
             root.currentTabIndex = 0
             tabBar.currentIndex = 0
         }
@@ -46,7 +47,48 @@ Rectangle {
     color: "transparent"
     radius: 0
     border.width: 0
+    clip: true
     implicitHeight: collapsed ? collapsedHeight : expandedHeight
+    //: `InputPane` follows this implicit height, so the layout opens and closes
+    //: with the panel instead of snapping between 54 and 282.
+    Behavior on implicitHeight {
+        NumberAnimation {
+            duration: 180
+            easing.type: Easing.OutCubic
+        }
+    }
+
+    //: The grid that was on screen before the last tab change. The page-turn
+    //: animation reads its sign to decide which way the new page enters.
+    property int previousTabIndex: 0
+    onCurrentTabIndexChanged: {
+        const direction = currentTabIndex - previousTabIndex
+        previousTabIndex = currentTabIndex
+        if (direction === 0 || root.collapsed)
+            return
+        keyGrid.pageOffset = direction > 0 ? 28 : -28
+        keyGrid.opacity = 0
+        pageFlipAnimation.restart()
+    }
+
+    ParallelAnimation {
+        id: pageFlipAnimation
+
+        NumberAnimation {
+            target: keyGrid
+            property: "pageOffset"
+            to: 0
+            duration: 160
+            easing.type: Easing.OutCubic
+        }
+        NumberAnimation {
+            target: keyGrid
+            property: "opacity"
+            to: 1
+            duration: 120
+            easing.type: Easing.OutCubic
+        }
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -330,12 +372,16 @@ Rectangle {
 
         // Only the current tab's grid is built. The old StackLayout kept one
         // complete GridLayout (and every Rin.Button) per tab, while only one is
-        // ever visible. Switching tabs now rebuilds that one grid.
+        // ever visible. Switching tabs now rebuilds that one grid, and the new
+        // page slides in from the direction of travel (see `previousTabIndex`).
         GridLayout {
             id: keyGrid
             Layout.fillWidth: true
             Layout.fillHeight: true
             visible: !root.collapsed
+
+            property real pageOffset: 0
+            transform: Translate { x: keyGrid.pageOffset }
 
             readonly property var tab:
                 vm.keyboardTabs[root.currentTabIndex] || ({})

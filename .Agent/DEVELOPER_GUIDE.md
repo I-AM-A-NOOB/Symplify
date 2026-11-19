@@ -1679,9 +1679,12 @@ mode hides the input and most chrome, and the window-level side of it lives in
   width/ratio to settle, then starts the same `layoutProgress` animation from
   the no-plot state: the result starts full-area and the plot grows from zero
   into `plotBesideResult`. No opacity fade is involved. A page rebuilt with a
-  plot already present starts settled (`plotWasVisible`), and a tabbed
-  small-window plot appears without a geometry tween. This is what avoids the
-  old fullscreen result-over-plot flash while still animating the appearance.
+  plot already present starts settled (`plotWasVisible`). The tabbed small-window
+  layout is the exception: `tabbedProgress` fades/moves the result and the
+  Result/Plot strip in one 220ms `OutCubic` tween, while the plot pane snaps to
+  its final geometry in one step (never a frame-by-frame canvas resize). This is
+  what avoids the old fullscreen result-over-plot flash while still animating
+  the appearance.
   When `hasPlot` turns false again, the same tween runs in reverse:
   `plotCollapsing` keeps the plot pane and its RHI loader alive while the result
   grows back to the full area; the pane is hidden only when `layoutProgress`
@@ -1706,6 +1709,12 @@ mode hides the input and most chrome, and the window-level side of it lives in
   This is the static fallback that avoids squeezing both panes and the
   frame-by-frame plot resize qmlmathplot cannot take. The page's
   `smallPaneIndex` selects the pane; the tab row is not persisted.
+  **The switch is animated**: `tabbedProgress` (0 split → 1 tabbed) drives the
+  header height, the result pane's geometry and the Segmented/handle/plot
+  opacity in a 220ms `OutCubic` tween. The plot pane's geometry is applied in
+  one step at the toggle (the final 40px header, not the growing one), because
+  resizing qmlmathplot's canvas every frame in a short window hangs it. Leaving
+  the tabbed mode runs the same progress in reverse.
 - **The outer splitter width, result share and keyboard collapse persist.** The
   page binds `SettingsViewModel.inputPanelWidth` / `resultShare` /
   `keyboardCollapsed` (keys `workspace.input_width`, `workspace.result_share`,
@@ -1715,8 +1724,12 @@ mode hides the input and most chrome, and the window-level side of it lives in
   its width uses the same 250ms write debounce. Input width and result share are written
   through 250ms debounce timers after drags/resizes, so a drag does not write
   YAML per frame. The keyboard's collapse button toggles the Calculator
-  viewmodel immediately and writes the same setting; the panel collapses to its
-  54px toolbar and the key grid/tab row are hidden.
+  viewmodel immediately and writes the same setting; the panel animates its
+  implicit height (54px toolbar ↔ 282px expanded, 180ms `OutCubic`) and
+  `InputPane` follows it, while the tab row/key grid hide or appear. Changing
+  keyboard tabs slides the new grid in from the direction of travel (160ms,
+  28px offset plus a 120ms opacity fade); the tab strip's own scroll remains the
+  eased `HScrollView` pan.
 - **The empty result pane carries a watermark with two kinds**
   (`workspace.result_watermark`, a writable `SettingsViewModel.resultWatermark`
   property): `icon` (default) draws the app's Σ monogram, `random` picks one
