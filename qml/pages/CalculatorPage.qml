@@ -239,7 +239,10 @@ Item {
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: vm.zenMode ? 16 : 24
-        anchors.bottomMargin: 16
+        //: The workspace is the page's floor: the split handle and both panes
+        //: reach the bottom edge. The 16px gap this used to carry left the
+        //: ContentSizer pill and the pane boundary floating above the frame.
+        anchors.bottomMargin: 0
         spacing: vm.zenMode ? 0 : 14
 
         // ---- Page toolbar ----

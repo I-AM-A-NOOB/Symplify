@@ -1523,7 +1523,11 @@ mode hides the input and most chrome, and the window-level side of it lives in
   stays a dropdown, not an action.
 - **The input is the first `SplitView` item, not a sidebar card.** Its width is
   the splitter's; the handle is hidden with the pane in Zen. Normal mode always
-  shows the input; there is no second collapse toggle competing with Zen.
+  shows the input; there is no second collapse toggle competing with Zen. The
+  page column keeps its 24px inset on the top and both sides but **0 at the
+  bottom**: the workspace is the page's floor, so the split handle, its hover
+  band and the pane boundary reach the window's bottom edge. The 16px bottom
+  margin this used to carry left them stopping short of the frame.
 - **The editor does not grow; the spacer does.** `inputStage` keeps one fixed
   110px in both Code and Assign, and the keyboard stays at 282px; the Assign
   value box scrolls inside that fixed stage. Switching modes must not resize the
