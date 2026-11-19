@@ -103,7 +103,6 @@ Item {
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: Spacing.control
         spacing: 8
 
         //: The backend state belongs to the result it governs, so it sits above

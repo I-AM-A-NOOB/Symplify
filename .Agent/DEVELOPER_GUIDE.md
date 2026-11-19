@@ -1506,9 +1506,11 @@ mode hides the input and most chrome, and the window-level side of it lives in
 - **The page is one surface, not a stack of cards.** The input pane, keyboard shell
   and plot card are transparent; the keyboard keys and the code box are the only
   raised pieces, matching the Windows Calculator reference. The title uses
-  `Typography.Title` at `page.width >= 900` and `Typography.Subtitle` below it,
-  so the heading stays large when there is room and stops crowding the controls
-  at the minimum width.
+  `Typography.Subtitle`, the same face as every `PageHeader` title, so switching
+  pages never changes the heading's size or weight; only the toolbar's spacing
+  tightens below 900px. The panes carry no outer margin of their own: the
+  workspace's `Spacing.content` (16) is the edge, and the input/result/plot
+  contents start there (the keyboard's 8px is internal to the key panel).
 - **The toolbar is a normal row, not a `CommandBar`.** It starts with the title,
   then Code/Assign, Calculate, Examples and Clear. It carries no result or plot
   actions: the result pane header owns the copy buttons (status stays next to

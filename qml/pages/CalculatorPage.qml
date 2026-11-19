@@ -269,10 +269,10 @@ Item {
             visible: !vm.zenMode
 
             Text {
-                //: Windows Calculator's page heading, not another toolbar label.
-                //: The 28px face yields to the 20px one before the toolbar
-                //: starts dropping controls at the minimum window width.
-                typography: page.wideHeader ? Typography.Title : Typography.Subtitle
+                //: The same page-title face as every `PageHeader`, so switching
+                //: pages does not change the heading's size or weight. The
+                //: toolbar's spacing still tightens below 900px.
+                typography: Typography.Subtitle
                 text: qsTr("Calculator")
                 Layout.alignment: Qt.AlignVCenter
             }

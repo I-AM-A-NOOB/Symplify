@@ -257,8 +257,9 @@ Item {
 
                 width: parent.width
                 height: Math.max(varTable.height,
-                                 varsScroll.height - varsScroll.contentBox.y - 12
-                                     - headerRow.height - content.spacing)
+                                 varsScroll.height - varsScroll.contentBox.y
+                                     - varsScroll.inset - headerRow.height
+                                     - content.spacing)
 
                 // Exactly as tall as its rows, and no taller: the view builds a
                 // delegate per row (it cannot recycle what it thinks is on screen),

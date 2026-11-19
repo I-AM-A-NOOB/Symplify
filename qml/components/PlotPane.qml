@@ -37,7 +37,6 @@ Item {
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.margins: Spacing.control
         height: 32
         spacing: 4
 
