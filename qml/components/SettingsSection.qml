@@ -24,6 +24,9 @@ ColumnLayout {
 
     Text {
         id: subtitle
+        //: The body runs at `content` so the cards get the wider area, but the
+        //: subtitle is a heading and lines up with the page title at `header`.
+        Layout.leftMargin: Spacing.header - Spacing.content
         typography: Typography.BodyStrong
         text: root.label
     }

@@ -190,7 +190,7 @@ Item {
         if (row < 0 || row >= page.rowCount)
             return
         const pitch = varTable.rowHeightProvider(0) + varTable.rowSpacing
-        //: The content's own origin: the box sits at the page inset, and the table
+        //: The content's own origin: the box sits at the content inset, and the table
         //: inside `content`, so the row's absolute top needs both (the History page's
         //: `reveal` has always counted its inset; this one used to leave it out and
         //: scroll a row 12px short).
@@ -513,9 +513,6 @@ Item {
         inlineRow: headerRow
         //: The floating bar belongs over the table, not over the panel beside it.
         rightBoundary: detailsSplitter
-        //: The body is inset 12 (it is a table, not prose), so the bar's own inset
-        //: has to match or the floating title would sit 12px off its inline self.
-        inset: 12
 
         SearchBar {
             id: searchBar

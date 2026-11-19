@@ -22,10 +22,10 @@ Item {
     readonly property real paneHandleWidth: 16
     readonly property real splitterPillThickness: 4
     readonly property real splitterPillLength: 24
-    //: The page's own inset on the top and both sides. The workspace keeps it,
-    //: except at the bottom (see the column) and for the result/plot handle,
-    //: which reaches the right edge so it is draggable all the way there.
-    readonly property int pageInset: vm.zenMode ? 16 : 24
+    //: The page's title/actions margin and the workspace's own margin. Only the
+    //: title row uses 24; the panes below it sit at 16 (see `Spacing`).
+    readonly property int headerInset: Spacing.header
+    readonly property int contentInset: Spacing.content
 
     //: WinUI3 ContentSizer tones: the rest state is the page surface, the hover
     //: band is the closest neutral fill, and the pill is the opaque system
@@ -242,7 +242,10 @@ Item {
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: page.pageInset
+        anchors.margins: page.contentInset
+        //: The title keeps the header's top margin; Zen hides it, so the
+        //: workspace takes the content value on all four sides there.
+        anchors.topMargin: vm.zenMode ? page.contentInset : page.headerInset
         //: The workspace is the page's floor: the split handle and both panes
         //: reach the bottom edge. The 16px gap this used to carry left the
         //: ContentSizer pill and the pane boundary floating above the frame.
@@ -258,6 +261,10 @@ Item {
         RowLayout {
             objectName: "calculatorToolbar"
             Layout.fillWidth: true
+            //: The title and actions keep the header inset (24) while the
+            //: workspace below them uses content (16).
+            Layout.leftMargin: page.headerInset - page.contentInset
+            Layout.rightMargin: page.headerInset - page.contentInset
             spacing: page.wideHeader ? 8 : 6
             visible: !vm.zenMode
 
@@ -660,7 +667,7 @@ Item {
                 //: the content rather than stopping at the plot card.
                 width: splitArea.targetHorizontal
                     ? page.paneHandleWidth
-                    : splitArea.width + page.pageInset
+                    : splitArea.width + page.contentInset
                 height: splitArea.targetHorizontal
                     ? splitArea.height : page.paneHandleWidth
 

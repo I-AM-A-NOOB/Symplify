@@ -65,7 +65,7 @@ QQC2.Control {
     //: focusable control (its own ring), with no History-style selection or
     //: current-index state.
     focusPolicy: Qt.NoFocus
-    padding: 14
+    padding: Spacing.pane
     implicitWidth: cardLayout.implicitWidth + leftPadding + rightPadding
     implicitHeight: cardLayout.implicitHeight + topPadding + bottomPadding
 

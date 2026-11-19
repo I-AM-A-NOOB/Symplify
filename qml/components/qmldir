@@ -1,5 +1,9 @@
 module Symplify.Components
 
+#: Spacing is the layout scale every page and region reads (header/content/pane/
+#: control/tight); it is a singleton, so one change moves the whole app.
+singleton Spacing 1.0 Spacing.qml
+
 #: The component library's inventory. Kept complete on purpose: nothing imports this
 #: module by URI (`import "../components"` resolves by file name), so a missing entry
 #: never complained — it had drifted to fifteen of twenty files, five of them the ones

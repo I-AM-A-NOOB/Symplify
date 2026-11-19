@@ -10,8 +10,9 @@ import RinUI as Rin
 //: attached, and a content item positioned at `x: inset, y: inset, width: width -
 //: inset * 2` — in four different orderings, repeating an inset it had already
 //: handed the `PageScaffold`. That is the drift the scaffold's own note warns
-//: about (a page passing one inset and writing another puts the floating title off
-//: its inline self), so the inset is *read back* here, from the scaffold, once.
+//: about (a page passing one inset and writing another puts the floating bar off
+//: the content it sits over), so the body inset is *read back* here, from the
+//: scaffold's `contentInset`, once.
 //:
 //: What a page keeps is what is genuinely its own: its `id` (its functions scroll
 //: `contentY`), its content item, the `PageHeaderRow` reserve inside it, and any
@@ -24,19 +25,20 @@ import RinUI as Rin
 //:
 //: The inset belongs on the content box and never on this flickable's margins:
 //: RinUI's bar anchors itself to its parent's right edge, so a `Flickable` with
-//: margins strands the bar in the margin, 24px off the content edge it should hug.
+//: margins strands the bar in the margin, off the content edge it should hug.
 Flickable {
     id: root
 
-    //: The page's `PageScaffold`. Its `inset` is the one this body lays its content
-    //: out with, so the two cannot disagree. One-way — this reads the scaffold, and
-    //: the scaffold reads this body's `contentY`, which is a different property pair
-    //: and not a loop.
-    property Item frame: null
+    //: The page's `PageScaffold`, read for `contentInset`. `var` because the
+    //: scaffold's type is not visible to qmllint from a component in the same
+    //: directory; it is always an Item in practice. One-way — this reads the
+    //: scaffold, and the scaffold reads this body's `contentY`, which is a
+    //: different property pair and not a loop.
+    property var frame: null
 
-    //: The page's content inset: the scaffold's, or the default when a body is
-    //: built without one (a harness).
-    readonly property int inset: root.frame ? root.frame.inset : 24
+    //: The page's content inset: the scaffold's body inset, or the scale's
+    //: content value when a body is built without one (a harness).
+    readonly property int inset: root.frame ? root.frame.contentInset : Spacing.content
 
     //: For probes and tree dumps, like the app's other hooks.
     objectName: "pageBody"

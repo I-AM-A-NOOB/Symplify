@@ -38,8 +38,8 @@ Rectangle {
     border.width: 0
     //: No border. The surface already says where the group is, and a 1px border
     //: *with* a radius is drawn antialiased along its straight edges too: the group's
-    //: x lands on a fractional physical pixel (24px page inset + the expander body's
-    //: 7px padding = 31 logical, ×1.5 = 46.5), so the left and right lines spread over
+    //: x lands on a fractional physical pixel (16px content inset + the expander body's
+    //: 7px padding = 23 logical, ×1.5 = 34.5), so the left and right lines spread over
     //: two pixels and read as thicker than the header's — which is the same colour and
     //: width but sits on whole pixels. Win11's own group inside an expanded card has no
     //: outline either. Wanting one back means either accepting that, or `radius: 0`,

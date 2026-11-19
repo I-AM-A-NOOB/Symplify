@@ -231,7 +231,7 @@ Item {
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 12
+        anchors.margins: Spacing.control
         spacing: 10
 
         // Input area: Code / Assign. Both live side by side in a clipped stage

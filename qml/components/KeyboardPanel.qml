@@ -50,7 +50,7 @@ Rectangle {
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 10
+        anchors.margins: Spacing.control
         spacing: 8
 
         // Toolbar: above the tab strip and separate from both it and the key

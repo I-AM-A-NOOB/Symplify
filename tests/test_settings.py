@@ -343,7 +343,11 @@ def test_the_components_directory_and_its_qmldir_agree():
         if not line:
             continue
         head = line.split()[0]
-        if head not in directives:
+        if head == "singleton":
+            # `singleton Spacing 1.0 Spacing.qml` names the type in the second
+            # token; the directive itself is not an inventory entry.
+            listed.add(line.split()[1])
+        elif head not in directives:
             listed.add(head)
 
     present = {path.stem for path in components.glob("*.qml")}

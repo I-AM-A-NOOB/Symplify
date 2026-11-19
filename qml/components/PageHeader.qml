@@ -37,14 +37,19 @@ Item {
     //: the scrolling column). Pages without sections leave it empty and the bar
     //: keeps the page title.
     property var sections: []
-    //: The page's content inset, so the actions line up with the content at rest.
-    property int inset: 24
+    //: The title/actions inset. This is the one place the page uses the
+    //: header scale (24); the body below it uses `contentInset`.
+    property int inset: Spacing.header
+    //: Where the body's content box starts. The section/scroll arithmetic below
+    //: is in content coordinates, so it reads this — not the title alignment.
+    property int contentInset: Spacing.content
     default property alias actions: actionRow.data
 
     //: The section whose subtitle has reached the bar's bottom edge — the one the
     //: bar shows instead of the page title. In *content* coordinates, so it needs
-    //: no `mapToItem` snapshot: the body's content box sits at `inset`, so a
-    //: subtitle's viewport y is `inset + section.y + subtitleOffset - contentY`.
+    //: no `mapToItem` snapshot: the body's content box sits at `contentInset`, so
+    //: a subtitle's viewport y is `contentInset + section.y + subtitleOffset -
+    //: contentY`.
     //: `section.y` and `subtitleOffset` are plain properties of the layouts, and
     //: layouts notify, so opening an expander above re-evaluates this too.
     readonly property string section: {
@@ -52,7 +57,7 @@ Item {
         if (!items || items.length === 0 || header.flickable === null)
             return ""
         const line = header.flickable.contentY + header.y + header.height
-            - header.inset
+            - header.contentInset
         let current = ""
         for (let i = 0; i < items.length; i += 1) {
             const item = items[i]
@@ -155,10 +160,10 @@ Item {
     readonly property real restingY: header.pad
         + (header.innerHeight - barRow.implicitHeight) / 2
     //: True once the content has scrolled under the bar, which is when the backdrop
-    //: may appear: the reserve is exactly as tall as the bar, and it starts `inset`
-    //: from the page's top, so the bar's own top edge is reached after
-    //: `inset - margin` of scrolling — past that, the first real row of content is
-    //: already behind the bar.
+    //: may appear: the reserve is exactly as tall as the bar, and it starts
+    //: `contentInset` from the page's top, so the bar's own top edge is reached
+    //: after `contentInset - margin` of scrolling — past that, the first real row
+    //: of content is already behind the bar.
     //:
     //: Measured from `contentY` on purpose. The obvious version asked where the
     //: inline row *is* (`inlineRow.mapToItem(...)`), and `mapToItem` is a snapshot
@@ -168,7 +173,7 @@ Item {
     //: the binding and it went away. `contentY` notifies; a snapshot does not.
     readonly property bool barShown: header.flickable !== null
         && header.inlineRow !== null
-        && header.flickable.contentY > header.inset - header.y
+        && header.flickable.contentY > header.contentInset - header.y
 
     x: header.margin
     y: header.margin

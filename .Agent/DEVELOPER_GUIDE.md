@@ -223,12 +223,15 @@ qml/
                                 #     keeps its content's text cursors; a plain Expander
                                 #     would need the same one-liner),
                                 #   PageScaffold (the frame every page shares: title, actions and
-                                #     the floating bar they ride into) together with the two pieces
+                                #     the floating bar they ride into; `inset` is the title/actions
+                                #     margin, `contentInset` the body's) together with the two pieces
                                 #     it assembles — PageHeader (the bar that fades in as the
-                                #     inline title scrolls away) and PageHeaderRow (that title,
-                                #     plus the room the actions need) — and PageBody (the body
-                                #     under it: the inset read back off the scaffold, the attached
-                                #     scroll bar, and the height the page scrolls to),
+                                #     content scrolls under it) and PageHeaderRow (the room the
+                                #     actions need) — and PageBody (the body under it: the content
+                                #     inset read back off the scaffold, the attached scroll bar, and
+                                #     the height the page scrolls to),
+                                #   Spacing (the one layout scale: header 24, content 16, pane 12,
+                                #     control 8, tight 4; pages read it instead of choosing insets),
                                 #   ZenChrome / TitleBarButtons (the window's Zen chrome: the
                                 #     fullscreen hover strip with its window controls, and the
                                 #     title-bar Zen/fullscreen slots; the window keeps the mode
@@ -1089,8 +1092,8 @@ transparent corner, not `srgba(255,255,255,1)`.
   * The group card carries **no border**, and that has to be written as `border.width: 0`:
     `Rectangle`'s border *defaults* to 1px black, so dropping the two lines leaves a black outline
     rather than none. With a border it looked thicker on the left and right than the header's — the
-    same colour and width, but the group's x lands on a fractional physical pixel (24px page inset +
-    the expander body's 7px padding = 31 logical, ×1.5 = 46.5), and a rounded `Rectangle` draws its
+    same colour and width, but the group's x lands on a fractional physical pixel (16px content inset +
+    the expander body's 7px padding = 23 logical, ×1.5 = 34.5), and a rounded `Rectangle` draws its
     border antialiased along the straight edges too, so those two lines spread over two pixels. The
     surface colour already says where the group is, which is what Win11 does inside an expanded card.
   * The content column carries `Layout.leftMargin: -24`. `SettingItem`'s row has `spacing: 16`, and
@@ -1198,10 +1201,10 @@ transparent corner, not `srgba(255,255,255,1)`.
   view is what removed them. One bar, at
   the right edge of the view that scrolls — which is why the History list is deliberately
   **full-bleed**: that puts its bar on the window edge, where the Microsoft Store keeps it, and the
-  *cards* carry the inset instead: the content sits at the usual 24px and the cards add
+  *cards* carry the inset instead: the content sits at `Spacing.content` (16) and the cards add
   `page.cardInset` (4px) on each side. Note the painted bar is tiny — RinUI's thumb is
   `scrollBarWidth` (6px) when hovered, 2px idle, inside a 12px interaction zone — so the cards'
-  32px stand-off from the edge is plenty; nothing needs to give way for it. The real overlay fight
+  20px stand-off from the edge is plenty; nothing needs to give way for it. The real overlay fight
   is *inside* a strip that scrolls horizontally: RinUI's bar is an overlay along the bottom edge,
   ~16px tall in all (6px thumb plus the arrow `ToolButton`s, which overhang the 12px control), so a
   formula with only 8px under it has the arrows sitting on its feet. That clearance belongs to
@@ -1524,10 +1527,12 @@ mode hides the input and most chrome, and the window-level side of it lives in
 - **The input is the first `SplitView` item, not a sidebar card.** Its width is
   the splitter's; the handle is hidden with the pane in Zen. Normal mode always
   shows the input; there is no second collapse toggle competing with Zen. The
-  page column keeps its 24px inset on the top and both sides but **0 at the
-  bottom**: the workspace is the page's floor, so the split handle, its hover
-  band and the pane boundary reach the window's bottom edge. The 16px bottom
-  margin this used to carry left them stopping short of the frame.
+  page column keeps the header inset (24) on top and the content inset (16) on
+  both sides, but **0 at the bottom**: the workspace is the page's floor, so the
+  split handle, its hover band and the pane boundary reach the window's bottom
+  edge. The 16px bottom margin this used to carry left them stopping short of
+  the frame. The toolbar row carries the `header - content` difference as its
+  own margins, so the title stays at 24 while the panes below sit at 16.
 - **The editor does not grow; the spacer does.** `inputStage` keeps one fixed
   110px in both Code and Assign, and the keyboard stays at 282px; the Assign
   value box scrolls inside that fixed stage. Switching modes must not resize the
@@ -2619,24 +2624,25 @@ backdrop floats up from 10px below while fading in, and carries the page's own t
     very thing being previewed. Overriding its `contentItem` with an `Icon` keeps the flyout and the
     `color` aliases while leaving the colour to the strip beside it. Its `implicitWidth` binding reads
     an id inside that replaced contentItem, so the instance sets `implicitWidth` explicitly.
-- The settings page's content lives in a `Flickable` (with an AsNeeded `ScrollBar`) because the page
-  is taller than a short window. Keep new rows inside that column — giving the content
-  `anchors.fill: parent` again would silently disable scrolling, and the numbers to watch are
-  `contentHeight` vs the viewport height. The **Flickable fills the whole page and the 24px inset
-  lives on the column** (`qml/pages/SettingsPage.qml`), which is RinUI's own `FluentPage`
-  arrangement: RinUI's `components/ScrollBar.qml` anchors this bar to `parent.right` /
-  `parent.verticalCenter`, so it inherits whatever inset its Flickable has — margins on the
-  Flickable strand the bar in the page gutter, 24px from the content edge instead of hugging it.
-  `contentHeight` carries one extra inset (`+ frame.inset * 2`) so the last card clears the bottom
-  edge. **The inset is read back, not restated**: every page used to write `x: 24` / `y: 24` /
-  `width: scroll.width - 48` by hand next to the `inset` it passed the scaffold, so moving an inset
-  meant finding four or five literals — and Variables, whose inset is 12, had its own set. That
-  arithmetic now lives in `qml/components/PageBody.qml`, which takes the scaffold (`frame:`) and reads
-  `inset` off it, so a page cannot disagree with the frame it hands the title bar to; the page's own
-  content is one child of the body's inset box. A page that maps something's `y` into the viewport
-  (History's cards, the Variables table's rows) asks `contentBox.y` for the content's origin in the
-  scroller rather than restating the inset — the Variables `reveal` used to leave it out and scrolled
-  one row 12px short, where History had always counted it.
+- The settings page's content lives in `PageBody` (a `Flickable` with an AsNeeded attached scroll
+  bar) because the page is taller than a short window. Keep new rows inside that content column —
+  giving the content `anchors.fill: parent` again would silently disable scrolling, and the numbers
+  to watch are `contentHeight` vs the viewport height. `PageBody` lays the content at the
+  scaffold's `contentInset` (`Spacing.content`, 16) while the title bar keeps `Spacing.header` (24);
+  the bar hugs the body's right edge, so do not put margins on the Flickable — margins there strand
+  the bar in the page gutter instead. `contentHeight` carries one extra inset
+  (`+ frame.inset * 2`) so the last card clears the bottom edge. **The inset is read back, not
+  restated**: every page used to write `x: 24` / `y: 24` / `width: scroll.width - 48` by hand next
+  to the `inset` it passed the scaffold, so moving an inset meant finding four or five literals —
+  and Variables, whose body used to be 12, had its own set. That arithmetic now lives in
+  `qml/components/PageBody.qml`, which takes the scaffold (`frame:`) and reads `contentInset` off
+  it, so a page cannot disagree with the frame it hands the title bar to; the page's own content is
+  one child of the body's inset box. A page that maps something's `y` into the viewport (History's
+  cards, the Variables table's rows) asks `contentBox.y` for the content's origin in the scroller
+  rather than restating the inset — the Variables `reveal` used to leave it out and scrolled one
+  row 12px short, where History had always counted it. The section subtitles add the
+  `header - content` difference back as their own left margin, so a settings heading still lines up
+  with the page title while the cards use the wider content area.
 - **The Workspace group** (`workspace.*`) is what the section of the same name owns — how code is
   coloured, how brackets are coloured, the three faces, and whether Zen mode enters full screen.
   The faces, all applied live:
@@ -3159,9 +3165,11 @@ pitch) runs after adding a variable and whenever the selection's current row cha
 
 The sticky part is `PageScaffold`'s: the title row and the toolbar ride up into the floating bar. The
 table has no card around it — no outline, no rounding, no plate behind the rows; their own tint is
-the table, and the page inset is 12 rather than the usual 24 (`PageScaffold.inset` is set to match,
-or the floating title would sit off its inline self — and the body reads that same value back for
-its own `x`/`y`/`width`). Its details panel is `page.panelWidth`, a named number because 320 means
+the table, and the body uses the shared content inset (`Spacing.content`, 16) while the title stays
+at `Spacing.header` (24). There is no page-specific inset any more: `PageBody` reads the scaffold's
+`contentInset` for its own `x`/`y`/`width`, and the floating bar follows the header inset, so the
+table and the title cannot drift apart. Its details panel is `page.panelWidth`, a named number
+because 320 means
 something unrelated on other pages (History's prefetch margin, the dialogs' width); it is resizable
 (240–480, capped by the page width) through the same 16px ContentSizer splitter the rest of the app
 uses, and the body ends at `detailsSplitter.left`. The panel deliberately has **no fill**
@@ -3188,12 +3196,14 @@ pinned right through it.
 
 **The bar is parked, not travelling, and its box is one control tall.** It used to ride the inline
 row and then stick, from when the title also lived in the content; with one title in one control,
-riding bought nothing and cost consistency, because every page insets its content differently — the
-same bar sat at a different height, with different padding round its title, on every page. `barRow`
-now sits at `restingY` always, and `restingY` centres it in a box of RinUI's own control height
-(`Button`: `max(text + 12, 32)`); without that floor a page with no actions (Settings) sized the bar
-to its title alone and stood 52 tall against every other page's 56, with its title 2px lower.
-Measured after: four pages, both window widths, title at y=22 and the bar 56 tall, every time.
+riding bought nothing and cost consistency — pages used to inset their content differently, so the
+same bar sat at a different height, with different padding round its title, on every page. The
+scaffold now gives every page the same split (`Spacing.header` for the bar/title, `Spacing.content`
+for the body), and `barRow` sits at `restingY` always. `restingY` centres it in a box of RinUI's own
+control height (`Button`: `max(text + 12, 32)`); without that floor a page with no actions
+(Settings) sized the bar to its title alone and stood 52 tall against every other page's 56, with
+its title 2px lower. Measured after: four pages, both window widths, title at y=22 and the bar 56
+tall, every time.
 
 **`SearchBar`'s field is the piece that gives way, and the mode is a menu, not a combo box.** The
 field carries `Layout.fillWidth: true` + `Layout.minimumWidth: 90`, so the component's own implicit

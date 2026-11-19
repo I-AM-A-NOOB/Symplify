@@ -107,7 +107,7 @@ Rectangle {
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 12
+        anchors.margins: Spacing.pane
         spacing: 10
 
         Item { Layout.fillHeight: true }
