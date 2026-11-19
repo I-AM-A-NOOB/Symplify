@@ -3122,9 +3122,11 @@ draw (`python/model/plotting.py`, zero Qt), the **object** every surface binds t
   the plot owns the handlers; on focus-out the camera's `panEnabled`/`zoomEnabled` are toggled off
   and back, which is qmlmathplot's public way of dropping held keys — without it, leaving with an
   arrow held would keep panning for ever (measured: the camera stops at its last position). The
-  frame carries `Layout.leftMargin`/`rightMargin: 3`: the ring draws two pixels outside its control
-  and the result column is clipped by its `Flickable`, so without the gutter the ring's sides are
-  cut off. The frame is `visible: calcVM.hasPlot`: a `ColumnLayout` skips an invisible child, so an
+  frame carries a 3px **left** margin: the ring draws two pixels outside its control and the
+  result/plot splitter has no page margin for it, so without that gutter the ring's left side is
+  cut off. The **right and bottom** margins are `Spacing.content` (16), the same as the result
+  text and copy buttons, so the card's right/bottom gaps read as one rectangle; the page margin
+  there is wide enough for the ring. The frame is `visible: calcVM.hasPlot`: a `ColumnLayout` skips an invisible child, so an
   empty result leaves **no 4:3 hole** — the placeholder card is gone, and the outcome box's
   `Press Ctrl+Return to calculate` hint is the only empty-state text.
 - **`x` and `y` start as ordinary variables** — `plotting.plot_variables()` is passed by `main.py`

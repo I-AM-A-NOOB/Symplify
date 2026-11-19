@@ -92,8 +92,10 @@ Item {
         }
     }
 
-    //: The focus ring draws two pixels outside its control, so three pixels of
-    //: gutter keep it whole in the split pane.
+    //: The focus ring draws two pixels outside its control, so the left edge
+    //: keeps a 3px gutter from the result/plot splitter. The right and bottom
+    //: use the page's content inset instead (see `rightMargin`/`bottomMargin`),
+    //: which leaves the ring room without an extra gutter.
     Control {
         id: plotFrame
 
@@ -105,6 +107,12 @@ Item {
         anchors.bottom: parent.bottom
         anchors.margins: 3
         anchors.topMargin: 8
+        //: The card's right and bottom sit on the same content inset as the
+        //: result text and the copy buttons (16), so those two gaps read as one
+        //: rectangle. The 3px gutter stays only on the left, where the
+        //: result/plot splitter has no page margin for the focus ring to use.
+        anchors.rightMargin: 0
+        anchors.bottomMargin: Spacing.content
 
         //: The same focus arrangement the Segmented items use: a Control is the
         //: Tab stop, so the shared ring can read `visualFocus`/`focusReason` and
