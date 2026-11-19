@@ -447,9 +447,10 @@ Item {
             Layout.fillWidth: true
             //: The panel animates its own implicit height; the layout follows
             //: it frame by frame instead of toggling between the two constants.
+            //: The minimum is the same value, so collapse and expand are one
+            //: curve rather than one direction clamping the minimum.
             Layout.preferredHeight: keyboardPanel.implicitHeight
-            Layout.minimumHeight: Math.min(keyboardPanel.implicitHeight,
-                                           keyboardPanel.minimumExpandedHeight)
+            Layout.minimumHeight: keyboardPanel.implicitHeight
             onKeyPressed: (key) => root.insertToInput(key)
             onBackspacePressed: root.backspaceInput()
             onCursorLeftPressed: root.moveInputCursor(-1)

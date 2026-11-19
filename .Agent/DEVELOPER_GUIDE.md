@@ -1680,11 +1680,12 @@ mode hides the input and most chrome, and the window-level side of it lives in
   the no-plot state: the result starts full-area and the plot grows from zero
   into `plotBesideResult`. No opacity fade is involved. A page rebuilt with a
   plot already present starts settled (`plotWasVisible`). The tabbed small-window
-  layout is the exception: `tabbedProgress` fades/moves the result and the
-  Result/Plot strip in one 220ms `OutCubic` tween, while the plot pane snaps to
-  its final geometry in one step (never a frame-by-frame canvas resize). This is
-  what avoids the old fullscreen result-over-plot flash while still animating
-  the appearance.
+  layout is the exception: `tabbedProgress` animates the result's geometry and
+  the Result/Plot strip in one 220ms `OutCubic` tween. The plot keeps its split
+  size and slides out inside a clipping drawer (the Plot tab takes the full pane
+  in one step), so qmlmathplot is never resized frame by frame. This is what
+  avoids the old fullscreen result-over-plot flash while still animating the
+  appearance.
   When `hasPlot` turns false again, the same tween runs in reverse:
   `plotCollapsing` keeps the plot pane and its RHI loader alive while the result
   grows back to the full area; the pane is hidden only when `layoutProgress`
@@ -1710,11 +1711,13 @@ mode hides the input and most chrome, and the window-level side of it lives in
   frame-by-frame plot resize qmlmathplot cannot take. The page's
   `smallPaneIndex` selects the pane; the tab row is not persisted.
   **The switch is animated**: `tabbedProgress` (0 split → 1 tabbed) drives the
-  header height, the result pane's geometry and the Segmented/handle/plot
-  opacity in a 220ms `OutCubic` tween. The plot pane's geometry is applied in
-  one step at the toggle (the final 40px header, not the growing one), because
-  resizing qmlmathplot's canvas every frame in a short window hangs it. Leaving
-  the tabbed mode runs the same progress in reverse.
+  header height, the result pane's geometry and the Segmented/handle opacity in
+  a 220ms `OutCubic` tween. The plot is a drawer: it keeps its split size and
+  slides below the split area (inside a clipped wrapper) while Result is
+  selected, so it neither flashes at full size nor resizes qmlmathplot's canvas
+  frame by frame; the Plot tab switches it to the full pane in one step. Leaving
+  the tabbed mode runs the same progress in reverse, sliding the plot back in
+  at its split geometry.
 - **The outer splitter width, result share and keyboard collapse persist.** The
   page binds `SettingsViewModel.inputPanelWidth` / `resultShare` /
   `keyboardCollapsed` (keys `workspace.input_width`, `workspace.result_share`,
@@ -1728,8 +1731,7 @@ mode hides the input and most chrome, and the window-level side of it lives in
   implicit height (54px toolbar ↔ 282px expanded, 180ms `OutCubic`) and
   `InputPane` follows it, while the tab row/key grid hide or appear. Changing
   keyboard tabs slides the new grid in from the direction of travel (160ms,
-  28px offset plus a 120ms opacity fade); the tab strip's own scroll remains the
-  eased `HScrollView` pan.
+  28px offset); the tab strip's own scroll remains the eased `HScrollView` pan.
 - **The empty result pane carries a watermark with two kinds**
   (`workspace.result_watermark`, a writable `SettingsViewModel.resultWatermark`
   property): `icon` (default) draws the app's Σ monogram, `random` picks one

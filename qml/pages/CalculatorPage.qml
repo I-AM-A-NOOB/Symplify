@@ -124,6 +124,17 @@ Item {
     //: cannot be read then; the last settled orientation is what the result
     //: panel is actually leaving.
     property bool tabbedFromHorizontal: false
+    //: Where the plot sits while tabbed: under the 40px strip when its own tab
+    //: is selected, or below the split area (clipped away) when Result is.
+    //: The tabbed tween interpolates from `splitPlotY` to this, so the plot
+    //: slides out like a drawer instead of snapping to a full-area flash.
+    property real tabbedPlotTargetY: 0
+    function tabbedPlotTarget() {
+        if (!splitArea)
+            return 0
+        return smallPaneIndex === 1
+            ? splitArea.tabbedHeaderTargetHeight : splitArea.height
+    }
     //: False during component construction: the first target is set without an
     //: entrance animation (a page rebuilt while already tabbed must open settled).
     property bool tabbedReady: false
@@ -135,9 +146,15 @@ Item {
         }
     }
     onTabbedPanesChanged: {
-        if (tabbedPanes)
+        if (tabbedPanes) {
             tabbedFromHorizontal = wasPlotBesideResult
+            tabbedPlotTargetY = tabbedPlotTarget()
+        }
         tabbedProgress = tabbedPanes ? 1 : 0
+    }
+    onSmallPaneIndexChanged: {
+        if (tabbedPanes)
+            tabbedPlotTargetY = tabbedPlotTarget()
     }
 
     Component.onCompleted: {
@@ -146,6 +163,7 @@ Item {
             settlePlotLayout()
         }
         tabbedFromHorizontal = wasPlotBesideResult
+        tabbedPlotTargetY = tabbedPlotTarget()
         tabbedProgress = tabbedPanes ? 1 : 0
         tabbedReady = true
     }
@@ -822,42 +840,48 @@ Item {
                 }
             }
 
-            // The plot is a sibling of the result pane, never a child of its
-            // scroller. That is what keeps a long formula from dragging the
-            // plot away and lets the wheel over the plot stay with the plot.
-            // The plot itself lives in the viewmodel (RinUI rebuilds a page on
-            // every navigation), so this is a view of it and owns no state.
-            PlotPane {
-                id: plotPane
+            //: The drawer that clips the plot when the split collapses into
+            //: the Segmented pane. The plot canvas keeps its split size while
+            //: it slides below the split area, so qmlmathplot is never resized
+            //: frame by frame (which hangs it in a short window).
+            Item {
+                id: plotDrawer
 
-                //: The half of the split that fades out when the tabbed mode is
-                //: showing Result (and stays for its own tab); its geometry is
-                //: the split shape or the tabbed full-pane target, applied in
-                //: one step by `tabbedPanes` so qmlmathplot is never resized
-                //: frame by frame.
-                opacity: (calcVM.hasPlot || page.plotCollapsing)
-                    && (!page.tabbedPanes || page.smallPaneIndex === 1) ? 1 : 0
-                Behavior on opacity {
-                    enabled: page.tabbedReady
-                    NumberAnimation {
-                        duration: 180
-                        easing.type: Easing.OutCubic
-                    }
+                anchors.fill: parent
+                clip: true
+
+                // The plot is a sibling of the result pane, never a child of
+                // its scroller. That is what keeps a long formula from dragging
+                // the plot away and lets the wheel over the plot stay with the
+                // plot. The plot itself lives in the viewmodel (RinUI rebuilds
+                // a page on every navigation), so this is a view of it and
+                // owns no state.
+                PlotPane {
+                    id: plotPane
+
+                    visible: (calcVM.hasPlot || page.plotCollapsing)
+                        && (!page.tabbedPanes || page.smallPaneIndex === 1
+                            || page.tabbedProgress < 1)
+                    keepAlive: page.plotCollapsing
+                    //: In the tabbed mode the Plot tab owns the full pane; the
+                    //: Result tab leaves the split geometry under the drawer
+                    //: while it slides out.
+                    readonly property bool tabbedFull:
+                        page.tabbedPanes && page.smallPaneIndex === 1
+                    x: tabbedFull ? 0 : splitArea.splitPlotX
+                    width: tabbedFull ? splitArea.width : splitArea.splitPlotWidth
+                    height: tabbedFull
+                        ? Math.max(0, splitArea.height
+                            - splitArea.tabbedHeaderTargetHeight)
+                        : splitArea.splitPlotHeight
+                    //: The drawer slide: split position → the tabbed position
+                    //: captured when the mode flipped. At Result it is the
+                    //: split area's bottom (fully clipped), at Plot the top of
+                    //: the tabbed pane.
+                    y: splitArea.splitPlotY
+                        + (page.tabbedPlotTargetY - splitArea.splitPlotY)
+                            * page.tabbedProgress
                 }
-                visible: opacity > 0
-                keepAlive: page.plotCollapsing
-                x: page.tabbedPanes ? 0 : splitArea.splitPlotX
-                //: The plot snaps to the *final* header height, not the
-                //: animated one: a height that changes every frame while the
-                //: tab strip grows is the frame-by-frame qmlmathplot resize the
-                //: guide warns about.
-                y: page.tabbedPanes
-                    ? splitArea.tabbedHeaderTargetHeight : splitArea.splitPlotY
-                width: page.tabbedPanes ? splitArea.width : splitArea.splitPlotWidth
-                height: page.tabbedPanes
-                    ? Math.max(0, splitArea.height
-                        - splitArea.tabbedHeaderTargetHeight)
-                    : splitArea.splitPlotHeight
             }
                     }
                 }

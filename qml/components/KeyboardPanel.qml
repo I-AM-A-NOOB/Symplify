@@ -40,8 +40,6 @@ Rectangle {
     //: sizes the panel from these instead of repeating the numbers.
     readonly property int collapsedHeight: 54
     readonly property int expandedHeight: 282
-    //: How far a short window may squeeze the expanded panel (the key grid).
-    readonly property int minimumExpandedHeight: 242
 
     //: The keys are the tiles; the keyboard itself is not another card.
     color: "transparent"
@@ -67,27 +65,17 @@ Rectangle {
         if (direction === 0 || root.collapsed)
             return
         keyGrid.pageOffset = direction > 0 ? 28 : -28
-        keyGrid.opacity = 0
         pageFlipAnimation.restart()
     }
 
-    ParallelAnimation {
+    NumberAnimation {
         id: pageFlipAnimation
 
-        NumberAnimation {
-            target: keyGrid
-            property: "pageOffset"
-            to: 0
-            duration: 160
-            easing.type: Easing.OutCubic
-        }
-        NumberAnimation {
-            target: keyGrid
-            property: "opacity"
-            to: 1
-            duration: 120
-            easing.type: Easing.OutCubic
-        }
+        target: keyGrid
+        property: "pageOffset"
+        to: 0
+        duration: 160
+        easing.type: Easing.OutCubic
     }
 
     ColumnLayout {
@@ -102,8 +90,14 @@ Rectangle {
         // Backspace stays on the opposite end so it cannot be hit while
         // reaching for an arrow.
         RowLayout {
+            objectName: "keyboardToolbar"
+
             Layout.fillWidth: true
             Layout.preferredHeight: 34
+            //: The toolbar is the one fixed row. Without this floor the
+            //: ColumnLayout squeezed it as the key grid appeared during the
+            //: expand tween, which is what made the buttons twitch.
+            Layout.minimumHeight: 34
             spacing: 2
 
             Rin.ToggleButton {
@@ -241,7 +235,16 @@ Rectangle {
         Item {
             Layout.fillWidth: true
             Layout.preferredHeight: 40
-            visible: !root.collapsed
+            //: Laid out at all times; the panel's clip and this fade reveal it
+            //: as the height grows, so collapse and expand run the same way.
+            opacity: root.collapsed ? 0 : 1
+            enabled: !root.collapsed
+            Behavior on opacity {
+                NumberAnimation {
+                    duration: 120
+                    easing.type: Easing.OutCubic
+                }
+            }
 
             Cmp.HScrollView {
                     id: tabScroll
@@ -378,7 +381,16 @@ Rectangle {
             id: keyGrid
             Layout.fillWidth: true
             Layout.fillHeight: true
-            visible: !root.collapsed
+            //: The grid stays laid out so the toolbar's height never depends
+            //: on it appearing mid-tween; the clip + fade do the reveal.
+            opacity: root.collapsed ? 0 : 1
+            enabled: !root.collapsed
+            Behavior on opacity {
+                NumberAnimation {
+                    duration: 120
+                    easing.type: Easing.OutCubic
+                }
+            }
 
             property real pageOffset: 0
             transform: Translate { x: keyGrid.pageOffset }
