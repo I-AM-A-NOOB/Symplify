@@ -1113,9 +1113,17 @@ transparent corner, not `srgba(255,255,255,1)`.
     through; the caller just writes its setting in `onSelected`.
   The rows go **directly** into the expander body, not behind another layout: `SettingItem` reads
   `parent.roundContentEdgeItems` for its corner rounding, so an extra `ColumnLayout` in between logs
-  `Unable to assign [undefined] to bool` (SettingItem.qml:15) once per row. A `Repeater` dropped there
+  `Unable to assign [undefined] to bool` (SettingItem.qml:15) once per row. The two group components
+  (`RadioSettingGroup` / `CheckboxSettingGroup`) are the deliberate exception: their rows sit behind
+  the group's `ColumnLayout` because the group owns the surface, so that column states
+  `roundContentEdgeItems: false` — the rows paint no background, so there is nothing to round — and
+  the warning stays away. A `Repeater` dropped there
   is a layout child like any other and would spend `spacing` on itself before the first row, so it
   carries `visible: false`; its delegates are separate children and stay visible.
+  `SettingExpander` itself also logs `QML RowLayout: ... Detected recursive rearrange` from its own
+  header, **even with one plain `SettingItem` and none of these rows** (measured with a bare
+  expander); that one is RinUI's header layout, not `SettingFieldRow.contentPreferredWidth`, so do
+  not restructure the rows for it.
   `QtQuick.Controls` and `RinUI` both export `RadioButton`, so a page that uses RinUI's own controls
   unqualified must watch for the clash — `SettingsPage` imports `RinUI as Rin` for its `Rin.ScrollBar`
   and `RadioSettingRow` imports only `RinUI`, which keeps its `RadioButton` unambiguous; qmllint

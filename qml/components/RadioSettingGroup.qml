@@ -49,6 +49,13 @@ Rectangle {
     ColumnLayout {
         id: column
 
+        //: `SettingItem` asks its parent for `roundContentEdgeItems` to decide
+        //: whether the first/last row rounds its corners. These rows set
+        //: `background: null` (the group owns the surface), so there are no
+        //: corners of their own to round; without this the lookup answers
+        //: `undefined` and Qt logs `Unable to assign [undefined] to bool` per row.
+        property bool roundContentEdgeItems: false
+
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top

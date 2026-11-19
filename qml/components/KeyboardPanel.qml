@@ -34,13 +34,19 @@ Rectangle {
         }
     }
 
+    //: The panel's own heights: 240px of key card, the toolbar (34) and the gap
+    //: (8) above it, and the toolbar-only strip when collapsed. `InputPane`
+    //: sizes the panel from these instead of repeating the numbers.
+    readonly property int collapsedHeight: 54
+    readonly property int expandedHeight: 282
+    //: How far a short window may squeeze the expanded panel (the key grid).
+    readonly property int minimumExpandedHeight: 242
+
     //: The keys are the tiles; the keyboard itself is not another card.
     color: "transparent"
     radius: 0
     border.width: 0
-    // The 240px card grew by the toolbar (34) and its gap (8), so the key
-    // rows keep the height they had before the cursor buttons existed.
-    implicitHeight: collapsed ? 54 : 290
+    implicitHeight: collapsed ? collapsedHeight : expandedHeight
 
     ColumnLayout {
         anchors.fill: parent

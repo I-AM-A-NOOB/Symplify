@@ -121,7 +121,7 @@ QQC2.ItemDelegate {
         host.keyboardNavigation && highlighted
 
     width: parent.width
-    height: cardBody.implicitHeight + 20
+    height: cardBody.implicitHeight + topPadding + bottomPadding
 
     // The card inset is the delegate's to apply, because the list is
     // full-bleed; then the content padding it always had, plus 8px so

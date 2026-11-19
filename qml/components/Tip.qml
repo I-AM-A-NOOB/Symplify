@@ -15,9 +15,18 @@ ToolTip {
     id: root
 
     //: The control this tip is shown for. Defaults to `parent`, which is the control
-    //: it is declared in.
-    property Item hoverTarget: parent
+    //: it is declared in. `var`, not `Item`: `Control.hovered` and
+    //: `MouseArea.containsMouse` are different members (see `visible`).
+    property var hoverTarget: parent
 
     delay: 500
-    visible: root.hoverTarget ? root.hoverTarget.hovered : false
+    //: `Control.hovered` where the target is a control; a `MouseArea` has only
+    //: `containsMouse`. Asking for `hovered` unconditionally made the warning
+    //: glyph's tip evaluate `undefined` (Qt logs `Unable to assign [undefined]
+    //: to bool`) and never show.
+    visible: root.hoverTarget
+        ? (root.hoverTarget.hovered !== undefined
+            ? root.hoverTarget.hovered
+            : root.hoverTarget.containsMouse === true)
+        : false
 }

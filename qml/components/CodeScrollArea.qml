@@ -40,6 +40,11 @@ Item {
         id: area
 
         anchors.fill: parent
+        //: RinUI's own `implicitHeight: defaultHeight` references a name its
+        //: component does not define (`ReferenceError` on every construction).
+        //: The height is anchored, so only the warning was lost — override the
+        //: broken binding with this component's own height.
+        implicitHeight: root.implicitHeight
         background: CodeSurface {
             focused: area.textArea.activeFocus
         }

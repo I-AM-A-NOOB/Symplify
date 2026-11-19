@@ -443,9 +443,13 @@ Item {
         }
 
         KeyboardPanel {
+            id: keyboardPanel
+
             Layout.fillWidth: true
-            Layout.preferredHeight: calcVM.keyboardCollapsed ? 54 : 282
-            Layout.minimumHeight: calcVM.keyboardCollapsed ? 54 : 242
+            Layout.preferredHeight: calcVM.keyboardCollapsed
+                ? keyboardPanel.collapsedHeight : keyboardPanel.expandedHeight
+            Layout.minimumHeight: calcVM.keyboardCollapsed
+                ? keyboardPanel.collapsedHeight : keyboardPanel.minimumExpandedHeight
             onKeyPressed: (key) => root.insertToInput(key)
             onBackspacePressed: root.backspaceInput()
             onCursorLeftPressed: root.moveInputCursor(-1)

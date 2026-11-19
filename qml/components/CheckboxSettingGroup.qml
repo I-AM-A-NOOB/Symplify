@@ -20,6 +20,11 @@ Rectangle {
     ColumnLayout {
         id: column
 
+        //: See `RadioSettingGroup`: these rows paint no background, so nothing
+        //: rounds; the property is stated to keep `SettingItem` from reading
+        //: `undefined` off its layout parent.
+        property bool roundContentEdgeItems: false
+
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top

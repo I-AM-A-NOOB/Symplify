@@ -123,9 +123,12 @@ Rectangle {
 
             Layout.fillWidth: true
             visible: host.selectedRow >= 0 && host.definition.url !== ""
-            source: host.definition.url
-            naturalWidth: host.definition.width
-            naturalHeight: host.definition.height
+            //: `definition` is `{}` when the panel is closed or no row is
+            //: selected; reading `.url`/`.width` then assigned `undefined` and Qt
+            //: logged `Unable to assign [undefined] to …` on every construction.
+            source: host.definition.url || ""
+            naturalWidth: host.definition.width || 0
+            naturalHeight: host.definition.height || 0
         }
         Text {
             Layout.fillWidth: true
