@@ -1715,9 +1715,14 @@ mode hides the input and most chrome, and the window-level side of it lives in
   a 220ms `OutCubic` tween. The plot is a drawer: it keeps its split size and
   slides below the split area (inside a clipped wrapper) while Result is
   selected, so it neither flashes at full size nor resizes qmlmathplot's canvas
-  frame by frame; the Plot tab switches it to the full pane in one step. Leaving
-  the tabbed mode runs the same progress in reverse, sliding the plot back in
-  at its split geometry.
+  frame by frame; the Plot tab switches it to the full pane in one step. The
+  drawer's target is a live binding to the split area's *current* bottom, so
+  growing the window while Result is selected cannot reveal the parked plot
+  before the transition starts. Leaving the tabbed mode runs the same progress
+  in reverse, sliding the plot back in at its split geometry. Switching between
+  the Result and Plot tabs slides each pane 40px horizontally (180ms) while
+  cross-fading; the plot keeps the tabbed full size once its tab has been
+  visited, so a switch never snaps through the split geometry.
 - **The outer splitter width, result share and keyboard collapse persist.** The
   page binds `SettingsViewModel.inputPanelWidth` / `resultShare` /
   `keyboardCollapsed` (keys `workspace.input_width`, `workspace.result_share`,

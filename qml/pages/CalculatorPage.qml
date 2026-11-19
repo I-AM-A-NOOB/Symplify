@@ -126,14 +126,37 @@ Item {
     property bool tabbedFromHorizontal: false
     //: Where the plot sits while tabbed: under the 40px strip when its own tab
     //: is selected, or below the split area (clipped away) when Result is.
-    //: The tabbed tween interpolates from `splitPlotY` to this, so the plot
-    //: slides out like a drawer instead of snapping to a full-area flash.
-    property real tabbedPlotTargetY: 0
-    function tabbedPlotTarget() {
-        if (!splitArea)
-            return 0
-        return smallPaneIndex === 1
+    //: The tabbed tween interpolates from `splitPlotY` to this. It is a live
+    //: binding, not a value captured at the toggle: while the window grows the
+    //: "hidden" position must stay at the split area's *current* bottom, or the
+    //: plot reappears below the old one before the transition starts.
+    readonly property real tabbedPlotTargetY:
+        !splitArea ? 0
+        : (smallPaneIndex === 1 || plotTabbedFull)
             ? splitArea.tabbedHeaderTargetHeight : splitArea.height
+    //: Horizontal offset of each Segmented pane while switching Result/Plot.
+    property real resultPageOffset: 0
+    property real plotPageOffset: 0
+    property int lastSmallPaneIndex: 0
+    //: True once the Plot tab has taken the full tabbed pane in this tabbed
+    //: session. The plot stays at that size while it fades out under Result, so
+    //: switching back does not resize the canvas again (and a switch never
+    //: snaps through the split geometry).
+    property bool plotTabbedFull: false
+    readonly property real tabbedPageShift: Spacing.header + Spacing.content
+    NumberAnimation {
+        id: resultPageAnimation
+        target: page
+        property: "resultPageOffset"
+        duration: 180
+        easing.type: Easing.OutCubic
+    }
+    NumberAnimation {
+        id: plotPageAnimation
+        target: page
+        property: "plotPageOffset"
+        duration: 180
+        easing.type: Easing.OutCubic
     }
     //: False during component construction: the first target is set without an
     //: entrance animation (a page rebuilt while already tabbed must open settled).
@@ -146,15 +169,43 @@ Item {
         }
     }
     onTabbedPanesChanged: {
+        resultPageAnimation.stop()
+        plotPageAnimation.stop()
+        resultPageOffset = 0
+        plotPageOffset = 0
+        lastSmallPaneIndex = smallPaneIndex
         if (tabbedPanes) {
             tabbedFromHorizontal = wasPlotBesideResult
-            tabbedPlotTargetY = tabbedPlotTarget()
+            plotTabbedFull = smallPaneIndex === 1
         }
         tabbedProgress = tabbedPanes ? 1 : 0
     }
     onSmallPaneIndexChanged: {
-        if (tabbedPanes)
-            tabbedPlotTargetY = tabbedPlotTarget()
+        if (!tabbedPanes) {
+            lastSmallPaneIndex = smallPaneIndex
+            return
+        }
+        if (smallPaneIndex === 1)
+            plotTabbedFull = true
+        const direction = smallPaneIndex > lastSmallPaneIndex ? 1 : -1
+        lastSmallPaneIndex = smallPaneIndex
+        resultPageAnimation.stop()
+        plotPageAnimation.stop()
+        if (smallPaneIndex === 0) {
+            //: Result arrives from the left, Plot leaves to the right.
+            resultPageOffset = direction * tabbedPageShift
+            plotPageOffset = 0
+            resultPageAnimation.to = 0
+            plotPageAnimation.to = -direction * tabbedPageShift
+        } else {
+            //: Plot arrives from the right, Result leaves to the left.
+            plotPageOffset = direction * tabbedPageShift
+            resultPageOffset = 0
+            plotPageAnimation.to = 0
+            resultPageAnimation.to = -direction * tabbedPageShift
+        }
+        resultPageAnimation.start()
+        plotPageAnimation.start()
     }
 
     Component.onCompleted: {
@@ -163,7 +214,8 @@ Item {
             settlePlotLayout()
         }
         tabbedFromHorizontal = wasPlotBesideResult
-        tabbedPlotTargetY = tabbedPlotTarget()
+        lastSmallPaneIndex = smallPaneIndex
+        plotTabbedFull = tabbedPanes && smallPaneIndex === 1
         tabbedProgress = tabbedPanes ? 1 : 0
         tabbedReady = true
     }
@@ -753,6 +805,7 @@ Item {
                             }
                         }
                         visible: opacity > 0
+                        transform: Translate { x: page.resultPageOffset }
                     }
 
             //: The divider writes the one result share both orientations read.
@@ -859,15 +912,27 @@ Item {
                 PlotPane {
                     id: plotPane
 
-                    visible: (calcVM.hasPlot || page.plotCollapsing)
-                        && (!page.tabbedPanes || page.smallPaneIndex === 1
-                            || page.tabbedProgress < 1)
+                    //: The plot is visible while it slides out of the split
+                    //: (progress < 1) and on its own tab; settled under Result
+                    //: it is hidden. The fade is what makes the left/right page
+                    //: switch, while the drawer slide remains the mode change.
+                    opacity: (calcVM.hasPlot || page.plotCollapsing)
+                        && (page.smallPaneIndex === 1 || !page.tabbedPanes
+                            || page.tabbedProgress < 1) ? 1 : 0
+                    Behavior on opacity {
+                        enabled: page.tabbedReady
+                        NumberAnimation {
+                            duration: 180
+                            easing.type: Easing.OutCubic
+                        }
+                    }
+                    visible: opacity > 0
                     keepAlive: page.plotCollapsing
                     //: In the tabbed mode the Plot tab owns the full pane; the
                     //: Result tab leaves the split geometry under the drawer
                     //: while it slides out.
                     readonly property bool tabbedFull:
-                        page.tabbedPanes && page.smallPaneIndex === 1
+                        page.tabbedPanes && page.plotTabbedFull
                     x: tabbedFull ? 0 : splitArea.splitPlotX
                     width: tabbedFull ? splitArea.width : splitArea.splitPlotWidth
                     height: tabbedFull
@@ -881,6 +946,7 @@ Item {
                     y: splitArea.splitPlotY
                         + (page.tabbedPlotTargetY - splitArea.splitPlotY)
                             * page.tabbedProgress
+                    transform: Translate { x: page.plotPageOffset }
                 }
             }
                     }
