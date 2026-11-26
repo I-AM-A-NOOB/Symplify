@@ -20,12 +20,16 @@ from PySide6.QtGui import QColor, QSyntaxHighlighter, QTextCharFormat, QTextDocu
 from PySide6.QtQuick import QQuickTextDocument
 
 from ..code_style import Style, color_for, spans
+from ..worker_protocol import ParsePolicy
 
 #: ``(start_in_block, length, format)`` — what one block has to paint.
 BlockFormat = tuple[int, int, QTextCharFormat]
 
 #: What the highlighter asks for the current name -> value scope.
 ScopeProvider = Callable[[], Mapping[str, Any]]
+
+#: What the highlighter asks for the live parser profile.
+PolicyProvider = Callable[[], ParsePolicy]
 
 
 class CodeHighlighter(QSyntaxHighlighter):
@@ -37,9 +41,11 @@ class CodeHighlighter(QSyntaxHighlighter):
         scope_provider: ScopeProvider | None = None,
         styles: Mapping[Style, str] | None = None,
         bracket_colors: Sequence[str] | None = None,
+        policy_provider: PolicyProvider | None = None,
     ):
         super().__init__(document)
         self._scope_provider = scope_provider
+        self._policy_provider = policy_provider
         # Stored as given: `color_for` owns the fallbacks (None/empty -> the
         # default palette or the bracket rainbow), so there is one such rule.
         self._styles = styles
@@ -54,20 +60,35 @@ class CodeHighlighter(QSyntaxHighlighter):
         self,
         styles: Mapping[Style, str] | None,
         bracket_colors: Sequence[str] | None,
-    ) -> None:
-        """Recolour an attached highlighter in place.
+    ) -> bool:
+        """Recolour an attached highlighter in place; did anything change?
 
         The document outlives a theme switch unless RinUI recreates the page, so
         a highlighter attached with the old palette would keep painting it —
         this is what the live theme-change handler calls. The format cache is
         cleared because it is keyed by colour, and the old palette's entries
         would otherwise accumulate across switches.
+
+        Returns ``False`` when the palette was already current, which lets the
+        caller decide whether a separate :meth:`refresh` (for a parser-policy
+        change) is needed instead of recomputing twice.
         """
         if styles == self._styles and bracket_colors == self._bracket_colors:
-            return
+            return False
         self._styles = styles
         self._bracket_colors = bracket_colors
         self._cache.clear()
+        self._recompute()
+        return True
+
+    def refresh(self) -> None:
+        """Recompute the spans with the live scope and parser policy.
+
+        A settings change (a parser switch, or a variable write) moves what the
+        same text should look like without touching the document, so the usual
+        ``contentsChanged`` path never runs. The formats are keyed by colour,
+        so the cache survives; only the span list is rebuilt.
+        """
         self._recompute()
 
     def _on_contents_changed(self) -> None:
@@ -82,8 +103,11 @@ class CodeHighlighter(QSyntaxHighlighter):
         try:
             document = self.document()
             scope = None if self._scope_provider is None else self._scope_provider()
+            policy = (
+                None if self._policy_provider is None else self._policy_provider()
+            )
             per_block: dict[int, list[BlockFormat]] = {}
-            for span in spans(document.toPlainText(), scope):
+            for span in spans(document.toPlainText(), scope, policy):
                 block = document.findBlock(span.start)
                 if not block.isValid():
                     continue
@@ -125,6 +149,7 @@ def attach(
     scope_provider: ScopeProvider | None = None,
     styles: Mapping[Style, str] | None = None,
     bracket_colors: Sequence[str] | None = None,
+    policy_provider: PolicyProvider | None = None,
 ) -> CodeHighlighter:
     """Code colouring for a QML text item's ``textDocument`` property.
 
@@ -133,8 +158,13 @@ def attach(
     document* rather than to a viewmodel: RinUI rebuilds every page on
     navigation, so the document is what knows when this instance is done — and
     that rebuild is also what re-applies a changed palette.
+
+    Both providers are asked on every recompute, so a variable write or a parser
+    switch is reflected without the caller handing over a new snapshot.
     """
     document = text_document.textDocument()
-    highlighter = CodeHighlighter(document, scope_provider, styles, bracket_colors)
+    highlighter = CodeHighlighter(
+        document, scope_provider, styles, bracket_colors, policy_provider
+    )
     highlighter.setParent(document)
     return highlighter

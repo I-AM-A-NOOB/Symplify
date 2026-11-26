@@ -258,10 +258,24 @@ class MainViewModel(QObject):
         self._apply_parse_policy()    # and the persisted parser switches
 
     def _apply_parse_policy(self) -> None:
-        """Push the current parser policy into both calculation viewmodels."""
+        """Push the current parser policy into both calculation viewmodels.
+
+        The policy is also what the code inputs paint with (a disabled ``!`` or
+        juxtaposition), so the attached highlighters recompute in place and the
+        read-only markup memo is dropped. Pages rebuild on navigation, which is
+        what re-renders their labels; the live editors are the ones a switch can
+        be seen on while the Settings page is open.
+        """
         policy = self._settings.parse_policy()
         self._calculator_vm.set_parse_policy(policy)
         self._variables_vm.set_parse_policy(policy)
+        self._markup_cache.clear()
+        for document, highlighter in list(self._code_highlighters.items()):
+            try:
+                highlighter.refresh()
+            except RuntimeError:
+                # The QObject was deleted before its `destroyed` hook ran.
+                self._code_highlighters.pop(document, None)
 
     def install_log_capture(self) -> None:
         """Take over Qt's and the interpreter's message streams.
@@ -643,14 +657,20 @@ class MainViewModel(QObject):
         return self._code_font_metrics
 
     def _markup(self, text: str, dark: bool) -> str:
-        """``text`` as markup, memoized by text, theme side and scope revision."""
-        key = (text, dark, self._scope_revision)
+        """``text`` as markup, memoized by text, theme side, scope and policy.
+
+        The parser switches are part of the key because they change whether a
+        juxtaposition or a standalone ``!`` is painted as invalid: two custom
+        policies share ``profile_id``, so the policy itself is the key.
+        """
+        policy = self._settings.parse_policy()
+        key = (text, dark, self._scope_revision, policy)
         cached = self._markup_cache.get(key)
         if cached is not None:
             return cached
         styles, bracket_colors = self._palette(dark)
         markup = to_rich_text(
-            text, self._code_scope(), styles, bracket_colors
+            text, self._code_scope(), styles, bracket_colors, policy
         )
         if len(self._markup_cache) >= 512:
             self._markup_cache.clear()
@@ -678,7 +698,11 @@ class MainViewModel(QObject):
         styles, bracket_colors = self._palette(dark)
         document = text_document.textDocument()
         highlighter = attach(
-            text_document, self._code_scope, styles, bracket_colors
+            text_document,
+            self._code_scope,
+            styles,
+            bracket_colors,
+            policy_provider=self._settings.parse_policy,
         )
         self._code_highlighters[document] = highlighter
         document.destroyed.connect(
@@ -698,7 +722,10 @@ class MainViewModel(QObject):
         styles, bracket_colors = self._palette(dark)
         for document, highlighter in list(self._code_highlighters.items()):
             try:
-                highlighter.set_palette(styles, bracket_colors)
+                if not highlighter.set_palette(styles, bracket_colors):
+                    # Same palette, but the parser policy may have moved: an
+                    # invalid juxtaposition is painted without a theme change.
+                    highlighter.refresh()
             except RuntimeError:
                 # The QObject was deleted before its `destroyed` hook ran.
                 self._code_highlighters.pop(document, None)

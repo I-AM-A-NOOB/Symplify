@@ -1936,6 +1936,88 @@ def test_lexer_takes_the_longest_operator():
     ]
 
 
+def test_a_disabled_factorial_makes_a_standalone_bang_unknown():
+    """`!` is only this language's factorial operator while the switch is on.
+
+    `!=` is Python's operator in either policy, so it must stay one — the
+    longest-match rule already tries it first.
+    """
+    off = policy_from_options({**default_options(), "factorial_notation": False})
+    assert [(token.start, token.kind) for token in tokenize("x!", None, off)] == [
+        (0, TokenKind.NAME),
+        (1, TokenKind.UNKNOWN),
+    ]
+    assert [(token.start, token.kind) for token in tokenize("x!=1", None, off)] == [
+        (0, TokenKind.NAME),
+        (1, TokenKind.OPERATOR),
+        (3, TokenKind.NUMBER),
+    ]
+    assert tokenize("x!", None, off)[1].invalid is False   # unknown, not juxtaposed
+
+
+def test_a_disabled_implicit_multiplication_marks_the_right_operand():
+    """The right-hand side of a juxtaposition is where the missing `*` goes.
+
+    Every spelling SymPy's `implicit_multiplication` accepts and Python's own
+    grammar rejects: a number then a name/number/bracket, and a closing bracket
+    then the same. `sin(x)` is a Python call and stays untouched, and so does
+    `sin x`, which belongs to `implicit_application`.
+    """
+    off = policy_from_options({**default_options(), "implicit_multiplication": False})
+
+    def invalid_at(text: str) -> list[str]:
+        return [
+            text[token.start:token.start + token.length]
+            for token in tokenize(text, None, off)
+            if token.invalid
+        ]
+
+    assert invalid_at("2x") == ["x"]
+    assert invalid_at("2 x") == ["x"]          # whitespace is not an operator
+    assert invalid_at("2pi") == ["pi"]
+    assert invalid_at("2 3") == ["3"]
+    assert invalid_at("2(x+1)") == ["("]
+    assert invalid_at("(x+1)(x-1)") == ["("]
+    assert invalid_at("f(x)y") == ["y"]
+    assert invalid_at("sin(x)") == []
+    assert invalid_at("sin x") == []           # implicit_application's business
+    assert invalid_at("2*x") == []
+    assert invalid_at("(x+1)*x") == []
+    # Python subscripts are accepted by this language, so they are not a
+    # missing `*`: only a paren counts after a number or a closing bracket.
+    assert invalid_at("2[0]") == []
+    assert invalid_at("Matrix([1, 2])[0]") == []
+
+    # The kind survives: a stored variable is still a VARIABLE for a quick fix,
+    # and only the painted span says the spelling is unusable.
+    tokens = tokenize("2x", {"x": Integer(1)}, off)
+    assert tokens[1].kind is TokenKind.VARIABLE and tokens[1].invalid
+    assert [(span.start, span.style) for span in code_spans("2x", None, off)] == [
+        (0, Style.NUMBER),
+        (1, Style.UNKNOWN),
+    ]
+    assert [span.style for span in code_spans("2x")] == [Style.NUMBER]  # free name
+
+
+def test_an_invalid_bracket_juxtaposition_beats_the_bracket_rainbow():
+    """Two producers, one paint: the bracket's layer would otherwise win.
+
+    The highlighter applies spans in order, so a rainbow bracket at the same
+    position as the invalid token erases the error. `spans` therefore drops the
+    bracket span at an invalid position.
+    """
+    off = policy_from_options({**default_options(), "implicit_multiplication": False})
+    assert (3, Style.UNKNOWN, None) in [
+        (span.start, span.style, span.layer) for span in code_spans("(1)(2)", None, off)
+    ]
+    assert (3, Style.BRACKET, 0) in [
+        (span.start, span.style, span.layer) for span in code_spans("(1)(2)")
+    ]
+    assert '<span style="color:#ff0000;">x</span>' in to_rich_text(
+        "2x", None, None, None, off
+    )
+
+
 def _names(text, scope=None):
     """The name-ish tokens of ``text`` as ``{source: kind}``."""
     wanted = (TokenKind.NAME, TokenKind.VARIABLE, TokenKind.CALLABLE, TokenKind.CONSTANT)

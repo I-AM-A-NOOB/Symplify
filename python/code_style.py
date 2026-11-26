@@ -22,12 +22,15 @@ highlighters on one document silently erase each other.
 import html
 from collections.abc import Mapping, Sequence
 from enum import Enum, auto
-from typing import Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from . import code_themes
 from .brackets import DEFAULT_COLORS as BRACKET_COLORS
 from .brackets import spans as bracket_spans
 from .lexer import TokenKind, tokenize
+
+if TYPE_CHECKING:
+    from .worker_protocol import ParsePolicy
 
 
 class Style(Enum):
@@ -131,13 +134,23 @@ DEFAULT_STYLES: dict[Style, str] = {
 }
 
 
-def spans(text: str, scope: Mapping[str, Any] | None = None) -> list[CodeSpan]:
+def spans(
+    text: str,
+    scope: Mapping[str, Any] | None = None,
+    policy: "ParsePolicy | None" = None,
+) -> list[CodeSpan]:
     """Everything in ``text`` worth painting, in order.
 
     Args:
         text: The expression.
         scope: Name -> value, so a stored variable colours differently from a
             free symbol.
+        policy: The active parser profile. An operand the lexer marks invalid
+            (a juxtaposition with implicit multiplication off, see
+            ``lexer.Token.invalid``) is painted as the expression language
+            having no use for it, and the bracket span at that same position is
+            dropped: the highlighter applies spans in order, so a rainbow
+            bracket would otherwise win over the error.
 
     Returns:
         The merged spans: lexer styles first, brackets last, ordered by start so
@@ -146,8 +159,13 @@ def spans(text: str, scope: Mapping[str, Any] | None = None) -> list[CodeSpan]:
     if not text:
         return []
 
+    tokens = tokenize(text, scope, policy)
+    invalid_starts = {token.start for token in tokens if token.invalid}
     merged: list[CodeSpan] = []
-    for token in tokenize(text, scope):
+    for token in tokens:
+        if token.invalid:
+            merged.append(CodeSpan(token.start, token.length, Style.UNKNOWN))
+            continue
         style = _KIND_STYLES.get(token.kind)
         if style is not None:
             merged.append(CodeSpan(token.start, token.length, style))
@@ -155,6 +173,7 @@ def spans(text: str, scope: Mapping[str, Any] | None = None) -> list[CodeSpan]:
     merged.extend(
         CodeSpan(start, length, Style.BRACKET, layer)
         for start, length, layer in bracket_spans(text)
+        if start not in invalid_starts
     )
     merged.sort(key=lambda span: span.start)
     return merged
@@ -193,17 +212,19 @@ def to_rich_text(
     scope: Mapping[str, Any] | None = None,
     styles: Mapping[Style, str] | None = None,
     bracket_colors: Sequence[str] | None = None,
+    policy: "ParsePolicy | None" = None,
 ) -> str:
     """``text`` as markup, for the read-only places that show an expression.
 
     The text is HTML-escaped as it goes — these are expressions, full of ``<``
     and ``&`` — and only the spans get wrapped, so the escaping can never shift
-    one.
+    one. ``policy`` is passed through to :func:`spans`, so a History card of a
+    now-disabled construct agrees with the editor that would reject it.
     """
     if not text:
         return ""
 
-    marked = spans(text, scope)
+    marked = spans(text, scope, policy)
     if not marked:
         return html.escape(text)
 

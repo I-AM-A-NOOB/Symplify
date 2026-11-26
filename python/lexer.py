@@ -12,6 +12,15 @@ stops a highlighter from claiming ``foo(1)`` is a function call while
 ``unknown_calls`` reports it as an unknown one (``implicit_multiplication``
 turns it into ``f*o**2``).
 
+The one exception is Python's own grammar: two disabled conveniences make text
+that is not valid Python at all, and the lexer is where that is already visible.
+A standalone ``!`` is only an operator when ``factorial_notation`` is on (``!=``
+stays one either way), and with ``implicit_multiplication`` off the operand on
+the *right* of a juxtaposition (``2x``, ``2(x)``, ``(x+1)(x-1)``) is
+:attr:`Token.invalid` — a spelling for "a ``*`` belongs here". Token kinds and
+boundaries still do not otherwise follow the policy: ``x^2``, ``sin x`` and
+``split_symbols`` change what the text *means*, not what each run *is*.
+
 The character classes are Python's own (``str.isidentifier``), because the
 parser tokenizes with Python's tokenizer: a name this module accepts is a name
 SymPy can resolve, and ``x²`` splits into a name and a stray character instead
@@ -20,9 +29,12 @@ of looking like one identifier.
 
 from collections.abc import Mapping, Sequence
 from enum import Enum, auto
-from typing import Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from .names import SYMPY_CALLABLES, SYMPY_CONSTANTS
+
+if TYPE_CHECKING:
+    from .worker_protocol import ParsePolicy
 
 
 class TokenKind(Enum):
@@ -53,11 +65,20 @@ class TokenKind(Enum):
 
 
 class Token(NamedTuple):
-    """``(start, length, kind)`` — a tuple, so it is also a colour span."""
+    """``(start, length, kind)`` — a tuple, so it is also a colour span.
+
+    ``invalid`` marks the right-hand operand of a juxtaposition that only
+    ``implicit_multiplication`` makes legal (``2x``, ``(x+1)(x-1)``). The kind
+    is kept: a stored variable in ``2x`` is still a ``VARIABLE`` for anything
+    that acts on the token (a future quick fix inserts the ``*`` before this
+    token), while the renderer paints it as the expression language having no
+    use for that spelling.
+    """
 
     start: int
     length: int
     kind: TokenKind
+    invalid: bool = False
 
 
 #: Multi-character first, so ``**`` never lexes as two ``*``. Mirrors what the
@@ -131,27 +152,96 @@ def _name_kind(name: str, scope: Mapping[str, Any]) -> TokenKind:
     return TokenKind.NAME
 
 
-def _operator_at(text: str, start: int) -> str | None:
-    """The operator at ``start``, longest match first, or None."""
+def _operator_at(text: str, start: int, factorial: bool = True) -> str | None:
+    """The operator at ``start``, longest match first, or None.
+
+    A standalone ``!`` is only an operator when the factorial convenience is
+    on; ``!=`` is still matched first and stays one either way.
+    """
     for operator in _OPERATORS:
+        if operator == "!" and not factorial:
+            continue
         if text.startswith(operator, start):
             return operator
     return None
 
 
-def tokenize(text: str, scope: Mapping[str, Any] | None = None) -> list[Token]:
+#: Tokens that can stand on the left of a juxtaposition.
+_NAME_KINDS = frozenset({
+    TokenKind.NAME,
+    TokenKind.VARIABLE,
+    TokenKind.CALLABLE,
+    TokenKind.CONSTANT,
+})
+
+
+def _is_paren(text: str, token: Token) -> bool:
+    """Is this token an opening ``(``?
+
+    Only a paren: ``2[0]`` and ``f(x)[0]`` are Python subscripts, which this
+    language accepts (the AST gate allows ``Subscript``), so they must not be
+    read as a missing ``*``. A ``[`` after a number is not implicit
+    multiplication either.
+    """
+    return token.kind is TokenKind.BRACKET and text[token.start] == "("
+
+
+def _is_closing_bracket(text: str, token: Token) -> bool:
+    return token.kind is TokenKind.BRACKET and text[token.start] in ")]}"
+
+
+def _is_juxtaposed(text: str, previous: Token, token: Token) -> bool:
+    """Is ``token`` the right operand of an implicit multiplication?
+
+    Covers what SymPy's ``implicit_multiplication`` inserts a ``*`` into and
+    Python's own grammar rejects: ``2x``, ``2 3``, ``2(x+1)``, ``(a+b)(a-b)``,
+    ``f(x)y``. A name followed by ``(`` is a call in Python (``sin(x)``), so it
+    is deliberately not one; neither is ``sin x``, which belongs to
+    ``implicit_application``.
+    """
+    if previous.kind is TokenKind.NUMBER:
+        return (
+            token.kind in _NAME_KINDS
+            or token.kind is TokenKind.NUMBER
+            or _is_paren(text, token)
+        )
+    if _is_closing_bracket(text, previous):
+        return (
+            token.kind in _NAME_KINDS
+            or token.kind is TokenKind.NUMBER
+            or _is_paren(text, token)
+        )
+    return False
+
+
+def tokenize(
+    text: str,
+    scope: Mapping[str, Any] | None = None,
+    policy: "ParsePolicy | None" = None,
+) -> list[Token]:
     """Every run of ``text`` as a :class:`Token`, in order.
 
     Args:
         text: The expression as the user typed it.
         scope: Name -> value, as ``Calculator.evaluate`` takes it; a name in
             here is a variable rather than a free symbol.
+        policy: The active parser profile, when the caller has one. Only two
+            rules read it (see the module docstring): standalone ``!`` and
+            juxtaposition. ``None`` means every convenience is on, which keeps
+            the historical colouring for callers that have no settings (tests,
+            headless renderers).
 
     Returns:
         A list of tokens covering the whole of ``text``, gaps included.
     """
     scope = {} if scope is None else scope
+    transformations = None if policy is None else policy.transformations
+    factorial = transformations is None or "factorial_notation" in transformations
+    implicit = (
+        transformations is None or "implicit_multiplication" in transformations
+    )
     tokens: list[Token] = []
+    previous: Token | None = None
     index = 0
     length = len(text)
 
@@ -162,29 +252,40 @@ def tokenize(text: str, scope: Mapping[str, Any] | None = None) -> list[Token]:
             end = index
             while end < length and text[end].isspace():
                 end += 1
-            tokens.append(Token(index, end - index, TokenKind.SPACE))
+            token = Token(index, end - index, TokenKind.SPACE)
             index = end
         elif char.isdecimal() or (char == "." and index + 1 < length
                                   and text[index + 1].isdecimal()):
             end = _scan_number(text, index)
-            tokens.append(Token(index, end - index, TokenKind.NUMBER))
+            token = Token(index, end - index, TokenKind.NUMBER)
             index = end
         elif _is_name_start(char):
             end = index + 1
             while end < length and _is_name_continue(text[end]):
                 end += 1
-            tokens.append(Token(index, end - index, _name_kind(text[index:end], scope)))
+            token = Token(index, end - index, _name_kind(text[index:end], scope))
             index = end
         elif char in _BRACKETS:
-            tokens.append(Token(index, 1, TokenKind.BRACKET))
+            token = Token(index, 1, TokenKind.BRACKET)
             index += 1
         else:
-            operator = _operator_at(text, index)
+            operator = _operator_at(text, index, factorial)
             if operator is not None:
-                tokens.append(Token(index, len(operator), TokenKind.OPERATOR))
+                token = Token(index, len(operator), TokenKind.OPERATOR)
                 index += len(operator)
             else:
-                tokens.append(Token(index, 1, TokenKind.UNKNOWN))
+                token = Token(index, 1, TokenKind.UNKNOWN)
                 index += 1
+
+        if (
+            not implicit
+            and previous is not None
+            and token.kind is not TokenKind.SPACE
+            and _is_juxtaposed(text, previous, token)
+        ):
+            token = token._replace(invalid=True)
+        tokens.append(token)
+        if token.kind is not TokenKind.SPACE:
+            previous = token
 
     return tokens

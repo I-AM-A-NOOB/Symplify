@@ -51,15 +51,16 @@ python/
     srepr.py                    #   restore_srepr(text): the Compute worker's one eval path, an
                                 #   AST-whitelisted reconstruction of a Store entry's srepr with
                                 #   no builtins. Never used by the UI or the Store worker.
-  lexer.py                      # tokenize(text, scope) -> [(start, length, kind)]: what each run
-                                # of characters IS — never whether it is valid (zero Qt, zero
-                                # SymPy; the static SymPy name table lives in names.py).
+  lexer.py                      # tokenize(text, scope, policy) -> [(start, length, kind, invalid)]:
+                                # what each run of characters IS, plus the two Python-grammar
+                                # exceptions a disabled switch creates (zero Qt, zero SymPy; the
+                                # static SymPy name table lives in names.py). See Code colouring.
   brackets.py                   # Rainbow bracket pairing + nesting layers + parse_colors() for
                                 # the custom palette (zero Qt). Ported from the v1 QWidget app's
                                 # RainbowBracketsHighlighter.
-  code_style.py                 # spans(text, scope): the ONE colour-span list, merging lexer.py
-                                # with brackets.py; theme(family, dark) -> (styles, brackets);
-                                # to_rich_text() for the read-only Text items.
+  code_style.py                 # spans(text, scope, policy): the ONE colour-span list, merging
+                                # lexer.py with brackets.py; theme(family, dark) -> (styles,
+                                # brackets); to_rich_text() for the read-only Text items.
   code_themes.py                # The colour families (a dark + a light member each), from VS Code's
                                 # themes, GitHub's, Atom One and Catppuccin, plus
                                 # VSCODE_BRACKET_COLORS (the bracket defaults VSCode registers for the
@@ -2068,20 +2069,35 @@ that run one curve in both directions, so only the entering one is exposed.)
 ## Code colouring
 
 One lexer, one span list, two renderers. Anything that colours code contributes spans to
-`code_style.spans(text, scope)`, and nothing paints on its own.
+`code_style.spans(text, scope, policy)`, and nothing paints on its own.
 
 - **The lexical truth is `lexer.py`** (top level, zero Qt/zero SymPy) — a tokenizer, not a parser and not a judge. It says
   what each run of characters *is*; whether the expression is valid stays with `Calculator.evaluate`
   (`Success` / `Failure`). That split is the point: `implicit_multiplication` turns `foo(1)` into
   `f*o**2`, so a highlighter deciding for itself would call it a function call while
   `unknown_calls` reports it as an unknown one.
-- **The lexer stays policy-independent deliberately.** Most transformations change meaning, not
-  token boundaries: `2x`, `sin x`, `sin^2(x)`, `x^2` and `integrate(...)` tokenize the same under
-  every policy. `!` is an operator token because `factorial_notation` can accept it. `split_symbols`
-  can turn one `NAME` (`xy`) into two symbols only at parse time, so highlighting the whole name is
-  correct at the lexical layer; a highlighter that split it would be re-implementing the parser.
-  A disabled construct is reported by `Calculator.evaluate` (`^` with `convert_xor` off, `2x` with
-  implicit multiplication off), not by inventing lexical tokens for it.
+- **The lexer reads exactly two pieces of policy, both for Python-grammar violations.** A
+  standalone `!` is only an operator while `factorial_notation` is on (`!=` is matched first and
+  stays one either way); with the switch off it is `UNKNOWN`, which paints as the language having
+  no use for it. With `implicit_multiplication` off, the operand on the *right* of a juxtaposition
+  (the `x` in `2x`, the `(` in `2(x+1)` and `(x+1)(x-1)`) gets `Token.invalid` — its kind is kept
+  (a stored `x` is still `VARIABLE`, and a quick fix inserts the `*` before that span), and
+  `code_style.spans` paints it `UNKNOWN` and drops the bracket span at the same position, because
+  the highlighter applies spans in order and a rainbow bracket would otherwise win. Whitespace does
+  not hide the juxtaposition (`2 x` is the same text to the parser); `sin(x)` is a Python call and
+  `sin x` belongs to `implicit_application`, so neither is marked.
+- **Everything else stays policy-independent deliberately.** Most transformations change meaning,
+  not token boundaries: `sin x`, `sin^2(x)`, `x^2` and `integrate(...)` tokenize the same under
+  every policy. `split_symbols` can turn one `NAME` (`xy`) into two symbols only at parse time, so
+  highlighting the whole name is correct at the lexical layer; a highlighter that split it would be
+  re-implementing the parser. A disabled construct that is not a Python-grammar violation (`^` with
+  `convert_xor` off, `sin x` with `implicit_application` off) is still reported by
+  `Calculator.evaluate`, not by inventing lexical tokens for it.
+- **The highlighter asks for the policy, it is not handed a snapshot.** `attach`/`CodeHighlighter`
+  take a `policy_provider` beside the scope provider, so switching a parser switch while an editor
+  is alive recolours it through `MainViewModel._apply_parse_policy` (which also clears the read-only
+  markup memo). `refreshCodeHighlighting` recolours the palette and calls `refresh()` when the
+  palette did not change, so a policy-only change still recomputes.
 - **Parser conveniences are user settings, but stored values are not.** `parse_options.py` exposes
   only the syntax switches that have a meaningful choice: `factorial_notation`, `split_symbols`,
   `implicit_multiplication`, `convert_xor`, `implicit_application`, `function_exponentiation`;
