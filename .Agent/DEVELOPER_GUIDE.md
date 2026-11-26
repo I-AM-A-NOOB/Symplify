@@ -347,8 +347,9 @@ installer/
                                 # never edit a version into it. It installs the tree and must NOT
                                 # create `data/` (see the packaging bullets under Versioning). The
                                 # uninstaller removes the app dir and Qt's local cache, asks
-                                # (interactively) about the config, and uses Inno's default setup
-                                # icon until the icon redesign.
+                                # (interactively) about the config, and carries the app's own
+                                # icon in Setup and Add/Remove (see the icon bullet under
+                                # Versioning).
 scratch/                        # Preserved experiments — NOT part of the app and not
                                 # maintained with it: test_plot.py is the SymPy->GLSL GPU
                                 # plotter prototype, the future plotting track's seed
@@ -3043,9 +3044,14 @@ Data-file pitfalls for frozen builds (update this list when you add data-reading
   means adding its message blocks, not editing `[Code]`. The privilege labels are left to Inno:
   the per-user default (`PrivilegesRequired=lowest`, also what a silent install uses) is correctly
   labelled "(recommended)", and the built-in text is already translated by Default.isl.
-- **Setup's icon is Inno's default for now.** `SetupIconFile` and `UninstallDisplayIcon` are
-  deliberately absent until the app icon redesign; the Start-Menu shortcut still takes the exe's
-  embedded icon, because it is the application itself, not Setup artwork.
+- **Setup wears the app icon.** `SetupIconFile={#SourceDir}\icon\Symplify.ico` compiles the
+  *packaged build's* artwork into Setup.exe — the compile fails if that folder is pruned, which is
+  the point: a setup must never show a different icon from the binary it installs.
+  `UninstallDisplayIcon={app}\symplify.exe` is the installed exe, so Add/Remove Programs and the
+  uninstall shortcut draw the same artwork without a second copy on disk. The icon redesign landed
+  with 0.8.0 (`scripts/build_icon.py`, nine sizes in one .ico), which is why the old "Inno's default
+  until the redesign" deferral is gone. Verified by compiling the script with the release defines and
+  reading the setup exe's icon back.
 - The `AppId` is a GUID with the architecture appended: that is what makes an upgrade replace the
   previous installation instead of sitting next to it, while still letting an arm64 build be installed
   on the same machine later without either one uninstalling the other. Never change it — a new `AppId`

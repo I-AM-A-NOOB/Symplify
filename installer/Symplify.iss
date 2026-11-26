@@ -61,10 +61,15 @@ AllowNoIcons=yes
 OutputDir={#OutputDir}
 OutputBaseFilename=Symplify-v{#MyAppVersion}-{#Platform}-{#Arch}-setup
 
-; No `SetupIconFile` / `UninstallDisplayIcon` for now: the redesign is still
-; pending, so Setup and Add/Remove use Inno's own default artwork instead of the
-; current app icon. The Start-Menu shortcut still takes the exe's icon, because
-; that is the application itself.
+; The setup carries the application's own artwork: `SetupIconFile` compiles the
+; same `Symplify.ico` the exe was built with into Setup.exe, so the download,
+; the UAC prompt, Explorer and the taskbar all show one icon. It is read from
+; the build being packaged (`SourceDir`) rather than the repo, so a setup can
+; never ship a different icon from the binary inside it. `UninstallDisplayIcon`
+; names the installed exe, which is what Add/Remove Programs and the uninstall
+; shortcut draw.
+SetupIconFile={#SourceDir}\icon\Symplify.ico
+UninstallDisplayIcon={app}\{#MyAppExeName}
 ;
 ; `dynamic` follows the user's Windows light/dark setting; `modern` is the flat
 ; wizard that matches it. No custom images or style files: the default artwork
