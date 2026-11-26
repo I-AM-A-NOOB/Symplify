@@ -154,6 +154,7 @@ TARGETS: dict[str, list[str]] = {
     "constant": ["constant.language", "variable.language"],
     "callable": ["entity.name.function", "support.function"],
     "variable": ["variable.other", "variable"],
+    "string": ["string.quoted", "string"],
     "operator": ["keyword.operator"],
     "unknown": ["invalid.illegal", "invalid"],
 }
@@ -454,6 +455,14 @@ def palette(source: Source, variant: str) -> tuple[dict[str, str], list[str], st
                 styles[style] = color
                 break
     colors = theme["colors"]
+    # Not a TextMate scope: VS Code registers the unmatched-bracket colour as an
+    # editor *color*, and `code_style` falls back to the registry default when a
+    # theme names none.
+    unexpected = normalize(
+        colors.get("editorBracketHighlight.unexpectedBracket.foreground", "")
+    )
+    if unexpected:
+        styles["unmatched"] = unexpected
     brackets = [
         normalize(colors[key])
         for key in (f"editorBracketHighlight.foreground{i}" for i in range(1, 7))

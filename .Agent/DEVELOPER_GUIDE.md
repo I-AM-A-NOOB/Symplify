@@ -2116,7 +2116,18 @@ One lexer, one span list, two renderers. Anything that colours code contributes 
   positions are what a tokenizer gives, and hover, completion and error ranges need no second tree.
 - **Brackets** (`brackets.py`, ported from the v1 app) are paired over the *whole document*, not per
   block, so a bracket closed on the next line keeps its partner's colour. A stray bracket gets no
-  layer, so it cannot shift the colours of the pairs around it.
+  layer, so it cannot shift the colours of the pairs around it. An unmatched bracket is painted with
+  VS Code's `editorBracketHighlight.unexpectedBracket.foreground` (`code_themes.VSCODE_UNMATCHED_BRACKET`,
+  `#ff1212` in every theme kind), not with the generic `unknown` red — a theme that names its own wins
+  through the `unmatched` style key.
+- **Strings are one `STRING` token and their contents are data.** The language supports
+  `Symbol("x")`/`symbols("x y")`, so the lexer scans both quote styles and their triple-quoted forms,
+  honouring escapes; an unterminated string is `invalid` and paints as wrong. Nothing inside is a
+  token: a disabled `!` in `Symbol("x!")` is not an error, and `code_style.spans` blanks the string
+  ranges before pairing brackets, so a `(` in the argument neither paints as unclosed nor steals the
+  partner of the call's own paren. A string has no themed colour yet — the extraction table predates
+  the `string` key, and absence means the control's ink (see `scripts/extract_themes.py`, which now
+  maps `string.quoted` for the next re-extraction).
 - **Renderers**: `viewmodel/highlighter.py` (`QSyntaxHighlighter`, attached to the editable input's
   `textArea.textDocument`) and `code_style.to_rich_text` (markup, for read-only `Text` items). A
   second painter would lose — `setFormat` is last-write-wins, so two highlighters on one document

@@ -46,9 +46,14 @@ class Style(Enum):
     VARIABLE = auto()
     CALLABLE = auto()
     CONSTANT = auto()
+    STRING = auto()
     OPERATOR = auto()
     UNKNOWN = auto()
     BRACKET = auto()
+    #: A bracket whose partner never came (or a closer with no opener). Its
+    #: colour is VS Code's ``editorBracketHighlight.unexpectedBracket.foreground``,
+    #: not the generic ``unknown`` red: they are different kinds of wrong.
+    UNMATCHED = auto()
 
 
 class CodeSpan(NamedTuple):
@@ -66,6 +71,7 @@ _KIND_STYLES: dict[TokenKind, Style] = {
     TokenKind.VARIABLE: Style.VARIABLE,
     TokenKind.CALLABLE: Style.CALLABLE,
     TokenKind.CONSTANT: Style.CONSTANT,
+    TokenKind.STRING: Style.STRING,
     TokenKind.OPERATOR: Style.OPERATOR,
     TokenKind.UNKNOWN: Style.UNKNOWN,
 }
@@ -126,11 +132,13 @@ _STYLE_BY_NAME: dict[str, Style] = {style.name.lower(): style for style in Style
 
 #: Style -> colour, used when the theme cannot answer — an unknown family, or a
 #: caller with no palette at all (headless, tests). **Only what is unambiguous**:
-#: numbers, names, callables and constants are left to the control's own text
-#: colour, because a fixed colour cannot read on both themes and the bracket
-#: rainbow already occupies the hue wheel.
+#: numbers, names, callables, constants and strings are left to the control's own
+#: text colour, because a fixed colour cannot read on both themes and the bracket
+#: rainbow already occupies the hue wheel. The unmatched bracket is the exception
+#: VS Code itself states: red in every theme side.
 DEFAULT_STYLES: dict[Style, str] = {
     Style.UNKNOWN: "#ff0000",       # a character the language has no use for
+    Style.UNMATCHED: code_themes.VSCODE_UNMATCHED_BRACKET,
 }
 
 
@@ -161,6 +169,21 @@ def spans(
 
     tokens = tokenize(text, scope, policy)
     invalid_starts = {token.start for token in tokens if token.invalid}
+    #: Bracket pairing runs over the raw text, so a ``(`` inside a string would
+    #: both paint "unclosed" and steal the partner of the call's own paren.
+    #: Strings are data, not source — blank them out at the same positions.
+    string_ranges = [
+        (token.start, token.start + token.length)
+        for token in tokens
+        if token.kind is TokenKind.STRING
+    ]
+    bracket_text = text
+    if string_ranges:
+        blanked = list(text)
+        for start, end in string_ranges:
+            blanked[start:end] = " " * (end - start)
+        bracket_text = "".join(blanked)
+
     merged: list[CodeSpan] = []
     for token in tokens:
         if token.invalid:
@@ -172,7 +195,7 @@ def spans(
 
     merged.extend(
         CodeSpan(start, length, Style.BRACKET, layer)
-        for start, length, layer in bracket_spans(text)
+        for start, length, layer in bracket_spans(bracket_text)
         if start not in invalid_starts
     )
     merged.sort(key=lambda span: span.start)
@@ -203,7 +226,10 @@ def color_for(
     if span.style is not Style.BRACKET:
         return styles.get(span.style)
     if span.layer is None:
-        return styles.get(Style.UNKNOWN)     # an unmatched bracket reads as wrong
+        # VS Code's `editorBracketHighlight.unexpectedBracket.foreground`; the
+        # registry default is the same red on every theme side, and a theme that
+        # names its own wins through the `unmatched` style key.
+        return styles.get(Style.UNMATCHED, code_themes.VSCODE_UNMATCHED_BRACKET)
     return bracket_colors[span.layer % len(bracket_colors)]
 
 

@@ -115,13 +115,25 @@ class CodeHighlighter(QSyntaxHighlighter):
                 if color is None:
                     continue            # the palette leaves this one to the control
                 unmatched = span.style is Style.BRACKET and span.layer is None
-                per_block.setdefault(block.blockNumber(), []).append(
-                    (
-                        span.start - block.position(),
-                        span.length,
-                        self._format_for(color, unmatched),
+                fmt = self._format_for(color, unmatched)
+                # A span may cross blocks: a triple-quoted string is one token
+                # that can hold newlines. `setFormat` paints one block only, so
+                # split it at each block boundary instead of letting the tail
+                # fall off the first block.
+                remaining = span.length
+                position = span.start
+                while remaining > 0 and block.isValid():
+                    offset = position - block.position()
+                    take = min(remaining, max(0, block.length() - offset))
+                    if take == 0:
+                        block = block.next()
+                        continue
+                    per_block.setdefault(block.blockNumber(), []).append(
+                        (offset, take, fmt)
                     )
-                )
+                    remaining -= take
+                    position += take
+                    block = block.next()
             self._formats = per_block
             self.rehighlight()          # re-runs highlightBlock for every block
         finally:

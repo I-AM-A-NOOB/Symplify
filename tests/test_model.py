@@ -1999,6 +1999,65 @@ def test_a_disabled_implicit_multiplication_marks_the_right_operand():
     assert [span.style for span in code_spans("2x")] == [Style.NUMBER]  # free name
 
 
+def test_a_string_is_one_token_and_its_contents_are_data():
+    """`Symbol("x!")` is a supported call, so its argument is not source.
+
+    Before this, the `!` inside the quotes was a token and a disabled
+    factorial painted it as an error, and bracket pairing coloured `(` inside
+    the string as an unclosed bracket.
+    """
+    off = policy_from_options({**default_options(), "factorial_notation": False})
+    tokens = tokenize('Symbol("x!")', None, off)
+    assert [token.kind for token in tokens] == [
+        TokenKind.CALLABLE,
+        TokenKind.BRACKET,
+        TokenKind.STRING,
+        TokenKind.BRACKET,
+    ]
+    assert tokens[2].invalid is False
+    assert [span.style for span in code_spans('Symbol("x!")', None, off)] == [
+        Style.CALLABLE,
+        Style.BRACKET,
+        Style.STRING,
+        Style.BRACKET,
+    ]
+    assert "#ff0000" not in to_rich_text('Symbol("x!")', None, None, None, off)
+
+    # Brackets inside a string are not paired with anything outside it.
+    marked = [(span.start, span.style, span.layer)
+              for span in code_spans('Symbol("(")')]
+    assert (6, Style.BRACKET, 0) in marked          # the call's own paren
+    assert (10, Style.BRACKET, 0) in marked         # its closer
+    assert all(start != 8 for start, _, _ in marked)  # the `(` inside the string
+
+
+def test_an_unterminated_string_is_reported_as_invalid():
+    token = tokenize('Symbol("x)')[2]
+    assert token.kind is TokenKind.STRING and token.invalid
+    assert (7, Style.UNKNOWN) in [
+        (span.start, span.style) for span in code_spans('Symbol("x)')
+    ]
+
+
+def test_an_unmatched_bracket_uses_vscodes_unexpected_colour():
+    """`editorBracketHighlight.unexpectedBracket.foreground`, not `unknown`.
+
+    VS Code's registry states `#ff1212` for every theme kind, so that is the
+    fallback; a theme that names its own wins through `Style.UNMATCHED`.
+    """
+    assert '<span style="color:#ff1212;">)</span>' in to_rich_text("a)b")
+    assert '<span style="color:#abcdef;">)</span>' in to_rich_text(
+        "a)b", styles={Style.UNMATCHED: "#abcdef"}
+    )
+    # The two kinds of wrong are independently addressable.
+    off = policy_from_options({**default_options(), "factorial_notation": False})
+    assert '<span style="color:#012345;">!</span>' in to_rich_text(
+        "a!",
+        styles={Style.UNKNOWN: "#012345", Style.UNMATCHED: "#abcdef"},
+        policy=off,
+    )
+
+
 def test_an_invalid_bracket_juxtaposition_beats_the_bracket_rainbow():
     """Two producers, one paint: the bracket's layer would otherwise win.
 

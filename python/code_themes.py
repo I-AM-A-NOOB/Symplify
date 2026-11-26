@@ -52,6 +52,13 @@ what the *surface* a code input sits on is painted with, so a family carries its
 own paper as well as its ink. Either may be ``""`` — High Contrast Light states
 neither — which means "no opinion", and the control keeps the UI theme's own
 colours.
+
+Two style keys a theme may state, and that older extractions here do not yet
+carry: ``string`` (its ``string.quoted`` scope) and ``unmatched`` (its
+``editorBracketHighlight.unexpectedBracket.foreground``). Absence is not a
+failure — ``code_style`` leaves an uncoloured string to the control's ink and
+falls back to :data:`VSCODE_UNMATCHED_BRACKET` for an unmatched bracket, the
+same red VS Code's registry states for every theme kind.
 """
 
 from typing import TypedDict
@@ -117,6 +124,12 @@ VSCODE_BRACKET_COLORS: dict[str, tuple[str, ...]] = {
     "dark": ("#ffd700", "#da70d6", "#179fff"),
     "light": ("#0431fa", "#319331", "#7b3814"),
 }
+
+#: VS Code's default for ``editorBracketHighlight.unexpectedBracket.foreground``
+#: — the foreground it gives a bracket whose partner never came, when the theme
+#: names no colour of its own. The registry states the same red for every theme
+#: kind (dark, light and both contrast kinds), so one value is correct here.
+VSCODE_UNMATCHED_BRACKET = "#ff1212"
 
 #: family -> {"dark" | "light" -> {"styles", "brackets", "background", "ink"}}.
 THEMES: dict[str, dict[str, ThemeLayer]] = {

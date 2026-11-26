@@ -47,6 +47,8 @@ class TokenKind(Enum):
         VARIABLE: A name that resolves to a stored variable.
         CALLABLE: A name SymPy resolves as a function.
         CONSTANT: A name SymPy resolves as a constant (``pi``, ``E``, ...).
+        STRING: A quoted literal. Its contents are data, not source: no name,
+            number, operator or bracket inside it is a token of its own.
         OPERATOR: An operator or separator (``+``, ``**``, ``,``, ``.`` ...).
         BRACKET: One of ``()[]{}``.
         SPACE: Whitespace, kept so callers can tell text apart without gaps.
@@ -58,6 +60,7 @@ class TokenKind(Enum):
     VARIABLE = auto()
     CALLABLE = auto()
     CONSTANT = auto()
+    STRING = auto()
     OPERATOR = auto()
     BRACKET = auto()
     SPACE = auto()
@@ -67,9 +70,10 @@ class TokenKind(Enum):
 class Token(NamedTuple):
     """``(start, length, kind)`` — a tuple, so it is also a colour span.
 
-    ``invalid`` marks the right-hand operand of a juxtaposition that only
-    ``implicit_multiplication`` makes legal (``2x``, ``(x+1)(x-1)``). The kind
-    is kept: a stored variable in ``2x`` is still a ``VARIABLE`` for anything
+    ``invalid`` marks a spelling the active language cannot mean: the right-hand
+    operand of a juxtaposition that only ``implicit_multiplication`` makes legal
+    (``2x``, ``(x+1)(x-1)``), or a string its closing quote never reached. The
+    kind is kept: a stored variable in ``2x`` is still a ``VARIABLE`` for anything
     that acts on the token (a future quick fix inserts the ``*`` before this
     token), while the renderer paints it as the expression language having no
     use for that spelling.
@@ -139,6 +143,42 @@ def _scan_number(text: str, start: int) -> int:
             while index < length and text[index].isdecimal():
                 index += 1
     return index
+
+
+def _scan_string(text: str, start: int) -> tuple[int, bool]:
+    """Index just past the quoted literal at ``start``, and whether it closed.
+
+    Both quote styles and their triple-quoted forms, because the parser hands
+    the expression to Python's tokenizer and ``Symbol("x")`` is a supported
+    call. Escapes are honoured so ``"a\\"b"`` does not close early; a plain
+    string ends at the line break Python would refuse, and an unterminated one
+    ends with the text.
+    """
+    quote = text[start]
+    length = len(text)
+    if text.startswith(quote * 3, start):
+        index = start + 3
+        while index < length:
+            if text[index] == "\\":
+                index += 2
+                continue
+            if text.startswith(quote * 3, index):
+                return index + 3, True
+            index += 1
+        return length, False
+
+    index = start + 1
+    while index < length:
+        char = text[index]
+        if char == "\\":
+            index += 2
+            continue
+        if char == quote:
+            return index + 1, True
+        if char == "\n":
+            return index, False
+        index += 1
+    return length, False
 
 
 def _name_kind(name: str, scope: Mapping[str, Any]) -> TokenKind:
@@ -258,6 +298,10 @@ def tokenize(
                                   and text[index + 1].isdecimal()):
             end = _scan_number(text, index)
             token = Token(index, end - index, TokenKind.NUMBER)
+            index = end
+        elif char in "'\"":
+            end, closed = _scan_string(text, index)
+            token = Token(index, end - index, TokenKind.STRING, invalid=not closed)
             index = end
         elif _is_name_start(char):
             end = index + 1
