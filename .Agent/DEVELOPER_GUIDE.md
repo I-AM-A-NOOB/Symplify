@@ -2013,14 +2013,15 @@ that run one curve in both directions, so only the entering one is exposed.)
   no timestamp and no send-to-input button: it is one result's reference card, not a list.
   The row menu copies that row's expression or LaTeX source; **Copy all** copies every row as
   `Label: expression` lines.
-- **The Calculator's Code/Assign panes slide, they do not swap.** Both inputs are siblings of one
-  clipped `Item` (`inputStage`): each `x` is bound to its side (`0` / `-width` and `width` / `0`),
-  with a 180 ms `OutCubic` `Behavior on x`. The behaviour is disabled until
+- **The Calculator's Code/Assign panes cross-fade, they do not swap.** Both inputs are siblings of
+  one clipped `Item` (`inputStage`): each `x` is bound to its side (`0` / `-Motion.slide` and
+  `Motion.slide` / `0`) with a matching opacity (`1` / `0`), and both properties animate over
+  `Motion.fast` with WinUI's entering spline. The `Behavior`s are disabled until
   `Component.onCompleted`, because a page rebuilt while the VM is in Assign mode would otherwise
-  animate its first layout from the Code position. The two panes are *disabled*, not hidden, when
-  off-stage — `visible: false` would cancel the slide — which also keeps the inactive input out of
-  the focus chain. The stage's `Layout.preferredHeight` still follows the mode, and the stage clips
-  the pane that is crossing its edge.
+  animate its first layout from the Code position. The two panes are *disabled* while off-stage,
+  and the hidden one is `visible: false` once the fade ends; keeping it visible during the fade is
+  what makes the cross-fade possible. The stage's `Layout.preferredHeight` still follows the mode,
+  and the stage clips the pane that is crossing its edge.
 - History renders each entry's LaTeX **lazily, per row, on approach**, and the pieces of that are
   worth stating because two obvious implementations do not work. Reading the `latexUrl` role used to
   render (the model's `_svg_url` caches the SVG on the entry and emits `dataChanged` for the
