@@ -199,8 +199,14 @@ FocusScope {
             selectAll()
         }
         //: Escape abandons the edit. Return is the delegate's
-        //: `Shortcut` — a text control eats it here.
+        //: `Shortcut` — a text control eats it here. Everything else is the
+        //: shared editor mechanics (pairs, quotes, Backspace, Tab); Return is
+        //: deliberately not one of them in a cell.
         Keys.onPressed: (event) => {
+            if (valueEditor.handleKey(event)) {
+                event.accepted = true
+                return
+            }
             if (event.key === Qt.Key_Escape) {
                 event.accepted = true
                 cellDelegate.pendingText = ""

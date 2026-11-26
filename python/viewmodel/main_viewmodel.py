@@ -10,20 +10,29 @@ from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import (
+    Q_ARG,
     Property,
     QCoreApplication,
     QEvent,
+    QMetaObject,
     QObject,
     Qt,
     QTimer,
     Signal,
     Slot,
 )
-from PySide6.QtGui import QColor, QFontMetricsF, QGuiApplication, QKeyEvent
+from PySide6.QtGui import (
+    QColor,
+    QFontMetricsF,
+    QGuiApplication,
+    QKeyEvent,
+    QTextCursor,
+)
 
 from .. import log_capture
 from ..brackets import parse_colors
 from ..code_style import Style, theme, to_rich_text
+from ..editing import apply as apply_edit
 from ..keyboard_config import load_keyboard_layout
 from ..latex_render import LatexStyle
 from ..settings import SettingsStore
@@ -729,6 +738,51 @@ class MainViewModel(QObject):
             except RuntimeError:
                 # The QObject was deleted before its `destroyed` hook ran.
                 self._code_highlighters.pop(document, None)
+
+    @Slot(QObject, int, int, str, result=bool)
+    def editCode(self, editor: QObject, start: int, end: int, action: str) -> bool:
+        """Apply the one editor edit ``action`` asks for at ``[start, end)``.
+
+        The mechanics live in ``python/editing.py`` (pure Python, testable);
+        this slot is only the QML door. ``editor`` is the ``TextArea`` itself,
+        because the replacement is made on its ``QTextDocument`` inside one
+        ``beginEditBlock``: that is what makes a wrapped selection or a
+        multi-line indent **one** undo step, where QML's ``remove`` + ``insert``
+        would be two. The control's own cursor is then moved with its invokable
+        ``select(start, end)``.
+
+        Returns ``False`` when the edit does not apply, and the caller must not
+        consume the key — a plain character, a lone closing bracket, Backspace
+        on an ordinary character.
+        """
+        document = editor.property("textDocument")
+        text_document = None if document is None else document.textDocument()
+        if text_document is None:
+            return False
+        edit = apply_edit(text_document.toPlainText(), start, end, action)
+        if edit is None:
+            return False
+        if edit.replace_start != edit.replace_end or edit.text:
+            cursor = QTextCursor(text_document)
+            cursor.beginEditBlock()
+            try:
+                cursor.setPosition(edit.replace_start)
+                cursor.setPosition(
+                    edit.replace_end, QTextCursor.MoveMode.KeepAnchor
+                )
+                cursor.insertText(edit.text)
+            finally:
+                cursor.endEditBlock()
+        # A pure caret move (stepping over a closer) must not push an empty
+        # undo block; only the selection changes.
+        QMetaObject.invokeMethod(
+            editor,
+            "select",
+            Qt.ConnectionType.DirectConnection,
+            Q_ARG(int, edit.selection_start),
+            Q_ARG(int, edit.selection_end),
+        )
+        return True
 
     @Slot(str, bool, result=str)
     def highlighted(self, text: str, dark: bool) -> str:

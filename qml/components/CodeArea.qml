@@ -35,6 +35,36 @@ QQC2.TextArea {
     textFormat: TextEdit.PlainText
     background: CodeSurface { focused: area.activeFocus }
 
+    //: The same editing mechanics as `CodeScrollArea`, as a function rather than
+    //: a `Keys.onPressed`: this control is the Variables table's inline editor,
+    //: whose own key handler must keep Escape and let Return reach the view.
+    //: A caller forwards the key here first and only then handles its own.
+    //: No Return action: in the table, Return ends the session, it does not open
+    //: a line.
+    function handleKey(event) {
+        if (area.readOnly)
+            return false
+        if (event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))
+            return false
+        let action = ""
+        if (event.key === Qt.Key_Backspace)
+            action = "backspace"
+        else if (event.key === Qt.Key_Backtab
+                 || (event.key === Qt.Key_Tab && (event.modifiers & Qt.ShiftModifier)))
+            action = "outdent"
+        else if (event.key === Qt.Key_Tab)
+            action = "tab"
+        else {
+            const ch = event.text
+            if (ch.length === 1
+                    && ("()[]{}".indexOf(ch) >= 0 || ch === "'" || ch === '"'))
+                action = ch
+        }
+        return action.length > 0
+            ? vm.editCode(area, area.selectionStart, area.selectionEnd, action)
+            : false
+    }
+
     //: One highlighter per editor, created with it and gone with it (it is
     //: parented to the document it highlights).
     Component.onCompleted: vm.attachCodeHighlighting(textDocument, Theme.isDark())

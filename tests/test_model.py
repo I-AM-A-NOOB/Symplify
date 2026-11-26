@@ -39,6 +39,8 @@ from python.code_style import (
 )
 from python.code_style import spans as code_spans
 from python.code_themes import FAMILIES, VSCODE_BRACKET_COLORS
+from python.editing import Edit
+from python.editing import apply as edit_apply
 from python.latex_render import MAX_LATEX_CHARS, LatexStyle, render_data_url
 from python.lexer import TokenKind, tokenize
 from python.model.calculator import (
@@ -2075,6 +2077,70 @@ def test_an_invalid_bracket_juxtaposition_beats_the_bracket_rainbow():
     assert '<span style="color:#ff0000;">x</span>' in to_rich_text(
         "2x", None, None, None, off
     )
+
+
+def test_editor_pairs_brackets_and_steps_over_the_closer():
+    """One contiguous answer per key, so the view can apply it in one edit."""
+    assert edit_apply("", 0, 0, "(") == Edit(0, 0, "()", 1, 1)
+    assert edit_apply("x", 1, 1, "[") == Edit(1, 1, "[]", 2, 2)
+    # The closer is already there: move the caret, do not insert a second one.
+    assert edit_apply("()", 1, 1, ")") == Edit(1, 1, "", 2, 2)
+    assert edit_apply("(x)", 1, 1, ")") is None        # not the next character
+    assert edit_apply("", 0, 0, ")") is None           # a lone closer is plain text
+    assert edit_apply("x", 1, 1, "*") is None          # every other character
+
+
+def test_editor_wraps_a_selection_instead_of_replacing_it():
+    assert edit_apply("x+1", 0, 3, "(") == Edit(0, 3, "(x+1)", 1, 4)
+    assert edit_apply("x+1", 0, 3, '"') == Edit(0, 3, '"x+1"', 1, 4)
+
+
+def test_editor_deletes_an_empty_pair_with_backspace():
+    assert edit_apply("()", 1, 1, "backspace") == Edit(0, 2, "", 0, 0)
+    assert edit_apply('""', 1, 1, "backspace") == Edit(0, 2, "", 0, 0)
+    assert edit_apply("(x)", 1, 1, "backspace") is None
+    assert edit_apply("x", 1, 1, "backspace") is None
+    assert edit_apply("(x)", 1, 2, "backspace") is None  # a selection is the control's
+
+
+def test_editor_treats_string_contents_as_data():
+    """Inside `Symbol("...")` a bracket is text, not a pair."""
+    assert edit_apply('Symbol("x")', 9, 9, "(") == Edit(9, 9, "(", 10, 10)
+    # The closing quote is already next: step over it instead of doubling it.
+    assert edit_apply('Symbol("x")', 9, 9, '"') == Edit(9, 9, "", 10, 10)
+    # Mid-string, with no quote next, one quote is a literal character.
+    assert edit_apply('Symbol("xy")', 9, 9, '"') == Edit(9, 9, '"', 10, 10)
+    # A quote after the opening quote closes the pair rather than nesting.
+    assert edit_apply('""', 1, 1, '"') == Edit(1, 1, "", 2, 2)
+    # An unterminated literal's end is still inside it: one quote closes it.
+    assert edit_apply('"abc', 4, 4, '"') == Edit(4, 4, '"', 5, 5)
+
+
+def test_editor_indents_and_outdents_the_touched_lines():
+    assert edit_apply("x", 0, 0, "tab") == Edit(0, 0, "    ", 4, 4)
+    assert edit_apply("a\nbb", 0, 4, "tab") == Edit(
+        0, 4, "    a\n    bb", 0, 12
+    )
+    assert edit_apply("    a\n    bb", 0, 12, "outdent") == Edit(
+        0, 12, "a\nbb", 0, 4
+    )
+    # A selection ending exactly at a line start does not touch that line, and
+    # a selection starting at a line start grows to include its new indent.
+    assert edit_apply("a\nb", 0, 2, "tab") == Edit(
+        0, 1, "    a", 0, 6
+    )
+    assert edit_apply("a", 0, 0, "outdent") is None    # nothing to remove
+
+
+def test_editor_keeps_the_indent_on_return_and_opens_a_block():
+    assert edit_apply("x+1", 3, 3, "return") == Edit(3, 3, "\n", 4, 4)
+    assert edit_apply("    x", 5, 5, "return") == Edit(5, 5, "\n    ", 10, 10)
+    assert edit_apply("f(", 2, 2, "return") == Edit(2, 2, "\n    ", 7, 7)
+    # Between a pair: the caret lands on the indented middle line.
+    assert edit_apply("f()", 2, 2, "return") == Edit(
+        2, 2, "\n    \n", 7, 7
+    )
+    assert edit_apply("f( )", 2, 2, "return") == Edit(2, 2, "\n    ", 7, 7)
 
 
 def _names(text, scope=None):

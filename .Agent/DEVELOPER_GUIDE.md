@@ -61,6 +61,9 @@ python/
   code_style.py                 # spans(text, scope, policy): the ONE colour-span list, merging
                                 # lexer.py with brackets.py; theme(family, dark) -> (styles,
                                 # brackets); to_rich_text() for the read-only Text items.
+  editing.py                    # What an editor key does (pure Python, zero Qt): one Edit per
+                                # key — pairs, skip-over, wrap, empty-pair Backspace, Tab/Shift+Tab,
+                                # Return indent. See Code editing.
   code_themes.py                # The colour families (a dark + a light member each), from VS Code's
                                 # themes, GitHub's, Atom One and Catppuccin, plus
                                 # VSCODE_BRACKET_COLORS (the bracket defaults VSCode registers for the
@@ -2065,6 +2068,48 @@ that run one curve in both directions, so only the entering one is exposed.)
   terminal — is what made the doubling obvious.
 - Long results/text use `elide: ElideRight` (mono lines in history align the result `=` under the
   assignment operator via `" ".repeat(name.length + 1)`).
+
+## Code editing
+
+The editor mechanics are decisions, not QML: `python/editing.py` answers one key with one
+`Edit(replace_start, replace_end, text, selection_start, selection_end)`; `None` means the
+control's own handling is right. `MainViewModel.editCode(editor, start, end, action)` is the QML
+door: it applies that replacement to the editor's `QTextDocument` inside one
+`QTextCursor.beginEditBlock()` and moves the control with its invokable `select()`. That is why a
+wrapped selection or a multi-line indent is **one** Ctrl+Z, where QML's `remove` + `insert` would
+be two; a pure caret move (stepping over a closer) skips the document edit entirely, so it pushes
+no empty undo block.
+
+Wiring:
+
+- `CodeScrollArea` owns the keys for the Calculator's Code box, the Assign value and the Variables
+  expression editor. Its `Keys.onPressed` asks `editingAction(event)` first; Return is an
+  auto-indent only when the caller has not given Return a meaning (`!submitOnEnter`). The
+  empty-field Backspace jump still runs after the pair delete declines.
+- `CodeArea` exposes `handleKey(event)` instead of installing a handler: it is the Variables table's
+  inline editor, whose own handler must keep Escape and let Return reach the view.
+  `VariableCellEditor` forwards the key there first; Return is deliberately not an editor action in
+  a cell.
+- `CodeField` has none: it edits identifiers, where brackets and quotes are not part of the language.
+
+What the rules are:
+
+- An opening bracket or quote pairs itself (`()`) or wraps the selection; a closing bracket next to
+  the caret is stepped over; Backspace deletes an empty pair as one pair.
+- Quotes and brackets inside a `STRING` are data (`Symbol("(")`), and a quote at an unterminated
+  literal's end closes it rather than opening an empty pair.
+- Tab inserts four spaces; a selection indents every line it touches (a selection ending exactly at
+  a line start does not touch that line); Shift+Tab removes one level. A selection that starts at a
+  line start grows to include the new indent, while a bare caret moves past it.
+- Return keeps the line's leading whitespace, adds one level after an opening bracket, and between
+  `(|)` produces the three-line block with the caret on the middle line.
+
+Positions are Python string indices, the same ones the lexer uses. QML text positions are UTF-16
+code units, so an astral character inside a string literal would offset the two; expressions are
+BMP in practice, and the lexer already shares this boundary.
+
+`tests/test_model.py` locks the pure decisions. The QML path is a launch check: type `(` in a Code
+box, Tab/Shift+Tab a selection, Backspace an empty pair, and undo each with one Ctrl+Z.
 
 ## Code colouring
 

@@ -19,6 +19,10 @@ Item {
     //: leaves both off (Enter inserts a newline); Assign and Variables opt in.
     property bool submitOnEnter: false
     property bool emptyBackspaceJumps: false
+    //: The editing mechanics: pair/skip brackets and quotes, delete an empty
+    //: pair, Tab/Shift+Tab indent. Enter auto-indents only when the caller has
+    //: not given Enter a meaning (`!submitOnEnter`).
+    property bool editingMechanics: true
     //: Set by a caller while it wants events from a just-finished jump ignored.
     property bool autoRepeatBlocked: false
     signal submitRequested()
@@ -33,6 +37,40 @@ Item {
     property alias wrapMode: area.wrapMode
     property alias readOnly: area.readOnly
     property alias textArea: area.textArea
+
+    //: What this key would edit, or "" to leave it to the control. A character
+    //: key is only interesting when it is one of the brackets/quotes; Tab and
+    //: Shift+Tab always are. Return auto-indents only in a field that has not
+    //: given Return a meaning.
+    function editingAction(event) {
+        if (!root.editingMechanics || root.readOnly)
+            return ""
+        if (event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))
+            return ""
+        if (event.key === Qt.Key_Backspace)
+            return "backspace"
+        if (event.key === Qt.Key_Backtab
+                || (event.key === Qt.Key_Tab && (event.modifiers & Qt.ShiftModifier)))
+            return "outdent"
+        if (event.key === Qt.Key_Tab)
+            return "tab"
+        if (!root.submitOnEnter
+                && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter))
+            return "return"
+        const ch = event.text
+        if (ch.length === 1
+                && ("()[]{}".indexOf(ch) >= 0 || ch === "'" || ch === '"'))
+            return ch
+        return ""
+    }
+
+    //: The edit is applied by the viewmodel on the editor's own document, in one
+    //: undo block (QML's remove+insert would be two). A false answer means the
+    //: key is the control's and must not be consumed.
+    function applyEditing(action) {
+        return vm.editCode(area.textArea, area.textArea.selectionStart,
+                           area.textArea.selectionEnd, action)
+    }
 
     CodeInputLook { id: look }
 
@@ -65,6 +103,11 @@ Item {
             }
             if (!event.isAutoRepeat)
                 root.nonAutoRepeatPressed()
+            const action = root.editingAction(event)
+            if (action.length > 0 && root.applyEditing(action)) {
+                event.accepted = true
+                return
+            }
             if (root.submitOnEnter
                     && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)) {
                 event.accepted = true
