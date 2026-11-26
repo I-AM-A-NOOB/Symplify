@@ -64,6 +64,8 @@ python/
   editing.py                    # What an editor key does (pure Python, zero Qt): one Edit per
                                 # key — pairs, skip-over, wrap, empty-pair Backspace, Tab/Shift+Tab,
                                 # Return indent. See Code editing.
+  indent_rainbow.py             # (start, length, level) for each line's leading whitespace, so
+                                # the highlighter can tint nesting depth. Zero Qt. See Code colouring.
   code_themes.py                # The colour families (a dark + a light member each), from VS Code's
                                 # themes, GitHub's, Atom One and Catppuccin, plus
                                 # VSCODE_BRACKET_COLORS (the bracket defaults VSCode registers for the
@@ -2174,6 +2176,23 @@ One lexer, one span list, two renderers. Anything that colours code contributes 
   concrete `string.quoted.double.python` scope (a bare `string` target would let Light+’s
   `string.quoted.double.xml` blue win over its own `#a31515` string colour); a theme that names no
   string scope leaves it to the control's ink.
+- **The active bracket pair is a fill in its own rainbow colour.** `brackets.pair_at(masked, caret)`
+  finds the pair next to the caret (it tries the character before the caret first, so a closing
+  bracket just typed is the one highlighted; nesting is checked across all bracket kinds, so
+  `([)]` is not a pair). The highlighter keeps the caret, and `MainViewModel.refreshBracketMatch`
+  is fed by QML's `cursorPositionChanged`/`activeFocusChanged`; an unfocused editor clears its box,
+  so two panes cannot both claim the active pair. The two spans keep their foreground and get a
+  background of that same bracket colour at `BRACKET_MATCH_ALPHA` (0.18). `QTextCharFormat` has no
+  border, so this is VS Code's `editorBracketMatch.background` fill, not its 1px border.
+- **Indent rainbow is whitespace tint, not an indent guide.** `indent_rainbow.spans` splits each
+  line's leading whitespace into units (a tab is one level; a short hand-typed group is a level of
+  its own), and the highlighter paints each unit's background in the bracket colour for that level
+  at `INDENT_ALPHA` (0.10). The string masking is shared with bracket pairing, so a line inside a
+  triple-quoted string contributes nothing; blank lines are skipped. `workspace.indent_rainbow`
+  (Settings → Workspace, on by default) is read when a highlighter is attached and re-applied by
+  `refreshCodeHighlighting`. There are **no indent guides and no bracket connector lines**: both
+  need a QML overlay synchronised with scrolling and wrapping, which is not worth it on an
+  expression box, whereas colouring the whitespace and the pair is the same highlighter pass.
 - **Renderers**: `viewmodel/highlighter.py` (`QSyntaxHighlighter`, attached to the editable input's
   `textArea.textDocument`) and `code_style.to_rich_text` (markup, for read-only `Text` items). A
   second painter would lose — `setFormat` is last-write-wins, so two highlighters on one document

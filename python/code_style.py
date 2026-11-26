@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 from . import code_themes
 from .brackets import DEFAULT_COLORS as BRACKET_COLORS
 from .brackets import spans as bracket_spans
-from .lexer import TokenKind, tokenize
+from .lexer import Token, TokenKind, tokenize
 
 if TYPE_CHECKING:
     from .worker_protocol import ParsePolicy
@@ -142,6 +142,30 @@ DEFAULT_STYLES: dict[Style, str] = {
 }
 
 
+def mask_strings(
+    text: str, tokens: Sequence[Token] | None = None
+) -> str:
+    """``text`` with quoted literals blanked to spaces, at the same positions.
+
+    Bracket pairing and indent scanning run over the raw text, where a ``(`` in
+    ``Symbol("(")`` would otherwise steal the call's partner or paint a
+    quotation mark as an indent. A caller that already tokenized (``spans``)
+    passes its tokens instead of paying for the second pass.
+    """
+    tokens = tokenize(text) if tokens is None else tokens
+    ranges = [
+        (token.start, token.start + token.length)
+        for token in tokens
+        if token.kind is TokenKind.STRING
+    ]
+    if not ranges:
+        return text
+    blanked = list(text)
+    for start, end in ranges:
+        blanked[start:end] = " " * (end - start)
+    return "".join(blanked)
+
+
 def spans(
     text: str,
     scope: Mapping[str, Any] | None = None,
@@ -172,17 +196,7 @@ def spans(
     #: Bracket pairing runs over the raw text, so a ``(`` inside a string would
     #: both paint "unclosed" and steal the partner of the call's own paren.
     #: Strings are data, not source — blank them out at the same positions.
-    string_ranges = [
-        (token.start, token.start + token.length)
-        for token in tokens
-        if token.kind is TokenKind.STRING
-    ]
-    bracket_text = text
-    if string_ranges:
-        blanked = list(text)
-        for start, end in string_ranges:
-            blanked[start:end] = " " * (end - start)
-        bracket_text = "".join(blanked)
+    bracket_text = mask_strings(text, tokens)
 
     merged: list[CodeSpan] = []
     for token in tokens:
@@ -200,6 +214,19 @@ def spans(
     )
     merged.sort(key=lambda span: span.start)
     return merged
+
+
+def bracket_color_for_layer(
+    layer: int, bracket_colors: Sequence[str] | None = None
+) -> str:
+    """The rainbow colour at ``layer``, with the same fallback as ``color_for``.
+
+    The highlighter asks this for the indent levels and the active pair's tint,
+    so those two cannot drift from the brackets they explain.
+    """
+    if not bracket_colors:
+        bracket_colors = BRACKET_COLORS
+    return bracket_colors[layer % len(bracket_colors)]
 
 
 def color_for(
@@ -221,8 +248,6 @@ def color_for(
     """
     if styles is None:
         styles = DEFAULT_STYLES
-    if not bracket_colors:
-        bracket_colors = BRACKET_COLORS
     if span.style is not Style.BRACKET:
         return styles.get(span.style)
     if span.layer is None:
@@ -230,7 +255,7 @@ def color_for(
         # registry default is the same red on every theme side, and a theme that
         # names its own wins through the `unmatched` style key.
         return styles.get(Style.UNMATCHED, code_themes.VSCODE_UNMATCHED_BRACKET)
-    return bracket_colors[span.layer % len(bracket_colors)]
+    return bracket_color_for_layer(span.layer, bracket_colors)
 
 
 def to_rich_text(

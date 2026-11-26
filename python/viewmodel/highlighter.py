@@ -19,11 +19,29 @@ from typing import Any
 from PySide6.QtGui import QColor, QSyntaxHighlighter, QTextCharFormat, QTextDocument
 from PySide6.QtQuick import QQuickTextDocument
 
-from ..code_style import Style, color_for, spans
+from ..brackets import pair_at
+from ..code_style import (
+    Style,
+    bracket_color_for_layer,
+    color_for,
+    mask_strings,
+    spans,
+)
+from ..indent_rainbow import spans as indent_spans
 from ..worker_protocol import ParsePolicy
 
 #: ``(start_in_block, length, format)`` — what one block has to paint.
 BlockFormat = tuple[int, int, QTextCharFormat]
+
+#: How strongly the active bracket pair is filled. The pair keeps its own
+#: rainbow colour, tinted rather than replaced, so the box agrees with the
+#: brackets around it. VS Code's own `editorBracketMatch.background` is a
+#: translucent fill too; a border cannot be expressed by `QTextCharFormat`.
+BRACKET_MATCH_ALPHA = 0.18
+
+#: How strong one indent-rainbow level is. Subtle on purpose: the glyphs are the
+#: content, the tint only answers "which nesting level is this".
+INDENT_ALPHA = 0.10
 
 #: What the highlighter asks for the current name -> value scope.
 ScopeProvider = Callable[[], Mapping[str, Any]]
@@ -42,6 +60,7 @@ class CodeHighlighter(QSyntaxHighlighter):
         styles: Mapping[Style, str] | None = None,
         bracket_colors: Sequence[str] | None = None,
         policy_provider: PolicyProvider | None = None,
+        indent_rainbow: bool = True,
     ):
         super().__init__(document)
         self._scope_provider = scope_provider
@@ -50,8 +69,12 @@ class CodeHighlighter(QSyntaxHighlighter):
         # default palette or the bracket rainbow), so there is one such rule.
         self._styles = styles
         self._bracket_colors = bracket_colors
+        self._indent_rainbow = bool(indent_rainbow)
+        #: Caret position for the active-pair box, or None when the editor is
+        #: not focused.
+        self._cursor: int | None = None
         self._formats: dict[int, list[BlockFormat]] = {}
-        self._cache: dict[str, QTextCharFormat] = {}
+        self._cache: dict[tuple, QTextCharFormat] = {}
         self._recomputing = False
         document.contentsChanged.connect(self._on_contents_changed)
         self._recompute()
@@ -91,6 +114,30 @@ class CodeHighlighter(QSyntaxHighlighter):
         """
         self._recompute()
 
+    def set_cursor(self, position: int | None) -> None:
+        """Move the active-pair box; ``None`` clears it (editor lost focus).
+
+        Called from QML on ``cursorPositionChanged``. The whole span list is
+        recomputed rather than just the pair: the text is short, and one path
+        keeps the box correct when an edit moved the brackets underneath the
+        caret.
+        """
+        if position is not None:
+            position = max(0, position)
+        if position == self._cursor:
+            return
+        self._cursor = position
+        self._recompute()
+
+    def set_indent_rainbow(self, enabled: bool) -> bool:
+        """Turn the indent tint on/off; did anything change?"""
+        enabled = bool(enabled)
+        if enabled == self._indent_rainbow:
+            return False
+        self._indent_rainbow = enabled
+        self._recompute()
+        return True
+
     def _on_contents_changed(self) -> None:
         # setFormat can make the document emit this again, so ignore it while the
         # recompute (and the rehighlight it ends with) is running.
@@ -106,22 +153,48 @@ class CodeHighlighter(QSyntaxHighlighter):
             policy = (
                 None if self._policy_provider is None else self._policy_provider()
             )
-            per_block: dict[int, list[BlockFormat]] = {}
-            for span in spans(document.toPlainText(), scope, policy):
-                block = document.findBlock(span.start)
-                if not block.isValid():
-                    continue
+            text = document.toPlainText()
+            masked = mask_strings(text)
+            pair = None
+            if self._cursor is not None:
+                pair = pair_at(masked, min(self._cursor, len(text)))
+
+            formatted: list[tuple[int, int, QTextCharFormat]] = []
+            for span in spans(text, scope, policy):
                 color = color_for(span, self._styles, self._bracket_colors)
                 if color is None:
                     continue            # the palette leaves this one to the control
                 unmatched = span.style is Style.BRACKET and span.layer is None
-                fmt = self._format_for(color, unmatched)
+                background = None
+                if pair is not None and span.start in pair:
+                    background = self._tint(color, BRACKET_MATCH_ALPHA)
+                formatted.append(
+                    (
+                        span.start,
+                        span.length,
+                        self._format_for(color, unmatched, background),
+                    )
+                )
+
+            if self._indent_rainbow:
+                for start, length, level in indent_spans(masked):
+                    base = bracket_color_for_layer(level, self._bracket_colors)
+                    formatted.append(
+                        (start, length, self._background_format(base))
+                    )
+
+            formatted.sort(key=lambda item: item[0])
+            per_block: dict[int, list[BlockFormat]] = {}
+            for start, length, fmt in formatted:
+                block = document.findBlock(start)
+                if not block.isValid():
+                    continue
                 # A span may cross blocks: a triple-quoted string is one token
                 # that can hold newlines. `setFormat` paints one block only, so
                 # split it at each block boundary instead of letting the tail
                 # fall off the first block.
-                remaining = span.length
-                position = span.start
+                remaining = length
+                position = start
                 while remaining > 0 and block.isValid():
                     offset = position - block.position()
                     take = min(remaining, max(0, block.length() - offset))
@@ -139,15 +212,49 @@ class CodeHighlighter(QSyntaxHighlighter):
         finally:
             self._recomputing = False
 
-    def _format_for(self, color: str, underline: bool = False) -> QTextCharFormat:
-        """One format per (colour, underline) — never a fresh one per keystroke."""
-        key = f"{color}|{int(underline)}"
+    @staticmethod
+    def _tint(color: str, alpha: float) -> QColor:
+        """``color`` at ``alpha``, for a fill behind glyphs.
+
+        The pair box and the indent levels use the bracket rainbow itself, so a
+        tinted level and the bracket that opened it cannot disagree about which
+        colour level it is.
+        """
+        tint = QColor(color)
+        tint.setAlphaF(alpha)
+        return tint
+
+    def _format_for(
+        self,
+        color: str,
+        underline: bool = False,
+        background: QColor | None = None,
+    ) -> QTextCharFormat:
+        """One format per (colour, underline, background) — shared, not per key."""
+        key = (
+            color,
+            bool(underline),
+            background.name(QColor.NameFormat.HexArgb) if background else "",
+        )
         fmt = self._cache.get(key)
         if fmt is None:
             fmt = QTextCharFormat()
             fmt.setForeground(QColor(color))
             if underline:
                 fmt.setFontUnderline(True)
+            if background is not None:
+                fmt.setBackground(background)
+            self._cache[key] = fmt
+        return fmt
+
+    def _background_format(self, color: str) -> QTextCharFormat:
+        """A fill with no foreground, for an indent level."""
+        tint = self._tint(color, INDENT_ALPHA)
+        key = ("indent", tint.name(QColor.NameFormat.HexArgb))
+        fmt = self._cache.get(key)
+        if fmt is None:
+            fmt = QTextCharFormat()
+            fmt.setBackground(tint)
             self._cache[key] = fmt
         return fmt
 
@@ -162,6 +269,7 @@ def attach(
     styles: Mapping[Style, str] | None = None,
     bracket_colors: Sequence[str] | None = None,
     policy_provider: PolicyProvider | None = None,
+    indent_rainbow: bool = True,
 ) -> CodeHighlighter:
     """Code colouring for a QML text item's ``textDocument`` property.
 
@@ -176,7 +284,12 @@ def attach(
     """
     document = text_document.textDocument()
     highlighter = CodeHighlighter(
-        document, scope_provider, styles, bracket_colors, policy_provider
+        document,
+        scope_provider,
+        styles,
+        bracket_colors,
+        policy_provider,
+        indent_rainbow,
     )
     highlighter.setParent(document)
     return highlighter

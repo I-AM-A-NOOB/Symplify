@@ -712,6 +712,7 @@ class MainViewModel(QObject):
             styles,
             bracket_colors,
             policy_provider=self._settings.parse_policy,
+            indent_rainbow=self._settings.indentRainbow,
         )
         self._code_highlighters[document] = highlighter
         document.destroyed.connect(
@@ -731,13 +732,34 @@ class MainViewModel(QObject):
         styles, bracket_colors = self._palette(dark)
         for document, highlighter in list(self._code_highlighters.items()):
             try:
+                highlighter.set_indent_rainbow(self._settings.indentRainbow)
                 if not highlighter.set_palette(styles, bracket_colors):
-                    # Same palette, but the parser policy may have moved: an
-                    # invalid juxtaposition is painted without a theme change.
+                    # Same palette, but the parser policy or the indent switch
+                    # may have moved: both paint without a theme change.
                     highlighter.refresh()
             except RuntimeError:
                 # The QObject was deleted before its `destroyed` hook ran.
                 self._code_highlighters.pop(document, None)
+
+    @Slot(QObject)
+    def refreshBracketMatch(self, editor: QObject) -> None:
+        """Move or clear the active-pair box for ``editor``.
+
+        Called on ``cursorPositionChanged`` and ``activeFocusChanged``. An
+        unfocused editor clears its box, so two panes cannot both claim the
+        active pair; the highlighter is found through the document it painted,
+        the same key `attachCodeHighlighting` registered.
+        """
+        document = editor.property("textDocument")
+        if document is None:
+            return
+        highlighter = self._code_highlighters.get(document.textDocument())
+        if highlighter is None:
+            return
+        if not editor.property("activeFocus"):
+            highlighter.set_cursor(None)
+            return
+        highlighter.set_cursor(int(editor.property("cursorPosition")))
 
     @Slot(QObject, int, int, str, result=bool)
     def editCode(self, editor: QObject, start: int, end: int, action: str) -> bool:

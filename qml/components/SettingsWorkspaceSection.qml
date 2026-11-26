@@ -219,6 +219,17 @@ SettingsSection {
                         }
                     }
 
+                    // A single checkbox in the same card as the parser's group:
+                    // indentation is a code-surface choice, not a radio mode.
+                    CheckboxSettingGroup {
+                        CheckboxSettingRow {
+                            label: qsTr("Indent rainbow")
+                            hint: qsTr("Tints each indentation level. Useful when a nested, Lisp-style expression spans several lines.")
+                            checked: settingsVM.indentRainbow
+                            onToggled: settingsVM.indentRainbow = !settingsVM.indentRainbow
+                        }
+                    }
+
                     // The rows are `ExpanderRow`s rather than cards because the
                     // controls do not fit side by side on a narrow window: the size
                     // spinner stays in the header (always visible, compact) while the

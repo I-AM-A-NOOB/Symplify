@@ -446,6 +446,10 @@ class SettingsViewModel(
         str, AppearanceSettings._get_bracket_colors,
         AppearanceSettings._set_bracket_colors, notify=appearanceChanged,
     )
+    indentRainbow = Property(
+        bool, AppearanceSettings._get_indent_rainbow,
+        AppearanceSettings._set_indent_rainbow, notify=appearanceChanged,
+    )
     # `accent` is the colour in effect (mode resolved) and read-only: the modes
     # above decide it, `customAccent` is the only part the user picks directly.
     accent = Property(str, AppearanceSettings._get_accent, notify=appearanceChanged)

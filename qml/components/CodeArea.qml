@@ -65,7 +65,24 @@ QQC2.TextArea {
             : false
     }
 
+    //: The active bracket pair follows the caret, and clears when this editor
+    //: loses focus — two panes must not both claim to be the active one.
+    Connections {
+        target: area
+
+        function onCursorPositionChanged() {
+            vm.refreshBracketMatch(area)
+        }
+
+        function onActiveFocusChanged() {
+            vm.refreshBracketMatch(area)
+        }
+    }
+
     //: One highlighter per editor, created with it and gone with it (it is
     //: parented to the document it highlights).
-    Component.onCompleted: vm.attachCodeHighlighting(textDocument, Theme.isDark())
+    Component.onCompleted: {
+        vm.attachCodeHighlighting(textDocument, Theme.isDark())
+        vm.refreshBracketMatch(area)
+    }
 }

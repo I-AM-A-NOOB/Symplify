@@ -177,6 +177,15 @@ def test_reset_workspace_layout_leaves_other_workspace_settings_alone():
     assert store.get("window.width") == 1400
 
 
+def test_indent_rainbow_is_a_workspace_boolean_that_persists():
+    path = temp_dir() / CONFIG_FILENAME
+    store = store_at(path)
+    assert store.get("workspace.indent_rainbow") is True
+    assert store.set("workspace.indent_rainbow", False) is False
+    assert store_at(path).get("workspace.indent_rainbow") is False
+    assert store.set("workspace.indent_rainbow", "yes") is True
+
+
 def test_bracket_settings_round_trip_and_repair_what_cannot_be_painted():
     path = temp_dir() / CONFIG_FILENAME
     store = store_at(path)

@@ -284,6 +284,17 @@ class AppearanceSettings:
 
     # --- brackets ---------------------------------------------------------
 
+    def _get_indent_rainbow(self) -> bool:
+        """Tint every indentation level in the code inputs."""
+        return bool(self._store.get("workspace.indent_rainbow"))
+
+    def _set_indent_rainbow(self, enabled: bool) -> None:
+        if bool(enabled) == self._get_indent_rainbow():
+            return
+        self._store.set("workspace.indent_rainbow", bool(enabled))
+        self.appearanceChanged.emit()
+        self.changed.emit()
+
     def _get_bracket_mode(self) -> str:
         return self._store.get("workspace.bracket_mode")
 

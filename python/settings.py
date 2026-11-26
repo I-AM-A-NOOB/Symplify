@@ -91,6 +91,10 @@ DEFAULTS: dict[str, Any] = {
         # (`brackets.DEFAULT_COLORS`), so clearing the field returns to it rather
         # than silently leaving the mode with nothing to paint.
         "bracket_colors": ",".join(DEFAULT_BRACKET_COLORS),
+        # Tint each indentation level in the code inputs. On by default: a
+        # deeply nested, Lisp/Mathematica-style expression typed over several
+        # lines reads its depth from the tint when its brackets are far apart.
+        "indent_rainbow": True,
         # A comma-separated PREFERENCE list, resolved to the first family the
         # system has (QML cannot express a fallback list — see python/fonts.py).
         "code_family": DEFAULT_CODE_FAMILY,
@@ -173,6 +177,7 @@ _KNOWN_KEYS = (
     "workspace.code_theme",
     "workspace.bracket_mode",
     "workspace.bracket_colors",
+    "workspace.indent_rainbow",
     "workspace.code_family",
     "workspace.code_size",
     "workspace.keyboard_family",
@@ -473,6 +478,7 @@ class SettingsStore:
             return max(0.0, min(1.0, share))
         if key in ("workspace.zen_fullscreen",
                    "workspace.keyboard_collapsed",
+                   "workspace.indent_rainbow",
                    "window.maximized", "window.remember",
                    "appearance.accent_shading",
                    "appearance.accent_os_shading"):

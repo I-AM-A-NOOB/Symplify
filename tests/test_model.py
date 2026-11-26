@@ -27,12 +27,13 @@ from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QTextDocument
 from sympy import Integer, Integral, Matrix, Rational, Symbol, cos, factorial, sin
 
-from python.brackets import DEFAULT_COLORS, parse_colors, spans
+from python.brackets import DEFAULT_COLORS, pair_at, parse_colors, spans
 from python.code_style import (
     DEFAULT_STYLES,
     CodeSpan,
     Style,
     color_for,
+    mask_strings,
     surface,
     theme,
     to_rich_text,
@@ -41,6 +42,7 @@ from python.code_style import spans as code_spans
 from python.code_themes import FAMILIES, VSCODE_BRACKET_COLORS
 from python.editing import Edit
 from python.editing import apply as edit_apply
+from python.indent_rainbow import spans as indent_spans
 from python.latex_render import MAX_LATEX_CHARS, LatexStyle, render_data_url
 from python.lexer import TokenKind, tokenize
 from python.model.calculator import (
@@ -2077,6 +2079,40 @@ def test_an_invalid_bracket_juxtaposition_beats_the_bracket_rainbow():
     assert '<span style="color:#ff0000;">x</span>' in to_rich_text(
         "2x", None, None, None, off
     )
+
+
+def test_bracket_pair_at_follows_the_caret_across_nesting():
+    """The active-pair box: the bracket before the caret is tried first."""
+    assert pair_at("f(x)", 2) == (1, 3)      # after the opening
+    assert pair_at("f(x)", 3) == (1, 3)      # before the closing
+    assert pair_at("f(x)", 4) == (1, 3)      # after the closing
+    assert pair_at("((x))", 1) == (0, 4)     # after the outer opening
+    assert pair_at("((x))", 2) == (1, 3)     # after the inner opening
+    assert pair_at("((x))", 4) == (1, 3)     # after the inner closing
+    assert pair_at("((x))", 5) == (0, 4)     # after the outer closing
+    assert pair_at("([x])", 1) == (0, 4)     # nesting across bracket kinds
+    assert pair_at("([)]", 1) is None        # interleaved is not a pair
+    assert pair_at("(x", 0) is None
+    assert pair_at("x)", 2) is None
+    assert pair_at("", 0) is None
+
+    # A bracket inside a quoted literal is data: masking removes it.
+    assert pair_at(mask_strings('Symbol("(")'), 8) is None
+    assert pair_at(mask_strings('Symbol("(")'), 6) == (6, 10)
+
+
+def test_indent_rainbow_splits_each_line_into_levels():
+    assert indent_spans("x") == []
+    assert indent_spans("    x") == [(0, 4, 0)]
+    assert indent_spans("        x") == [(0, 4, 0), (4, 4, 1)]
+    assert indent_spans("    a\n        b") == [
+        (0, 4, 0),
+        (6, 4, 0),
+        (10, 4, 1),
+    ]
+    assert indent_spans("\t\tx") == [(0, 1, 0), (1, 1, 1)]
+    assert indent_spans("   x") == [(0, 3, 0)]      # a short hand-typed level
+    assert indent_spans("    \nx") == []            # a blank line has no level
 
 
 def test_editor_pairs_brackets_and_steps_over_the_closer():

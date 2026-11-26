@@ -16,6 +16,72 @@ import re
 #: pairing below walks the string one character at a time.
 DEFAULT_PAIRS: dict[str, str] = {"(": ")", "[": "]", "{": "}"}
 
+#: The reverse map, for matching backwards from a closing bracket.
+_CLOSING_TO_OPENING: dict[str, str] = {
+    closing: opening for opening, closing in DEFAULT_PAIRS.items()
+}
+
+
+def pair_at(text: str, position: int) -> tuple[int, int] | None:
+    """The ``(opening, closing)`` indices of the bracket at/next to ``position``.
+
+    ``position`` is a caret: the character before it is tried first (the one the
+    caret just typed or stepped over), then the character at it. Nesting is
+    respected across *all* bracket kinds, so ``([)]`` is not a pair; an
+    unmatched bracket answers ``None`` and keeps its existing error colour.
+
+    Callers pass text with string contents blanked (``code_style.mask_strings``):
+    a bracket inside a quoted literal is data and must not pair.
+    """
+    if not text:
+        return None
+    position = max(0, min(position, len(text)))
+
+    for probe in (position - 1, position):
+        if not 0 <= probe < len(text):
+            continue
+        char = text[probe]
+        if char in DEFAULT_PAIRS:
+            pair = _match_forward(text, probe)
+        elif char in _CLOSING_TO_OPENING:
+            pair = _match_backward(text, probe)
+        else:
+            continue
+        if pair is not None:
+            return pair
+    return None
+
+
+def _match_forward(text: str, start: int) -> tuple[int, int] | None:
+    stack: list[str] = []
+    for index in range(start, len(text)):
+        char = text[index]
+        if char in DEFAULT_PAIRS:
+            stack.append(DEFAULT_PAIRS[char])
+        elif char in _CLOSING_TO_OPENING:
+            if not stack or stack[-1] != char:
+                return None
+            stack.pop()
+            if not stack:
+                return (start, index)
+    return None
+
+
+def _match_backward(text: str, start: int) -> tuple[int, int] | None:
+    stack: list[str] = []
+    for index in range(start, -1, -1):
+        char = text[index]
+        if char in _CLOSING_TO_OPENING:
+            stack.append(_CLOSING_TO_OPENING[char])
+        elif char in DEFAULT_PAIRS:
+            if not stack or stack[-1] != char:
+                return None
+            stack.pop()
+            if not stack:
+                return (index, start)
+    return None
+
+
 #: One colour per nesting depth, cycled. The v1 palette, and also what the
 #: ``custom`` bracket mode starts from and is repaired to. Kept in the canonical
 #: form ``parse_colors`` produces (lower case hex), so the settings default, the

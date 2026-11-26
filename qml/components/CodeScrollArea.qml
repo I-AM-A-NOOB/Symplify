@@ -127,6 +127,24 @@ Item {
         anchors.fill: parent
     }
 
-    Component.onCompleted:
+    //: The active bracket pair follows the caret, and clears when this editor
+    //: loses focus — two panes must not both claim to be the active one.
+    Connections {
+        target: area.textArea
+
+        function onCursorPositionChanged() {
+            vm.refreshBracketMatch(area.textArea)
+        }
+
+        function onActiveFocusChanged() {
+            vm.refreshBracketMatch(area.textArea)
+        }
+    }
+
+    Component.onCompleted: {
         vm.attachCodeHighlighting(area.textArea.textDocument, Theme.isDark())
+        // The editor may already hold the caret (Code mode focuses at start-up)
+        // and the focus signal ran before the highlighter was registered.
+        vm.refreshBracketMatch(area.textArea)
+    }
 }
