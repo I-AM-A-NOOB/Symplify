@@ -74,7 +74,8 @@ Item {
 
     //: Below this window height the side-by-side result/plot split squeezes
     //: both panes; show one at a time behind a small tab row instead.
-    readonly property bool tabbedPanes: calcVM.hasPlot && Window.height < 620
+    readonly property bool shortWindow: Window.height < 620
+    readonly property bool tabbedPanes: calcVM.hasPlot && page.shortWindow
     property int smallPaneIndex: 0
 
     //: The toolbar labels fit at this content width; below it the two copy
@@ -143,6 +144,23 @@ Item {
     //: switching back does not resize the canvas again (and a switch never
     //: snaps through the split geometry).
     property bool plotTabbedFull: false
+    //: True when this tabbed session *opened because a plot arrived*: the pane
+    //: had no split position on screen to slide from, so the drawer starts at
+    //: its tabbed target instead of interpolating from `splitPlotY`. Without
+    //: this, the plot (which the settle timer has already given a real size)
+    //: slid down across the bottom of the result for the whole 220ms entrance.
+    //: Read through `tabbedPlotAnchored`; leaving it set is free at progress 1,
+    //: where the anchored and interpolated positions are the same.
+    property bool tabbedPlotOpening: false
+    //: True while the drawer must sit at `tabbedPlotTargetY` instead of
+    //: interpolating. Two situations, one rule — there is no split layout to
+    //: travel between:
+    //:  * a plot arriving in the tabbed pane (nothing to slide *from*);
+    //:  * a plot going away there (nothing to slide *into*); the pane fades in
+    //:    place instead, and the 180ms fade is what ends the collapse.
+    readonly property bool tabbedPlotAnchored:
+        (page.tabbedPanes && page.tabbedPlotOpening)
+        || (page.plotCollapsing && page.shortWindow)
     readonly property real tabbedPageShift: Spacing.header + Spacing.content
     NumberAnimation {
         id: resultPageAnimation
@@ -177,6 +195,12 @@ Item {
         if (tabbedPanes) {
             tabbedFromHorizontal = wasPlotBesideResult
             plotTabbedFull = smallPaneIndex === 1
+            //: A plot that has not settled yet is *arriving*, not being
+            //: re-laid out by a resize: open the drawer parked (see
+            //: `tabbedPlotOpening`).
+            tabbedPlotOpening = !page.plotWasVisible
+        } else {
+            tabbedPlotOpening = false
         }
         tabbedProgress = tabbedPanes ? 1 : 0
     }
@@ -260,11 +284,23 @@ Item {
         plotCollapseShare = plotCollapseFromHorizontal
             ? splitArea.horizontalShare : splitArea.verticalShare
         plotLayoutSettleTimer.stop()
+        if (page.shortWindow) {
+            //: The tabbed pane has no split shape under it to collapse into,
+            //: and the result already owns the full area once the plot is
+            //: gone. Running the split tween anyway both slid the plot back
+            //: up across the result (there is no split for it to land in)
+            //: and resized qmlmathplot's canvas frame by frame in exactly the
+            //: short window where that hangs. The pane fades where it is;
+            //: its opacity fade is what ends the collapse.
+            plotCollapseSettleTimer.restart()
+            return
+        }
         splitArea.prepareLayoutAnimation()
         splitArea.startLayoutAnimation()
     }
 
     function finishPlotCollapse() {
+        plotCollapseSettleTimer.stop()
         plotCollapsing = false
         plotWasVisible = false
     }
@@ -290,11 +326,21 @@ Item {
         }
     }
 
+    //: Ends a tabbed-mode plot collapse: there is no layout tween to finish it
+    //: (see `beginPlotCollapse`), so the pane's 180ms opacity fade is the only
+    //: clock. Also stops the pane being kept alive past the fade.
+    Timer {
+        id: plotCollapseSettleTimer
+        interval: 180
+        onTriggered: page.finishPlotCollapse()
+    }
+
     Connections {
         target: calcVM
 
         function onPlotChanged() {
             if (calcVM.hasPlot) {
+                plotCollapseSettleTimer.stop()
                 if (page.plotCollapsing) {
                     page.plotCollapsing = false
                     page.plotWasVisible = false
@@ -916,7 +962,13 @@ Item {
                     //: (progress < 1) and on its own tab; settled under Result
                     //: it is hidden. The fade is what makes the left/right page
                     //: switch, while the drawer slide remains the mode change.
+                    //: A plot that goes away in a short window fades from
+                    //: whatever it was showing — the tabbed pane has no split
+                    //: half for it to shrink into, and letting the old
+                    //: condition read true there faded the plot *in* on its
+                    //: way out.
                     opacity: (calcVM.hasPlot || page.plotCollapsing)
+                        && !(page.plotCollapsing && page.shortWindow)
                         && (page.smallPaneIndex === 1 || !page.tabbedPanes
                             || page.tabbedProgress < 1) ? 1 : 0
                     Behavior on opacity {
@@ -930,9 +982,13 @@ Item {
                     keepAlive: page.plotCollapsing
                     //: In the tabbed mode the Plot tab owns the full pane; the
                     //: Result tab leaves the split geometry under the drawer
-                    //: while it slides out.
+                    //: while it slides out. A pane that is collapsing in a short
+                    //: window keeps the size it had on screen instead of
+                    //: snapping to the split geometry while it fades.
                     readonly property bool tabbedFull:
-                        page.tabbedPanes && page.plotTabbedFull
+                        page.plotTabbedFull
+                        && (page.tabbedPanes
+                            || (page.plotCollapsing && page.shortWindow))
                     x: tabbedFull ? 0 : splitArea.splitPlotX
                     width: tabbedFull ? splitArea.width : splitArea.splitPlotWidth
                     height: tabbedFull
@@ -942,10 +998,14 @@ Item {
                     //: The drawer slide: split position → the tabbed position
                     //: captured when the mode flipped. At Result it is the
                     //: split area's bottom (fully clipped), at Plot the top of
-                    //: the tabbed pane.
-                    y: splitArea.splitPlotY
-                        + (page.tabbedPlotTargetY - splitArea.splitPlotY)
-                            * page.tabbedProgress
+                    //: the tabbed pane. `tabbedPlotAnchored` holds it at that
+                    //: target when there is no split state to travel between
+                    //: (a plot arriving in, or leaving, the tabbed pane).
+                    y: page.tabbedPlotAnchored
+                        ? page.tabbedPlotTargetY
+                        : splitArea.splitPlotY
+                            + (page.tabbedPlotTargetY - splitArea.splitPlotY)
+                                * page.tabbedProgress
                     transform: Translate { x: page.plotPageOffset }
                 }
             }

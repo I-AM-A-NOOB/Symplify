@@ -1720,7 +1720,20 @@ mode hides the input and most chrome, and the window-level side of it lives in
   drawer's target is a live binding to the split area's *current* bottom, so
   growing the window while Result is selected cannot reveal the parked plot
   before the transition starts. Leaving the tabbed mode runs the same progress
-  in reverse, sliding the plot back in at its split geometry. Switching between
+  in reverse, sliding the plot back in at its split geometry — **but only when
+  the window is doing the changing.** A plot that *arrives* in the tabbed pane
+  (`tabbedPlotOpening`) has no split position on screen to slide from, and one
+  that *goes away* there has no split to slide into: both are anchored at
+  `tabbedPlotTargetY` (`tabbedPlotAnchored`), the first parked from its first
+  frame, the second fading out where it stands over the pane's 180ms opacity
+  fade (`plotCollapseSettleTimer` ends the collapse, since no layout tween
+  runs). Without that split, a new plot first rendered at split geometry and
+  slid down across the bottom of the result for the whole 220ms entrance, and
+  clearing (or calculating a non-plot result) faded the plot *up* to full
+  opacity as it slid back in — both read as the plot flashing past. The short
+  window also skips the split collapse tween entirely, which is what keeps
+  qmlmathplot's canvas from being resized frame by frame on the way out.
+  Switching between
   the Result and Plot tabs slides each pane 40px horizontally (180ms) while
   cross-fading; the plot keeps the tabbed full size once its tab has been
   visited, so a switch never snaps through the split geometry.
