@@ -250,6 +250,28 @@ def test_call_to_scoped_name_is_juxtaposition():
     assert ok("f(x)", {"f": Integer(2)}) == 2 * X
 
 
+def test_a_missing_comma_is_reported_as_syntax_not_a_security_problem():
+    """`integrate(x^2 (x, 0, 1))` is a typo, not an escape attempt.
+
+    A newline stops implicit multiplication from inserting `*`, so the text
+    becomes a call on `x**2`; with a space it becomes a product with a tuple.
+    Both used to surface as an unsafe-expression / TypeError message.
+    """
+    failure = bad(
+        "integrate(\n    x^2\n    (x, 0, 1)\n)",
+        ErrorKind.SYNTAX,
+        {"x": X},
+    )
+    assert failure.message == "a call must name a function"
+    assert "comma" in failure.hint
+
+    failure = bad("integrate(x^2 (x, 0, 1))", ErrorKind.SYNTAX, {"x": X})
+    assert failure.message == "a tuple cannot be multiplied"
+    assert "comma" in failure.hint
+
+    assert ok("integrate(x^2, (x, 0, 1))", {"x": X}) == Rational(1, 3)
+
+
 # --------------------------------------------------------------------------
 # Unknown calls: reported instead of silently rewritten into a product
 # --------------------------------------------------------------------------

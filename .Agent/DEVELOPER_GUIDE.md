@@ -2155,6 +2155,13 @@ One lexer, one span list, two renderers. Anything that colours code contributes 
   holds `srepr`, and the Compute cache restores objects, so a policy change only affects new text.
   History keeps the original text, a *Send result* fallback, and a worker-generated normalized
   input (explicit `*`/`**`/calls, no evaluation) for continuing an expression after a policy change.
+  `implicit_multiplication` works across spaces but **not across a newline**; `integrate(\n x^2\n
+  (x, 0, 1))` therefore becomes a call on `x**2`, not a product (SymPy's tokenizer sees `NL`). That
+  is the user's missing comma, not an escape attempt: the AST gate raises `_SyntaxProblem("a call
+  must name a function", hint)` so the UI says so, while blocked names/methods stay
+  `_UnsafeExpression`. A tuple multiplied by an expression (`f(x^2 (x, 0, 1))`) is caught the same
+  way, instead of surfacing SymPy's `TypeError` as `INTERNAL`. Both are still `ErrorKind.SYNTAX` and
+  still fail closed.
 - Character classes come from Python itself (`str.isidentifier` to continue a name, **`isdecimal`**
   for digits — never `isalnum`/`isdigit`, which accept superscripts). The parser tokenizes with
   Python's tokenizer, so this agrees with it for free.

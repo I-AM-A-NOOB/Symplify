@@ -120,6 +120,19 @@ class _UnsafeExpression(ValueError):
     """The transformed expression is outside the calculator's safe grammar."""
 
 
+class _SyntaxProblem(ValueError):
+    """A grammar mistake in the expression, with a hint for the UI.
+
+    Separate from :class:`_UnsafeExpression` because the two read differently to
+    a user: "only named functions and SymPy methods can be called" is a security
+    boundary talking, while a missing comma is a typo. Both still fail closed.
+    """
+
+    def __init__(self, message: str, hint: str = ""):
+        super().__init__(message)
+        self.hint = hint
+
+
 @lru_cache(maxsize=1)
 def _parser_globals() -> dict:
     """A SymPy namespace with no Python builtins and no eval/compile helpers."""
@@ -161,6 +174,16 @@ def _validate_safe_ast(node: ast.AST, allowed_names: set[str]) -> None:
         if node.id.startswith("__") or node.id not in allowed_names:
             raise _UnsafeExpression(f"unknown name '{node.id}'")
     elif isinstance(node, ast.BinOp):
+        if isinstance(node.op, ast.Mult) and (
+            isinstance(node.left, ast.Tuple) or isinstance(node.right, ast.Tuple)
+        ):
+            # `f(x^2 (x, 0, 1))`: implicit multiplication turned the missing
+            # comma into a product with a tuple. SymPy's own error here is a
+            # TypeError, which reads as an internal failure.
+            raise _SyntaxProblem(
+                "a tuple cannot be multiplied",
+                "write a comma between the arguments you meant to pass",
+            )
         if not isinstance(node.op, _SAFE_BINOPS):
             raise _UnsafeExpression("operator is not supported")
         _validate_safe_ast(node.left, allowed_names)
@@ -191,7 +214,14 @@ def _validate_safe_ast(node: ast.AST, allowed_names: set[str]) -> None:
                 raise _UnsafeExpression(f"method '{name}' is not allowed")
             _validate_safe_ast(node.func.value, allowed_names)
         else:
-            raise _UnsafeExpression("only named functions and SymPy methods can be called")
+            # `f(x^2\n(x, 0, 1))`: a newline stops implicit multiplication from
+            # inserting `*`, so the text becomes a call *on an expression*.
+            # That is a missing comma, not an attempt to escape the sandbox.
+            raise _SyntaxProblem(
+                "a call must name a function",
+                "write a comma between the arguments, or '*' before '(' to "
+                "mean multiplication",
+            )
         for argument in node.args:
             if allow_strings and isinstance(argument, ast.Constant) \
                     and isinstance(argument.value, str):
@@ -596,6 +626,8 @@ class Calculator:
             value = _safe_parse_expr(
                 text, recorder.namespace(scope), self.transformations
             )
+        except _SyntaxProblem as exc:
+            return Failure(expression, ErrorKind.SYNTAX, str(exc), exc.hint)
         except _UnsafeExpression as exc:
             return Failure(expression, ErrorKind.SYNTAX, str(exc))
         except SyntaxError as exc:
