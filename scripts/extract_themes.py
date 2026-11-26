@@ -11,6 +11,18 @@ hand-written (the families' labels, the bracket defaults, the overrides) — whi
 what keeps the committed table byte-identical to what a re-extraction produces
 without a four-hundred-line paste.
 
+**Windows without a Python CA bundle.** A uv-managed standalone Python does not
+read the Windows certificate store, and it ships no `certifi`; there
+``ssl.get_default_verify_paths()`` answers paths that do not exist and every HTTPS
+fetch dies with `CERTIFICATE_VERIFY_FAILED`. Point OpenSSL at a bundle that does
+exist — Git for Windows ships one — for that run only:
+
+    SSL_CERT_FILE="C:/Program Files/Git/usr/ssl/certs/ca-bundle.crt" \\
+        uv run python scripts/extract_themes.py --write
+
+This is the missing trust store, not a bad certificate, and it is needed only by
+this maintenance script: the app itself makes no network requests.
+
 Sources are **raw files on GitHub, pinned to a tag or a commit**, rather than the
 local VS Code install. That way the extraction works on any machine (no VS Code
 needed) and the same ref always yields the same table; bump the pins deliberately,
