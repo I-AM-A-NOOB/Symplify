@@ -2125,9 +2125,10 @@ One lexer, one span list, two renderers. Anything that colours code contributes 
   honouring escapes; an unterminated string is `invalid` and paints as wrong. Nothing inside is a
   token: a disabled `!` in `Symbol("x!")` is not an error, and `code_style.spans` blanks the string
   ranges before pairing brackets, so a `(` in the argument neither paints as unclosed nor steals the
-  partner of the call's own paren. A string has no themed colour yet — the extraction table predates
-  the `string` key, and absence means the control's ink (see `scripts/extract_themes.py`, which now
-  maps `string.quoted` for the next re-extraction).
+  partner of the call's own paren. The colour is the theme's `string` entry, extracted through a
+  concrete `string.quoted.double.python` scope (a bare `string` target would let Light+’s
+  `string.quoted.double.xml` blue win over its own `#a31515` string colour); a theme that names no
+  string scope leaves it to the control's ink.
 - **Renderers**: `viewmodel/highlighter.py` (`QSyntaxHighlighter`, attached to the editable input's
   `textArea.textDocument`) and `code_style.to_rich_text` (markup, for read-only `Text` items). A
   second painter would lose — `setFormat` is last-write-wins, so two highlighters on one document

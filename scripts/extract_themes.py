@@ -154,7 +154,11 @@ TARGETS: dict[str, list[str]] = {
     "constant": ["constant.language", "variable.language"],
     "callable": ["entity.name.function", "support.function"],
     "variable": ["variable.other", "variable"],
-    "string": ["string.quoted", "string"],
+    #: A concrete Python scope, not the bare `string`: the resolver matches
+    #: prefixes in both directions, so `string.quoted` would also select every
+    #: language-specific list entry (`string.quoted.double.xml`, …) and a light
+    #: theme's Pug/XML blue would win over its own `#a31515` string colour.
+    "string": ["string.quoted.double.python"],
     "operator": ["keyword.operator"],
     "unknown": ["invalid.illegal", "invalid"],
 }
