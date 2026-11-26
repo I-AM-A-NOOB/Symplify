@@ -443,8 +443,9 @@ Item {
 
             Behavior on color {
                 ColorAnimation {
-                    duration: 120
-                    easing.type: Easing.OutCubic
+                    duration: Motion.fast
+                    easing.type: Easing.BezierSpline
+                    easing.bezierCurve: Motion.enter
                 }
             }
         }

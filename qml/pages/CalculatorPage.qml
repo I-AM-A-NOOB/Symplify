@@ -161,20 +161,22 @@ Item {
     readonly property bool tabbedPlotAnchored:
         (page.tabbedPanes && page.tabbedPlotOpening)
         || (page.plotCollapsing && page.shortWindow)
-    readonly property real tabbedPageShift: Spacing.header + Spacing.content
+    readonly property real tabbedPageShift: Motion.slide
     NumberAnimation {
         id: resultPageAnimation
         target: page
         property: "resultPageOffset"
-        duration: 180
-        easing.type: Easing.OutCubic
+        duration: Motion.fast
+        easing.type: Easing.BezierSpline
+        easing.bezierCurve: Motion.enter
     }
     NumberAnimation {
         id: plotPageAnimation
         target: page
         property: "plotPageOffset"
-        duration: 180
-        easing.type: Easing.OutCubic
+        duration: Motion.fast
+        easing.type: Easing.BezierSpline
+        easing.bezierCurve: Motion.enter
     }
     //: False during component construction: the first target is set without an
     //: entrance animation (a page rebuilt while already tabbed must open settled).
@@ -327,11 +329,12 @@ Item {
     }
 
     //: Ends a tabbed-mode plot collapse: there is no layout tween to finish it
-    //: (see `beginPlotCollapse`), so the pane's 180ms opacity fade is the only
-    //: clock. Also stops the pane being kept alive past the fade.
+    //: (see `beginPlotCollapse`), so the pane's own opacity fade is the clock —
+    //: `Motion.fast`, the same duration the Behaviour below uses. Also stops
+    //: the pane being kept alive past the fade.
     Timer {
         id: plotCollapseSettleTimer
-        interval: 180
+        interval: Motion.fast
         onTriggered: page.finishPlotCollapse()
     }
 
@@ -553,8 +556,9 @@ Item {
 
                 Behavior on color {
                     ColorAnimation {
-                        duration: 120
-                        easing.type: Easing.OutCubic
+                        duration: Motion.fast
+                        easing.type: Easing.BezierSpline
+                        easing.bezierCurve: Motion.enter
                     }
                 }
 
@@ -841,13 +845,16 @@ Item {
                         height: splitArea.resultHeight
                         //: The pane fades rather than vanishing when the Segmented
                         //: switches to Plot; a page built with Result selected has
-                        //: opacity 1 from the start.
+                        //: opacity 1 from the start. Duration and curve match the
+                        //: offset animation above, so the nudge and the fade are
+                        //: one motion (the Code/Assign stage uses the same pair).
                         opacity: !page.tabbedPanes || page.smallPaneIndex === 0 ? 1 : 0
                         Behavior on opacity {
                             enabled: page.tabbedReady
                             NumberAnimation {
-                                duration: 180
-                                easing.type: Easing.OutCubic
+                                duration: Motion.fast
+                                easing.type: Easing.BezierSpline
+                                easing.bezierCurve: Motion.enter
                             }
                         }
                         visible: opacity > 0
@@ -887,8 +894,9 @@ Item {
 
                 Behavior on color {
                     ColorAnimation {
-                        duration: 120
-                        easing.type: Easing.OutCubic
+                        duration: Motion.fast
+                        easing.type: Easing.BezierSpline
+                        easing.bezierCurve: Motion.enter
                     }
                 }
 
@@ -974,8 +982,9 @@ Item {
                     Behavior on opacity {
                         enabled: page.tabbedReady
                         NumberAnimation {
-                            duration: 180
-                            easing.type: Easing.OutCubic
+                            duration: Motion.fast
+                            easing.type: Easing.BezierSpline
+                            easing.bezierCurve: Motion.enter
                         }
                     }
                     visible: opacity > 0

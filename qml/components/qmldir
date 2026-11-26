@@ -4,6 +4,11 @@ module Symplify.Components
 #: control/tight); it is a singleton, so one change moves the whole app.
 singleton Spacing 1.0 Spacing.qml
 
+#: Motion is the WinUI 3 motion scale every state change reads (durations and
+#: the two Fluent splines, plus the one Segmented slide distance); like Spacing,
+#: it is a singleton so the app cannot drift into two animation languages.
+singleton Motion 1.0 Motion.qml
+
 #: The component library's inventory. Kept complete on purpose: nothing imports this
 #: module by URI (`import "../components"` resolves by file name), so a missing entry
 #: never complained — it had drifted to fifteen of twenty files, five of them the ones

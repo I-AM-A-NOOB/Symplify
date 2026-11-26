@@ -232,6 +232,9 @@ qml/
                                 #     the height the page scrolls to),
                                 #   Spacing (the one layout scale: header 24, content 16, pane 12,
                                 #     control 8, tight 4; pages read it instead of choosing insets),
+                                #   Motion (the one motion scale, WinUI 3's: fast 167 / normal
+                                #     250 / faster 83 ms, the two Fluent splines enter/exit, and
+                                #     the 40px Segmented slide; see Motion),
                                 #   ZenChrome / TitleBarButtons (the window's Zen chrome: the
                                 #     fullscreen hover strip with its window controls, and the
                                 #     title-bar Zen/fullscreen slots; the window keeps the mode
@@ -1561,14 +1564,17 @@ mode hides the input and most chrome, and the window-level side of it lives in
   editor uses `CodeArea` because the row constrains its height. Both share the
   code ink/surface and highlighter. The Assign value field uses
   `CodeScrollArea` too, so all three follow the same scrollable construction.
-- **The inactive editor is hidden except during a mode slide.** Both panes must
-  be visible while `inputStage` runs its 180ms `x` transition; after that, the
-  pane for the other mode is `visible: false`. `beginModeTransition()` must run
-  before the input-mode change from the user's segmented control / switch
-  helpers, so both panes are visible when `x` starts animating. The
-  `Behavior on x` itself stays enabled (gated on `slideReady`); the visibility
-  gate is what prevents a splitter resize from exposing the hidden pane as its
-  `x` follows the width. `inputPane` also clips, as a second line of defence.
+- **The inactive editor is hidden except during a mode switch.** Both panes are
+  visible while `inputStage` cross-fades them; after that, the pane for the
+  other mode is `visible: false`. `beginModeTransition()` must run before the
+  input-mode change from the user's segmented control / switch helpers, so both
+  panes are visible when the fade starts. The motion is the Segmented one (see
+  Motion): each pane nudges by `Motion.slide` in the direction of travel and
+  cross-fades over `Motion.fast` with WinUI's entering spline — the same pair
+  the Calculator's Result/Plot switch uses. The `Behavior`s stay gated on
+  `slideReady`, so a page rebuilt in Assign mode does not animate in. The
+  visibility gate is still needed: after the fade the hidden editor should
+  neither take clicks nor stay in the tab chain. `inputPane` also clips.
 - **Zen mode is a window-level view state.** `MainViewModel.zenMode` is toggled
   by the title-bar button immediately left of minimize (`Ctrl+Alt+M` also works;
   `Ctrl+Alt+Z` is swallowed by a system hotkey on at least one dev machine —
@@ -1725,25 +1731,27 @@ mode hides the input and most chrome, and the window-level side of it lives in
   (`tabbedPlotOpening`) has no split position on screen to slide from, and one
   that *goes away* there has no split to slide into: both are anchored at
   `tabbedPlotTargetY` (`tabbedPlotAnchored`), the first parked from its first
-  frame, the second fading out where it stands over the pane's 180ms opacity
-  fade (`plotCollapseSettleTimer` ends the collapse, since no layout tween
-  runs). Without that split, a new plot first rendered at split geometry and
+  frame, the second fading out where it stands over the pane's own
+  `Motion.fast` opacity fade (`plotCollapseSettleTimer`, the same duration,
+  ends the collapse, since no layout tween runs). Without that split, a new plot first rendered at split geometry and
   slid down across the bottom of the result for the whole 220ms entrance, and
   clearing (or calculating a non-plot result) faded the plot *up* to full
   opacity as it slid back in — both read as the plot flashing past. The short
   window also skips the split collapse tween entirely, which is what keeps
   qmlmathplot's canvas from being resized frame by frame on the way out.
   Switching between
-  the Result and Plot tabs slides each pane 40px horizontally (180ms) while
-  cross-fading; the plot keeps the tabbed full size once its tab has been
-  visited, so a switch never snaps through the split geometry.
+  the Result and Plot tabs slides each pane `Motion.slide` (40px) horizontally
+  while cross-fading, over `Motion.fast` with WinUI's entering spline — the
+  same motion the Code/Assign stage uses (see Motion); the plot keeps the
+  tabbed full size once its tab has been visited, so a switch never snaps
+  through the split geometry.
 - **The outer splitter width, result share and keyboard collapse persist.** The
   page binds `SettingsViewModel.inputPanelWidth` / `resultShare` /
   `keyboardCollapsed` (keys `workspace.input_width`, `workspace.result_share`,
   `workspace.keyboard_collapsed`). The Variables page's details panel has the
   same treatment through `variablesSidebarOpen` / `variablesSidebarWidth`
   (`workspace.variables_sidebar_open` / `workspace.variables_sidebar_width`);
-  its width uses the same 250ms write debounce. Input width and result share are written
+  its width uses the same `Motion.normal` (250ms) write debounce. Input width and result share are written
   through 250ms debounce timers after drags/resizes, so a drag does not write
   YAML per frame. The keyboard's collapse button toggles the Calculator
   viewmodel immediately and writes the same setting; the panel animates its
@@ -1779,6 +1787,48 @@ mode hides the input and most chrome, and the window-level side of it lives in
   domain signal, while `MainViewModel`/`resetToDefaults` and the tests use
   `changed` for "some setting moved". Adding a property means choosing its
   domain signal, not `changed`.
+
+## Motion
+
+`qml/components/Motion.qml` is the app's motion vocabulary, a `Spacing`-style
+singleton. It carries WinUI 3's documented control durations
+(`ControlFastAnimationDuration` 167, `ControlNormalAnimationDuration` 250,
+`ControlFasterAnimationDuration` 83) and Microsoft's incoming curve from
+"Timing and easing" — **Fast Out, Slow In** `cubic-bezier(0, 0, 0, 1)`, exposed
+as `Motion.enter`. Qt has no named equivalent: `Easing.OutCubic` is slower off
+the line and lands softer, so the same two controls written with it read as two
+design languages. Write state changes with `easing.type: Easing.BezierSpline`
+and `easing.bezierCurve: Motion.enter`, and take the duration from the singleton
+as well. (WinUI's outgoing spline is the mirror image; these are property tweens
+that run one curve in both directions, so only the entering one is exposed.)
+`Motion.slide` is the one Segmented travel, 40px.
+
+- **The two Segmented areas are one motion.** The Calculator's Code/Assign
+  stage and its tabbed Result/Plot pane both nudge by `Motion.slide` and
+  cross-fade over `Motion.fast` with `Motion.enter`. The Code/Assign panes are
+  `Behavior`s on `x`/`opacity`; the tabbed offsets are two `NumberAnimation`s
+  because they carry the direction of travel. Do not give one of them another
+  curve or distance — the stage used to travel its full width with no fade while
+  the tabs nudged 40px and cross-faded, and the two switches of the same control
+  read as different interactions.
+- **Splitters and the Variables sidebar.** All three ContentSizer hover bands
+  (the Calculator's outer splitter, its result/plot divider, and the Variables
+  details splitter) use `Motion.fast` + `Motion.enter`, so hovering any of them
+  feels the same. **None of them animates a width while dragging**: a drag is
+  direct manipulation and must track the pointer frame for frame (WinUI's
+  `SplitView`/`ContentSizer` behave the same). The Variables details panel is
+  the one width with an animation, and only for its open/close toggle:
+  `Motion.normal` + `Motion.enter`; its `panelResizing` disables the `Behavior`
+  while the splitter drags. So they are deliberately not the same thing: hover
+  timing is common, widths animate only when the user is *not* dragging them,
+  and the Calculator's panes have no toggle of their own to animate.
+- **Layout tweens are not control motion.** `tabbedProgress` (220ms) and
+  `layoutProgress` (the flip and plot appearance/collapse) animate geometry
+  between two layouts, normalized so a resize cannot push a pane negative; they
+  keep their own timing and `OutCubic`. The keyboard panel's height/grid
+  animations are layout too. Do not replace those with the control vocabulary:
+  a 167ms normalized geometry tween would read as a snap and would resize
+  qmlmathplot's canvas faster than it can take.
 
 ## Rendering / display
 
@@ -3314,7 +3364,8 @@ page's state: which row is selected, the definition read through `dataRevision`,
 the mutable `panelWidth`, and the row's two actions), it owns the two fields and the
 `syncDetails`/`applyDetails` pair that reads and writes them,
 and it calls `host.refreshTableLayout()` when its width animation stops (see the traps above — the
-animation's last frame is not the final width). The page's 16px `detailsSplitter` drags
+animation's last frame is not the final width). The animation is `Motion.normal` with WinUI's
+entering spline (see Motion). The page's 16px `detailsSplitter` drags
 `panelWidth` (240–480, capped by the page) and is hidden with the panel; while it drags, the
 panel's width `Behavior` is disabled so the pointer is not fighting the easing. Both the open
 state and width persist through `workspace.variables_sidebar_open` /

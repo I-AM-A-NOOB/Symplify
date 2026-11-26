@@ -77,8 +77,14 @@ Rectangle {
     Behavior on width {
         enabled: !host.panelResizing
         NumberAnimation {
-            duration: Utils.animationSpeed
-            easing.type: Easing.OutCubic
+            //: WinUI's panel duration and its entering spline: the same
+            //: vocabulary the Segmented switches and the splitter hover use
+            //: (`Motion`). Dragging is still instant (`panelResizing`), exactly
+            //: like the Calculator's splitter, which has no width animation at
+            //: all — direct manipulation must track the pointer.
+            duration: Motion.normal
+            easing.type: Easing.BezierSpline
+            easing.bezierCurve: Motion.enter
 
             //: The table's columns are computed from its own width, and the
             //: provider runs whenever that changes — which, during this animation,

@@ -233,9 +233,11 @@ Item {
         anchors.fill: parent
         spacing: 10
 
-        // Input area: Code / Assign. Both live side by side in a clipped stage
-        // and slide in opposite directions when the mode changes; the off-screen
-        // one is disabled, so the hidden input never takes focus or keystrokes.
+        // Input area: Code / Assign. Both live in the same clipped stage and
+        // exchange places when the mode changes: one nudges out while fading,
+        // the other nudges in while fading (`Motion.slide`), the same motion
+        // the Calculator's Result/Plot Segmented uses. The inactive one is
+        // disabled, so the hidden input never takes focus or keystrokes.
         Item {
             id: inputStage
 
@@ -245,9 +247,11 @@ Item {
             //: the VM is in Assign mode would otherwise slide both rows in from
             //: the left.
             property bool slideReady: false
-            //: Both editors must be visible while the mode slide runs. Once it
-            //: ends, the hidden one disappears so a sidebar width animation
-            //: cannot expose it: its `x` offset shrinks with the stage otherwise.
+            //: Both editors must be visible while the mode cross-fade runs.
+            //: Once it ends, the hidden one disappears so a sidebar width
+            //: animation cannot expose it: its `x` offset is not tied to the
+            //: stage's width any more, but a hidden editor should not take
+            //: clicks or stay in the tab chain either.
             property bool modeSwitching: false
 
             function beginModeTransition() {
@@ -259,7 +263,7 @@ Item {
 
             Timer {
                 id: modeSwitchTimer
-                interval: 180
+                interval: Motion.fast
                 onTriggered: inputStage.modeSwitching = false
             }
 
@@ -278,21 +282,33 @@ Item {
                 id: codeArea
 
                 objectName: "codeInput"
-                // The stage's two panes are siblings of its width; the inactive
-                // one sits fully outside the clip.
+                //: The stage's two panes overlap; the inactive one is faded
+                //: out and then hidden. Only the nudge (`Motion.slide`) and the
+                //: cross-fade move — the same pair of values the tabbed
+                //: Result/Plot switch uses.
                 width: parent.width
                 height: parent.height
-                x: calcVM.inputMode === 0 ? 0 : -width
+                x: calcVM.inputMode === 0 ? 0 : -Motion.slide
+                opacity: calcVM.inputMode === 0 ? 1 : 0
                 enabled: calcVM.inputMode === 0
                 visible: calcVM.inputMode === 0 || inputStage.modeSwitching
                 //: Code leaves to the left, Assign arrives from the right; going
-                //: back reverses both. Eased, not a paginated SwipeView: the two
-                //: panes cross the stage together.
+                //: back reverses both. WinUI's control motion, not OutCubic:
+                //: the same curve as every other Segmented content switch.
                 Behavior on x {
                     enabled: inputStage.slideReady
                     NumberAnimation {
-                        duration: 180
-                        easing.type: Easing.OutCubic
+                        duration: Motion.fast
+                        easing.type: Easing.BezierSpline
+                        easing.bezierCurve: Motion.enter
+                    }
+                }
+                Behavior on opacity {
+                    enabled: inputStage.slideReady
+                    NumberAnimation {
+                        duration: Motion.fast
+                        easing.type: Easing.BezierSpline
+                        easing.bezierCurve: Motion.enter
                     }
                 }
                 text: calcVM.inputText
@@ -321,16 +337,29 @@ Item {
                 id: assignRow
 
                 objectName: "assignInput"
+                //: Mirror of the Code pane: same nudge, same curve, opposite
+                //: side, so the two formats exchange places instead of one
+                //: handing over to a static page.
                 width: parent.width
                 height: parent.height
-                x: calcVM.inputMode === 1 ? 0 : width
+                x: calcVM.inputMode === 1 ? 0 : Motion.slide
+                opacity: calcVM.inputMode === 1 ? 1 : 0
                 enabled: calcVM.inputMode === 1
                 visible: calcVM.inputMode === 1 || inputStage.modeSwitching
                 Behavior on x {
                     enabled: inputStage.slideReady
                     NumberAnimation {
-                        duration: 180
-                        easing.type: Easing.OutCubic
+                        duration: Motion.fast
+                        easing.type: Easing.BezierSpline
+                        easing.bezierCurve: Motion.enter
+                    }
+                }
+                Behavior on opacity {
+                    enabled: inputStage.slideReady
+                    NumberAnimation {
+                        duration: Motion.fast
+                        easing.type: Easing.BezierSpline
+                        easing.bezierCurve: Motion.enter
                     }
                 }
                 spacing: 8
