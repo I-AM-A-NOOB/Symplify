@@ -5,6 +5,7 @@ __pycache__
 /.idea
 /.vscode
 /.vs
+/.qtcreator
 # Distribution files
 /build
 
