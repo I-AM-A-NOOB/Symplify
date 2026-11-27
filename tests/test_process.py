@@ -758,14 +758,14 @@ def test_the_store_client_persists_variables_between_runs():
         import tempfile
         from pathlib import Path
 
-        from python.store_client import StoreClient, plotting_seeds
+        from python.store_client import StoreClient
         from python.worker_protocol import CommitRequest, StoreEntryCandidate
 
         def main():
             path = Path(tempfile.mkdtemp()) / "variables.json"
             first = StoreClient(path)
             try:
-                first.bootstrap(plotting_seeds())
+                first.bootstrap()
                 assert first.commit(CommitRequest(
                     first.snapshot().revision,
                     StoreEntryCandidate(
@@ -778,7 +778,7 @@ def test_the_store_client_persists_variables_between_runs():
 
             second = StoreClient(path)
             try:
-                snapshot = second.bootstrap(plotting_seeds())
+                snapshot = second.bootstrap()
             finally:
                 second.close()
 
@@ -792,7 +792,7 @@ def test_the_store_client_persists_variables_between_runs():
             main()
         """
     )
-    assert events["names"] == ["x", "y", "a"]
+    assert events["names"] == ["a"]
     assert events["sympy_version"]
 
 
@@ -800,13 +800,13 @@ def test_the_store_client_bootstraps_and_commits_in_a_child():
     events = run_script(
         r"""
         import json
-        from python.store_client import StoreClient, plotting_seeds
+        from python.store_client import StoreClient
         from python.worker_protocol import CommitRequest, StoreEntryCandidate
 
         def main():
             client = StoreClient()
             try:
-                snapshot = client.bootstrap(plotting_seeds())
+                snapshot = client.bootstrap()
                 reply = client.commit(CommitRequest(
                     snapshot.revision,
                     StoreEntryCandidate(
@@ -834,9 +834,9 @@ def test_the_store_client_bootstraps_and_commits_in_a_child():
         """
     )
     assert events == {
-        "seed_revision": 2,
-        "reply": [True, 3],
-        "names": ["x", "y", "a"],
+        "seed_revision": 0,
+        "reply": [True, 1],
+        "names": ["a"],
         "a": "5",
     }
 

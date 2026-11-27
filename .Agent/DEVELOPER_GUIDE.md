@@ -16,10 +16,10 @@ built by CI on Windows.
 ## Source layout
 
 ```
-main.py                         # Entry / composition root. Starts the Store worker (seeded
-                                # with x/y as strings, loading variables.json beside the settings),
-                                # builds MainViewModel with the ProcessBackends (10 s calculation
-                                # deadline) and that Store, registers flat QML context properties,
+main.py                         # Entry / composition root. Starts the Store worker (loading
+                                # variables.json beside the settings; a fresh Store is empty — no
+                                # x/y seeding), builds MainViewModel with the ProcessBackends (10 s
+                                # calculation deadline) and that Store, registers flat QML context properties,
                                 # then RinUIWindow loads qml/MainWindow.qml. Calls
                                 # multiprocessing.freeze_support() first. ROOT = exe dir when frozen
                                 # (Nuitka), else __file__ dir.
@@ -106,8 +106,8 @@ python/
                                 # the static SymPy constants/callables table from
                                 # sympy_names.json (zero Qt/SymPy; shared by the lexer, model
                                 # and Store worker). Regenerate with scripts/update_sympy_names.py.
-                                # PLOTTING_NAMES lives here too, so the Store seeds and the plot
-                                # rule cannot drift.
+                                # PLOTTING_NAMES lives here too, so the plot rule and the
+                                # "you asked for it" warning cannot drift.
   parse_options.py              # The user-visible parser switches: core/exposed transformation
                                 # names, defaults, and policy_from_options() -> ParsePolicy in
                                 # canonical order (zero Qt/SymPy). Settings and the parser share
@@ -120,8 +120,9 @@ python/
                                 # only the changed srepr entries, or adopts a legacy mapping.
   store_client.py               # Blocking client for the Store worker (zero Qt, zero SymPy):
                                 # snapshot/commit/rename/delete/clear and a fresh-install
-                                # seed for x/y. The Variables page and the composition root
-                                # use it; the long work stays in the Compute worker.
+                                # bootstrap (the app passes no seeds). The Variables page
+                                # and the composition root use it; the long work stays in
+                                # the Compute worker.
   store_worker.py               # The variable Store's spawned child (zero Qt, zero SymPy):
                                 # authoritative StoreEntry map, revision allocation, commit/
                                 # rename/delete/clear, optional atomic JSON snapshot; answers with
@@ -3327,13 +3328,16 @@ draw (`python/model/plotting.py`, zero Qt), the **object** every surface binds t
   there is wide enough for the ring. The frame is `visible: calcVM.hasPlot`: a `ColumnLayout` skips an invisible child, so an
   empty result leaves **no 4:3 hole** — the placeholder card is gone, and the outcome box's
   `Press Ctrl+Return to calculate` hint is the only empty-state text.
-- **`x` and `y` start as ordinary variables** — `plotting.plot_variables()` is passed by `main.py`
-  into `MainViewModel(initial_variables=…)` (the viewmodel's own default stays empty, which is what
-  the tests build). They are not hidden: the Variables page lists them as `Symbol` rows. Touching one
-  — value edit, rename in either direction, delete, or an Assign-mode write — raises the house
-  warning `"x is a plotting variable. You asked for it."`, the same tone as the SymPy-built-in one
-  (`plot_variable_warning`). `VariablesModel` reads its `_keys` from the manager at construction;
-  without that the seeded rows would not appear until the first write.
+- **`x` and `y` are ordinary free symbols, not pre-seeded rows.** A fresh Store is empty: the
+  parser creates an unknown name as a `Symbol`, and `plot_series` reads the result's
+  `free_symbols`, so the plot works without a stored `x`/`y`. The app used to seed both into the
+  Store, which put two rows in the Variables table the user never added; it no longer does.
+  `plotting.plot_variables()` and `MainViewModel(initial_variables=…)` remain for the
+  legacy/headless path only. Touching a plotting name — value edit, rename in either direction,
+  delete, or an Assign-mode write that creates it — raises the house warning
+  `"x is a plotting variable. You asked for it."`, the same tone as the SymPy-built-in one
+  (`plot_variable_warning`). `VariablesModel` reads its `_keys` from the manager at construction so
+  the legacy path can still start with explicit entries.
 - **Registration happens once, before the engine**: `main.py` calls
   `qmlmathplot.register_qml_types()` right after `prepare(ROOT)`, and the page imports
   `QmlMathPlot 2.0`, `Qt5Compat.GraphicalEffects` and `../components` (for the ring).

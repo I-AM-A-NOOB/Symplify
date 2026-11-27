@@ -18,7 +18,6 @@ from pathlib import Path
 from typing import Any
 
 from .child_process import ChildProcess
-from .names import PLOTTING_NAMES
 from .store_worker import worker_main
 from .worker_protocol import (
     CommitRequest,
@@ -34,20 +33,6 @@ class StoreClientError(RuntimeError):
 
 class StoreClientTimeout(StoreClientError):
     """The Store worker missed the client's deadline and was replaced."""
-
-
-def plotting_seeds() -> tuple[StoreEntryCandidate, ...]:
-    """String-only seeds for a fresh Store (the two plotting variables)."""
-    return tuple(
-        StoreEntryCandidate(
-            name=name,
-            srepr=f"Symbol('{name}')",
-            display=name,
-            type_label="Symbol",
-            latex=name,
-        )
-        for name in PLOTTING_NAMES
-    )
 
 
 class StoreClient:

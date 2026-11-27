@@ -46,7 +46,7 @@ def main() -> int:
     # importing RinUI itself.
     from python import window_drag, window_icon
     from python.rinui_bootstrap import prepare
-    from python.store_client import StoreClient, plotting_seeds
+    from python.store_client import StoreClient
     from python.version import __version__
     from python.viewmodel.calculation_backend import ProcessBackend
     from python.viewmodel.main_viewmodel import MainViewModel
@@ -91,12 +91,14 @@ def main() -> int:
 
     # The variable Store is a separate process with no SymPy; it owns the
     # authoritative strings and the revision every calculation is computed
-    # against. A fresh store starts with the plotting names, seeded as strings so
-    # the composition root never imports SymPy for them. The snapshot sits beside
-    # the settings file (portable or OS config), and a different SymPy version
-    # sets it aside rather than restoring potentially incompatible srepr.
+    # against. A fresh Store is **empty**: x and y are ordinary free symbols the
+    # parser creates on demand, and the plot reads them from the result, so
+    # pre-seeding them only put two rows in the table that the user never added.
+    # Assigning them warns like any plotting name. The snapshot sits beside the
+    # settings file (portable or OS config), and a different SymPy version sets
+    # it aside rather than restoring potentially incompatible srepr.
     store = StoreClient(runtime.settings.path.with_name("variables.json"))
-    store.bootstrap(plotting_seeds())
+    store.bootstrap()
     app.aboutToQuit.connect(store.close)
 
     vm = MainViewModel(

@@ -8,7 +8,7 @@ wholesale.
 """
 
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import (
@@ -53,6 +53,11 @@ BACKEND_IDLE_MS = 60_000
 #: scope. If the sender is older than this, the next request gets a snapshot.
 MAX_SCOPE_HISTORY = 256
 
+#: A worker that could not apply the scope says so as an INTERNAL failure. These
+#: are not expression failures: the worker's cache is out of step, and the write
+#: is retried once with a full snapshot instead of failing the user's edit.
+_SCOPE_ERRORS = ("ScopeConflictError", "ScopeGapError", "ScopeStaleError")
+
 
 @dataclass(frozen=True)
 class _WriteRequest:
@@ -62,6 +67,9 @@ class _WriteRequest:
     kind: str                 # "add" | "update"
     name: str
     text: str
+    #: A scope-sync failure is retried once with a full snapshot. The same
+    #: request id keeps the pending draft, so the table does not flicker.
+    retried: bool = False
 
 
 @dataclass(frozen=True)
@@ -166,9 +174,9 @@ class VariablesModel(QAbstractTableModel):
             if manager is None:
                 raise ValueError("VariablesModel needs a manager or a store client")
             #: Insertion-ordered variable names. Read off the manager rather than
-            #: assumed empty: the app starts with the plotting variables in scope
-            #: (``MainViewModel(initial_variables=…)``), and a table that began empty
-            #: would show no rows until the first write.
+            #: assumed empty: the legacy/headless path may start with explicit
+            #: ``initial_variables``, and a table that ignored them would show no
+            #: rows until the first write. The application's Store starts empty.
             self._keys = manager.names()
 
     def is_store_backed(self) -> bool:
@@ -482,6 +490,9 @@ class VariablesModel(QAbstractTableModel):
             return
         request = self._active
         self._active = None
+        # The abort may have reached the worker before it applied the scope.
+        self._write_scope_revision = None
+        self._write_scope_generation = None
         pending = self._pending.get(request.name)
         text = pending.text if pending is not None else request.text
         self._clear_pending(request.name)
@@ -529,6 +540,26 @@ class VariablesModel(QAbstractTableModel):
             self.activity.emit()
             self._start_next()
             return
+
+        message = getattr(result, "error_message", "")
+        scope_error = isinstance(message, str) and message.startswith(_SCOPE_ERRORS)
+        if transport_error or scope_error:
+            # The worker may not have applied the scope it was sent, so its
+            # revision cannot be trusted; the next request starts from a
+            # snapshot. This is the same reset the Calculator path does on any
+            # error, and it stops one bad delta from cascading.
+            self._write_scope_revision = None
+            self._write_scope_generation = None
+        if scope_error and not request.retried:
+            # The edit itself is fine — the worker's scope cache was out of
+            # step. Keep the draft and retry once with a full snapshot.
+            self._queue.appendleft(replace(request, retried=True))
+            self._log_info(f"Variable scope resynced; retrying '{request.name}'")
+            self.busyChanged.emit()
+            self.activity.emit()
+            self._start_next()
+            return
+
         self._clear_pending(request.name)
         if request.kind == "add":
             self._apply_add(request.name, request.text, result)

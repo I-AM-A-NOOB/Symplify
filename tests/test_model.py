@@ -58,7 +58,6 @@ from python.model.variable import VariableManager, is_sympy_name, validate_name
 from python.model.variants import variants
 from python.parse_options import default_options, policy_from_options
 from python.settings import DEFAULTS, SettingsStore
-from python.store_client import plotting_seeds
 from python.store_worker import VariableStore
 from python.viewmodel.history_viewmodel import HistoryModel, HistoryWindowModel
 from python.viewmodel.inline_backend import InlineBackend
@@ -950,6 +949,73 @@ def test_variable_worker_uses_store_deltas_after_its_first_write():
     assert [change.name for change in second.changes] == ["a"]
 
 
+def test_a_scope_error_retries_the_write_once_with_a_snapshot():
+    """A worker whose scope cache drifted must not fail the user's edit.
+
+    A gap/conflict is the worker's bookkeeping, not the expression: keep the
+    draft, reset the sent revision, and retry the same request with a snapshot.
+    """
+    store = VariableStore()
+    backend = _FakeVariablesBackend()
+    model = VariablesModel(None, backend=backend, store=store)
+    added = []
+    model.variableAdded.connect(lambda name, ok: added.append((name, ok)))
+
+    assert model.add("a", "1") is True
+    request_id = backend.requests[0][0]
+    assert isinstance(backend.requests[0][3], ScopeSnapshot)
+
+    backend.finished.emit(
+        request_id,
+        ResultView(
+            request_id=request_id,
+            expression="1",
+            text="",
+            latex="",
+            is_error=True,
+            error_message="ScopeGapError: delta starts at 4, state is at 1",
+            hint="",
+            variants=(),
+            plot=(),
+            scope_revision=0,
+            profile_id="default",
+            error_kind="INTERNAL",
+        ),
+    )
+
+    assert len(backend.requests) == 2
+    retry_id, _, _, retry_scope = backend.requests[1]
+    assert retry_id == request_id
+    assert isinstance(retry_scope, ScopeSnapshot)
+    assert store.entry("a") is None            # the failed attempt committed nothing
+
+    backend.finished.emit(
+        retry_id,
+        ResultView(
+            request_id=retry_id,
+            expression="1",
+            text="1",
+            latex="",
+            is_error=False,
+            error_message="",
+            hint="",
+            variants=(),
+            plot=(),
+            scope_revision=0,
+            profile_id="default",
+            entry=StoreEntryCandidate(
+                name="a",
+                srepr="Integer(1)",
+                display="1",
+                type_label="Integer",
+                latex="a = 1",
+            ),
+        ),
+    )
+    assert store.entry("a").display == "1"
+    assert added == [("a", True)]
+
+
 class RecordingInlineBackend(InlineBackend):
     """Inline backend that records the scope of every submitted request."""
 
@@ -966,8 +1032,6 @@ def test_store_backed_variables_and_assignments_share_one_source():
     settings = SettingsStore(temp_dir() / "config.yaml")
     settings.load()
     store = VariableStore()
-    for seed in plotting_seeds():
-        assert store.commit(CommitRequest(store.revision, seed)).ok
 
     calculation = RecordingInlineBackend()
     vm = MainViewModel(
@@ -977,32 +1041,30 @@ def test_store_backed_variables_and_assignments_share_one_source():
         store_client=store,
     )
     model = vm.variables.model
-    assert [model.nameAt(row) for row in range(model.rowCount())] == ["x", "y"]
-    assert model.cellAt(0, 2) == "Symbol"
-    assert model.latexAt(0) == "x"
+    assert [model.nameAt(row) for row in range(model.rowCount())] == []
 
     assert vm.variables.addVariable("a", "2 + 3") is True
-    assert model.nameAt(2) == "a"
-    assert model.cellAt(2, 1) == "5"
-    assert model.cellAt(2, 2) == "Integer"
+    assert model.nameAt(0) == "a"
+    assert model.cellAt(0, 1) == "5"
+    assert model.cellAt(0, 2) == "Integer"
     assert store.entry("a").display == "5"
 
     assert vm.variables.updateVariable("a", "7") is True
-    assert model.cellAt(2, 1) == "7"
+    assert model.cellAt(0, 1) == "7"
     assert store.entry("a").display == "7"
 
     assert vm.variables.renameVariable("a", "b") is True
-    assert [model.nameAt(row) for row in range(model.rowCount())] == ["x", "y", "b"]
+    assert [model.nameAt(row) for row in range(model.rowCount())] == ["b"]
     assert store.entry("b").srepr == "Integer(7)"
     assert store.entry("a") is None
 
     assert vm.variables.deleteVariable("b") is True
-    assert [model.nameAt(row) for row in range(model.rowCount())] == ["x", "y"]
+    assert [model.nameAt(row) for row in range(model.rowCount())] == []
     assert store.entry("b") is None
 
     vm.calculator.calculateAssign("c", "=", "6")
     assert store.entry("c").display == "6"
-    assert model.nameAt(2) == "c"
+    assert model.nameAt(0) == "c"
     vm.calculator.calculate("c + 1")
     assert vm.calculator.resultText == "7"
     assert isinstance(calculation.scopes[0], ScopeSnapshot)
@@ -2912,7 +2974,7 @@ def test_a_theme_switch_recolours_what_is_already_drawn():
     assert dark == vm.calculator.plot.color_cycle[0]
 
 
-def test_the_app_starts_with_the_plotting_variables_in_the_table():
+def test_the_legacy_path_can_start_with_explicit_initial_variables():
     store = SettingsStore(temp_dir() / "config.yaml")
     store.load()
     vm = MainViewModel(store, initial_variables=plot_variables())

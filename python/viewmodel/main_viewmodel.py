@@ -101,9 +101,9 @@ class MainViewModel(QObject):
                 apply appearance changes; None in headless tests.
             parent: Qt parent.
             initial_variables: Variables a fresh session starts with **on the legacy
-                test/headless path**. The app seeds the Store instead
-                (``StoreClient.bootstrap(plotting_seeds())``), so this mapping is
-                ignored when ``store_client`` is supplied.
+                test/headless path**. The app's Store starts empty (``x`` and
+                ``y`` are ordinary free symbols), so this mapping is ignored when
+                ``store_client`` is supplied.
             calculation_backend: How calculation requests leave the UI. None
                 keeps the synchronous in-process backend (tests/headless); the
                 application passes a ``ProcessBackend`` with a timeout.

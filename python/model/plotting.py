@@ -79,12 +79,13 @@ RESULT_LABELS = {
 
 
 def plot_variables() -> dict[str, Any]:
-    """The variables a fresh app starts with: ``x`` and ``y`` as themselves.
+    """``x`` and ``y`` as themselves, for the legacy/headless path.
 
-    They are ordinary entries in the variables table (not hidden): they make the
-    two plotting names visible and editable, and an expression may use them
-    without defining anything. Editing one warns (see ``VariablesViewModel``) —
-    the value is still stored, exactly like a SymPy built-in.
+    The application no longer seeds these into the Store: ``x`` and ``y`` are
+    ordinary free symbols the parser creates on demand, and the plot reads them
+    from the result. A table that pre-seeded them showed two rows the user never
+    added. The mapping stays for ``MainViewModel(initial_variables=…)`` in tests
+    and headless callers; writing one still warns (see ``VariablesViewModel``).
     """
     return {name: sp.Symbol(name) for name in PLOT_SYMBOLS}
 

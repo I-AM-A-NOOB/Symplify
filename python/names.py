@@ -25,8 +25,10 @@ SYMPY_CONSTANTS = frozenset(_NAMES["constants"])
 SYMPY_CALLABLES = frozenset(_NAMES["callables"])
 SYMPY_VERSION = str(_NAMES.get("sympy_version", ""))
 
-#: The names a fresh Store seeds and the plot may leave free. Kept here (zero
-#: SymPy) so ``store_client`` and ``model.plotting`` cannot drift.
+#: The names a plot may leave free. The app no longer seeds them into the Store;
+#: they are ordinary free symbols, and only the legacy/headless path pre-fills a
+#: table with them. Kept here (zero SymPy) so the plot rule and the warning cannot
+#: drift.
 PLOTTING_NAMES = ("x", "y")
 
 __all__ = [
