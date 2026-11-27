@@ -94,15 +94,48 @@ def insert_char(text: str, start: int, end: int, char: str) -> Edit | None:
     return None
 
 
-def backspace(text: str, start: int, end: int) -> Edit | None:
-    """Delete an empty pair together, like every code editor does."""
+def _previous_tab_stop(column: int, width: int) -> int:
+    """The indentation column one Backspace should leave (``0`` at the start)."""
+    return ((column - 1) // width) * width if column > 0 else 0
+
+
+def backspace(text: str, start: int, end: int, unit: str = INDENT) -> Edit | None:
+    """Delete an empty pair, or one indentation level in leading whitespace.
+
+    The pair rule is the first one every code editor has. The second is the
+    other half of Tab: after ``Tab`` inserted four spaces, Backspace must remove
+    a *level*, not leave three spaces behind. It follows tab stops, so a
+    hand-typed six-space indent removes two spaces down to the four-column stop,
+    while three spaces remove all three down to column zero. A tab is one
+    character regardless of where it lands.
+    """
     if start != end or start == 0:
         return None
     previous = text[start - 1]
     closing = OPEN_TO_CLOSE.get(previous)
-    if closing is None or start >= len(text) or text[start] != closing:
+    if closing is not None and start < len(text) and text[start] == closing:
+        return Edit(start - 1, start + 1, "", start - 1, start - 1)
+
+    line_start = text.rfind("\n", 0, start) + 1
+    prefix = text[line_start:start]
+    if not prefix or prefix.strip(" \t"):
         return None
-    return Edit(start - 1, start + 1, "", start - 1, start - 1)
+    if prefix.endswith("\t"):
+        return Edit(start - 1, start, "", start - 1, start - 1)
+
+    width = max(1, len(unit))
+    column = 0
+    for char in prefix:
+        if char == "\t":
+            column += width - (column % width)
+        else:
+            column += 1
+    target = _previous_tab_stop(column, width)
+    spaces = len(prefix) - len(prefix.rstrip(" "))
+    remove = min(spaces, column - target)
+    if remove <= 0:
+        return None
+    return Edit(start - remove, start, "", start - remove, start - remove)
 
 
 def newline(text: str, start: int, end: int, unit: str = INDENT) -> Edit:
@@ -254,7 +287,7 @@ def apply(
     if action in OPEN_TO_CLOSE or action in CLOSERS:
         return insert_char(text, start, end, action)
     if action == "backspace":
-        return backspace(text, start, end)
+        return backspace(text, start, end, unit)
     if action == "tab":
         return indent(text, start, end, unit=unit)
     if action == "outdent":

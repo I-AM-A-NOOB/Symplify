@@ -2261,6 +2261,18 @@ def test_editor_deletes_an_empty_pair_with_backspace():
     assert edit_apply("(x)", 1, 2, "backspace") is None  # a selection is the control's
 
 
+def test_editor_backspace_removes_one_indentation_level():
+    """The other half of Tab: leading whitespace goes back a tab stop at a time."""
+    assert edit_apply("    x", 4, 4, "backspace") == Edit(0, 4, "", 0, 0)
+    assert edit_apply("        x", 8, 8, "backspace") == Edit(4, 8, "", 4, 4)
+    assert edit_apply("      x", 6, 6, "backspace") == Edit(4, 6, "", 4, 4)
+    assert edit_apply("     x", 5, 5, "backspace") == Edit(4, 5, "", 4, 4)
+    assert edit_apply("   x", 3, 3, "backspace") == Edit(0, 3, "", 0, 0)
+    assert edit_apply("\t\tx", 2, 2, "backspace") == Edit(1, 2, "", 1, 1)
+    assert edit_apply("    ", 4, 4, "backspace") == Edit(0, 4, "", 0, 0)
+    assert edit_apply("x", 1, 1, "backspace") is None
+
+
 def test_editor_treats_string_contents_as_data():
     """Inside `Symbol("...")` a bracket is text, not a pair."""
     assert edit_apply('Symbol("x")', 9, 9, "(") == Edit(9, 9, "(", 10, 10)
