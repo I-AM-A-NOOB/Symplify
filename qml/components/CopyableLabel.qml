@@ -73,8 +73,10 @@ Item {
 
     implicitWidth: edit.implicitWidth
     implicitHeight: edit.implicitHeight
-    //: A read-only box does not need the text cursor; the arrow reads better.
-    //: (RinUI's `Button` does the same for its own labels.)
+    //: The label is read-only but still selectable, so the pointer says "text
+    //: cursor" like RinUI's own text areas do. The shape is set on the
+    //: right-click `MouseArea` below: it is the topmost cursor-bearing item, and
+    //: a bare `TextEdit` has no Control palette to carry one itself.
     clip: true
 
     //: Drop the selection — for a page that knows the reason it was made has
@@ -158,6 +160,9 @@ Item {
             anchors.fill: parent
             acceptedButtons: Qt.RightButton
             propagateComposedEvents: false
+            //: The label is selectable; the I-beam is the affordance. This
+            //: handler is the topmost cursor-bearing item over the text.
+            cursorShape: Qt.IBeamCursor
             onClicked: (mouse) => root.rightClicked(mouse.x, mouse.y)
         }
     }
