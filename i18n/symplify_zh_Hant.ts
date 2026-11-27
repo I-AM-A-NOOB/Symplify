@@ -221,6 +221,16 @@
         <translation>尚無日誌。</translation>
     </message>
 
+    <message>
+        <location filename="../qml/pages/LogPage.qml" line="154"/>
+        <source>Select all</source>
+        <translation>全選</translation>
+    </message>
+    <message>
+        <location filename="../qml/pages/LogPage.qml" line="165"/>
+        <source>Copy selection</source>
+        <translation>複製選取內容</translation>
+    </message>
 </context>
 <context>
     <name>MainWindow</name>

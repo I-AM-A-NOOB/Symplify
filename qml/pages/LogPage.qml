@@ -105,7 +105,7 @@ Item {
                 bottomGap: 12
                 }
 
-            Text {
+            TextEdit {
                 id: logText
 
                 y: headerRow.height
@@ -113,12 +113,28 @@ Item {
                 // The markup is ours (python/viewmodel/log_viewmodel.py), and the
                 // message text inside it is escaped there — so the `<` and `&` of
                 // an expression can never be read as markup.
-                textFormat: Text.RichText
-                wrapMode: Text.Wrap
+                textFormat: TextEdit.RichText
+                wrapMode: TextEdit.Wrap
                 text: logVM.richLogs
                 color: Theme.currentTheme.colors.textColor
                 // Log lines are expressions and results, so they wear the code font.
                 font: settingsVM.codeFont
+
+                //: A log is read, not edited; selection is the only interaction.
+                //: `selectByMouse` is the mouse path only. Touch drags stay with
+                //: the outer Flickable (which scrolls); touch selection is Qt's
+                //: long-press path. The height is the content height, so this
+                //: control never scrolls itself and cannot fight the page.
+                readOnly: true
+                selectByMouse: true
+                persistentSelection: true
+                cursorVisible: false
+                //: A bare `QtQuick.TextEdit` has no Control palette; without this
+                //: the selection is Windows' application highlight, not the app
+                //: accent. RinUI's own text controls set the same property.
+                selectionColor: Theme.currentTheme.colors.primaryColor
+                padding: 0
+                height: contentHeight
             }
         }
     }
@@ -135,6 +151,29 @@ Item {
         // A `CommandBar`, not a hand-written row: the two actions must survive a
         // narrow window, and the bar folds whichever does not fit into its menu.
         CommandBar {
+            //: A touch path that does not depend on a precise long-press: select
+            //: everything, then copy it. Both actions are in the bar, so a touch
+            //: reader never needs a drag gesture to get text out.
+            Action {
+                text: qsTr("Select all")
+                icon.name: "ic_fluent_select_all_on_20_regular"
+                enabled: logVM.formattedLogs !== ""
+                onTriggered: {
+                    logText.forceActiveFocus()
+                    logText.selectAll()
+                }
+            }
+
+            //: The selected rich text as plain text. `TextEdit.copy` is the
+            //: control's own selection, so a touch long-press selection works the
+            //: same way as a mouse drag, and the action is reachable in the bar.
+            Action {
+                text: qsTr("Copy selection")
+                icon.name: "ic_fluent_text_quote_20_regular"
+                enabled: logText.selectedText.length > 0
+                onTriggered: logText.copy()
+            }
+
             // The plain rendering, for the clipboard: the page shows markup.
             Action {
                 text: qsTr("Copy log")

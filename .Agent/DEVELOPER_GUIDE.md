@@ -2481,7 +2481,7 @@ warning arrives once per instantiation), and the list is capped at `MAX_ENTRIES 
 **Rich rendering is batched and page-owned.** Appending a new unique entry extends the plain and
 rich strings in place; a repeat marks the tail dirty. The two property signals are coalesced through
 a 16 ms single-shot timer, so a page-construction burst (Settings alone emits dozens of RinUI/Qt
-warnings) produces one `Text` layout instead of one per message. `LogViewModel.setDisplayActive()`
+warnings) produces one `TextEdit` layout instead of one per message. `LogViewModel.setDisplayActive()`
 is driven by `LogPage.visible`: while the page is away, new entries still extend `formattedLogs`
 (for Copy log) but the rich text is neither rebuilt nor signalled. Activating the page renders it
 once. This is what removed the long-standing "Log → Settings blocks" delay — with a full 1000-entry
@@ -2496,8 +2496,14 @@ and it has to convert on the way: a `color` handed to Python arrives as a `QColo
 The values are composited over the page background (theme roles are translucent) and emitted as
 opaque `#rrggbb`.
 
-**The page** (`qml/pages/LogPage.qml`) is a borderless `Flickable` + rich `Text`, deliberately not a
-`ScrollView` — see the trap below. It follows the tail unless the reader has scrolled away, and it
+**The page** (`qml/pages/LogPage.qml`) is a borderless `Flickable` + read-only rich `TextEdit`,
+deliberately not a `ScrollView` — see the trap below. The `TextEdit` is sized to its
+`contentHeight`, so it never scrolls itself and touch drags stay with the Flickable;
+`selectByMouse` is the mouse-only drag-selection path, while touch selection is Qt's long-press;
+`selectionColor` comes from the theme accent because a bare `TextEdit` has no Control palette.
+The toolbar carries **Select all**, **Copy selection** (`TextEdit.copy`, so the selection survives
+focus leaving via `persistentSelection`) and **Copy log**; the first two are the touch-safe path
+when a precise long-press is awkward. It follows the tail unless the reader has scrolled away, and it
 distinguishes "not laid out yet" from "scrolled up"; conflating the two is what left the page
 opening on its oldest line. Its header is the two-part arrangement the Microsoft Store uses — the
 title, the actions and the bar in `qml/components/PageHeader.qml`, the inline row in
