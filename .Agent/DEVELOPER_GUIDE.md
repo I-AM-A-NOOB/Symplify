@@ -2101,7 +2101,10 @@ Wiring:
 What the rules are:
 
 - An opening bracket or quote pairs itself (`()`) or wraps the selection; a closing bracket next to
-  the caret is stepped over; Backspace deletes an empty pair as one pair.
+  the caret is stepped over; Backspace deletes an empty pair as one pair. In leading whitespace it
+  deletes one **indentation level**, following tab stops: Tab then Backspace leaves the line
+  unindented, a hand-typed six-space indent backs up to the four-column stop, and a tab is one
+  character.
 - Quotes and brackets inside a `STRING` are data (`Symbol("(")`), and a quote at an unterminated
   literal's end closes it rather than opening an empty pair.
 - Tab inserts four spaces; a selection indents every line it touches (a selection ending exactly at
