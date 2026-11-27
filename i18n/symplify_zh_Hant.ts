@@ -1259,12 +1259,12 @@
     <message>
         <location filename="../qml/components/WarningDialog.qml" line="26"/>
         <source>%1 is a SymPy built-in. You asked for it.</source>
-        <translation>%1 是 SymPy 內建名稱。這是你要求的。</translation>
+        <translation>%1 是 SymPy 內建名稱。這是你自找的。</translation>
     </message>
     <message>
         <location filename="../qml/components/WarningDialog.qml" line="28"/>
         <source>%1 is a plotting variable. You asked for it.</source>
-        <translation>%1 是繪圖變數。這是您要求的。</translation>
+        <translation>%1 是繪圖變數。這是你自找的。</translation>
     </message>
 </context>
 <context>
