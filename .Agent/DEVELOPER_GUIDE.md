@@ -2568,8 +2568,9 @@ backdrop floats up from 10px below while fading in, and carries the page's own t
   all the slack and squeezed the title to nothing — the slot must also set
   `Layout.preferredWidth: titleMeasure.implicitWidth`.
   The Workspace rows read top-down as *colour the code → the faces → the empty result → the
-  window*: code theme, bracket colouring, code font, custom keyboard, keyboard font, LaTeX font,
-  empty-result watermark, full screen in Zen. The watermark row is the one expander whose header
+  window*: code theme, bracket colouring, indent rainbow, code font, custom keyboard, keyboard
+  font, LaTeX font, empty-result watermark, full screen in Zen. Indent rainbow is a
+  `SettingCard` + `Switch`, the same shape as Full screen in Zen, not a `CheckboxSettingRow`. The watermark row is the one expander whose header
   control is the *kind* (icon / random maths) and whose body is the random pool: a `TextArea` of one
   LaTeX snippet per line in the code font, committed on focus loss / destruction (every commit
   re-rolls and redraws the watermark, so per keystroke would be wasteful). Blank lines are dropped
@@ -2687,7 +2688,10 @@ backdrop floats up from 10px below while fading in, and carries the page's own t
     `Utils.primaryColor`, which its QML `Theme.setThemeColor` sets as well. So **only QML applies
     the accent**, and `MainWindow.qml` is its **single owner** (`applyAccent()`): the window
     outlives the pages, and applying it has to happen at startup, on every change, *and* after every
-    theme switch, which a page cannot do. Pages must not touch it.
+    theme switch, which a page cannot do. Pages must not touch it. **A mode switch is a change**:
+    `_set_accent_mode` emits `accentChanged` itself (the picker is not the only producer), and
+    `MainWindow.onAccentChanged` also calls `applyLogColors()` — the log's info colour is pushed
+    into the viewmodel, not bound to `systemAttentionColor`.
   - **The accent's variants are the shades Windows itself derives** (`python/accent.py`, ported
     from `windowsthemefinetuner`, the author's own reconstruction of that behaviour — the full
     484-vector corpus and live comparator live there; `tests/golden_accent_palettes.json` is the

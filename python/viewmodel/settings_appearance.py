@@ -94,6 +94,9 @@ class AppearanceSettings:
 
     def _set_accent_mode(self, mode: str) -> None:
         self._store.set("appearance.accent_mode", mode)
+        # Switching Default/System/Custom changes the colour in effect even when
+        # no picker moved, so the QML accent handler has to run for this too.
+        self.accentChanged.emit()
         self.appearanceChanged.emit()
         self.changed.emit()
 

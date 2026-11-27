@@ -219,14 +219,17 @@ SettingsSection {
                         }
                     }
 
-                    // A single checkbox in the same card as the parser's group:
-                    // indentation is a code-surface choice, not a radio mode.
-                    CheckboxSettingGroup {
-                        CheckboxSettingRow {
-                            label: qsTr("Indent rainbow")
-                            hint: qsTr("Tints each indentation level. Useful when a nested, Lisp-style expression spans several lines.")
+                    // A card with a switch, the shape this section uses for
+                    // every other on/off choice (see "Full screen in Zen mode").
+                    SettingCard {
+                        Layout.fillWidth: true
+                        title: qsTr("Indent rainbow")
+                        description: qsTr("Tint each indentation level. Useful when a nested, Lisp-style expression spans several lines.")
+                        icon.name: "ic_fluent_text_indent_increase_20_regular"
+
+                        Switch {
                             checked: settingsVM.indentRainbow
-                            onToggled: settingsVM.indentRainbow = !settingsVM.indentRainbow
+                            onToggled: settingsVM.indentRainbow = checked
                         }
                     }
 

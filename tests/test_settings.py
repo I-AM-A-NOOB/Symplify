@@ -1139,6 +1139,20 @@ def test_os_finetuning_off_falls_back_to_the_blend():
         assert vm.accentForScheme(dark) == for_scheme(vm.accent, dark)
 
 
+def test_switching_accent_mode_announces_the_accent():
+    """The QML accent owner listens to `accentChanged`; a mode switch is one."""
+    from python.viewmodel.settings_viewmodel import SettingsViewModel
+
+    store = store_at(temp_dir() / CONFIG_FILENAME)
+    vm = SettingsViewModel(store)
+    seen = []
+    vm.accentChanged.connect(lambda: seen.append(vm.accentMode))
+    vm.accentMode = "system"
+    assert seen == ["system"]
+    vm.accentMode = "default"
+    assert seen == ["system", "default"]
+
+
 def test_accent_mode_decides_the_colour_in_effect():
     from python.viewmodel.settings_viewmodel import SettingsViewModel
 

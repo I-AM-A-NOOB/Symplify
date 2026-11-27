@@ -443,6 +443,9 @@ FluentWindow {
 
         function onAccentChanged() {
             applyAccent()
+            // The log's info level is `systemAttentionColor`, which follows the
+            // accent; it is pushed into the viewmodel, not bound, so re-apply it.
+            applyLogColors()
         }
 
         //: A code-family or bracket-mode change also changes the palette. The
