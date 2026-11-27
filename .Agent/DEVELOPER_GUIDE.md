@@ -679,6 +679,9 @@ transparent corner, not `srgba(255,255,255,1)`.
   add, because transport trouble is not a statement about the expression. A newer edit of the
   same name supersedes older queued writes; an answer for an older request is ignored while the
   newer draft is pending. A late answer for a renamed/deleted name is discarded.
+  A rename warns about **both ends**; the Store's rename clears the entry's
+  name-dependent warning, so the new name must be asked through `_warn_reserved`
+  explicitly — otherwise renaming `a` to `pi` silently shadows the constant.
   `CalculatorViewModel` uses the same Store snapshot as its calculation scope and commits an
   Assign's `ResultView.entry` through `VariablesModel.commit_candidate`, so a Calculator write and
   a Variables-page edit land in one authoritative place. With `store=None` (tests/headless) the

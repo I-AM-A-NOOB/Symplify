@@ -946,6 +946,11 @@ class VariablesModel(QAbstractTableModel):
             self._log_info(f"Variable renamed: {old_name} -> {new_name}")
             if old_entry is not None:
                 self._emit_warning(old_entry)
+            # Renaming *to* a built-in/plotting name is the same collision as
+            # creating it: the Store's rename clears the entry's warning, so ask
+            # the name table about the new name explicitly (the legacy path below
+            # already did).
+            self._warn_reserved(new_name)
             return True
 
         if not self._manager.rename(old_name, new_name):

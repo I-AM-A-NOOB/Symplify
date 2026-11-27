@@ -949,6 +949,27 @@ def test_variable_worker_uses_store_deltas_after_its_first_write():
     assert [change.name for change in second.changes] == ["a"]
 
 
+def test_store_backed_rename_to_a_builtin_warns_about_the_new_name():
+    """The Store's rename clears the entry's warning; the new name still warns.
+
+    The legacy path always asked both ends; the store-backed path only emitted
+    the old entry's warning, so renaming `a` to `pi` silently shadowed the
+    constant.
+    """
+    store = VariableStore()
+    assert store.commit(CommitRequest(store.revision, StoreEntryCandidate(
+        name="a", srepr="Integer(1)", display="1", type_label="Integer",
+        latex="a = 1",
+    ))).ok
+    model = VariablesModel(None, backend=InlineBackend(), store=store)
+    warnings = []
+    model.warningOccurred.connect(lambda name, body: warnings.append((name, body)))
+
+    assert model.rename("a", "pi") is True
+    assert warnings[-1][0] == "pi"
+    assert "SymPy built-in" in warnings[-1][1]
+
+
 def test_a_scope_error_retries_the_write_once_with_a_snapshot():
     """A worker whose scope cache drifted must not fail the user's edit.
 
