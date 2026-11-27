@@ -40,6 +40,7 @@ from ..worker_protocol import (
     StoreReply,
 )
 from .log_viewmodel import LogViewModel
+from .warnings import localize_warning
 
 if TYPE_CHECKING:
     from .search import VariablesFilterModel
@@ -817,8 +818,9 @@ class VariablesModel(QAbstractTableModel):
 
     def _emit_warning(self, entry: StoreEntry) -> None:
         if entry.warning:
-            self.warningOccurred.emit(entry.name, entry.warning)
-            self._log_warn(entry.warning)
+            warning = localize_warning(entry.name, entry.warning)
+            self.warningOccurred.emit(entry.name, warning)
+            self._log_warn(warning)
 
     def _warn_reserved(self, name: str) -> None:
         """Emit the warning for a name input's meaning depends on.
@@ -832,6 +834,7 @@ class VariablesModel(QAbstractTableModel):
         warning = reserved_name_warning(name)
         if warning is None:
             return
+        warning = localize_warning(name, warning)
         self.warningOccurred.emit(name, warning)
         self._log_warn(warning)
 

@@ -1218,6 +1218,16 @@
         <extracomment>The signal carries its own title (a refused name is the title), so this is only what an empty-handed caller would see.</extracomment>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <location filename="../qml/components/WarningDialog.qml" line="26"/>
+        <source>%1 is a SymPy built-in. You asked for it.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/components/WarningDialog.qml" line="28"/>
+        <source>%1 is a plotting variable. You asked for it.</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>ZenChrome</name>

@@ -21,6 +21,7 @@ from .input_mode import InputMode
 from .latex_jobs import LatexJobs
 from .latex_service import LatexRenderService
 from .log_viewmodel import LogViewModel
+from .warnings import localize_warning
 
 if TYPE_CHECKING:
     from .variables_viewmodel import VariablesModel
@@ -1094,4 +1095,4 @@ class CalculatorViewModel(QObject):
 
             warning = reserved_name_warning(name)
         if warning:
-            self.warningOccurred.emit(name, warning)
+            self.warningOccurred.emit(name, localize_warning(name, warning))

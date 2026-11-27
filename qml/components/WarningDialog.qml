@@ -19,6 +19,14 @@ MessageDialog {
     //: only what an empty-handed caller would see.
     title: qsTr("Warning")
 
+    //: Source strings for the viewmodel's reserved-name warnings. They are not
+    //: drawn here; lupdate scans QML only, so these keep the translations in the
+    //: same context `python/viewmodel/warnings.py` asks for.
+    readonly property string builtinWarningSource:
+        qsTr("%1 is a SymPy built-in. You asked for it.")
+    readonly property string plottingWarningSource:
+        qsTr("%1 is a plotting variable. You asked for it.")
+
     Connections {
         target: root.source
 

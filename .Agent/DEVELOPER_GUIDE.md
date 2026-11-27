@@ -2610,7 +2610,12 @@ backdrop floats up from 10px below while fading in, and carries the page's own t
   `scripts/build_windows.py` compiles every `symplify_*.ts` before Nuitka and includes the directory. There is
   **no runtime .ts compiler, bundled lrelease, or .qm cache** — user-contributed translations are
   compiled at build time, not by the app. QML strings are extracted today; Python-side user-facing
-  strings still need `tr()` before they can be translated.
+  strings still need `tr()` before they can be translated. **The model's reserved-name warnings are
+  English strings** (`python/model/variable.py` is zero Qt, and the Store persists the sentence);
+  `python/viewmodel/warnings.py` translates the two known ones with
+  `QCoreApplication.translate("WarningDialog", …)`. Their `qsTr` sources are unused properties in
+  `WarningDialog.qml` because `update_translations.py` runs lupdate over **QML only**; keep the
+  source strings there, or lupdate will mark the catalogue entries obsolete.
   **English copy can be centralized optionally**: create `i18n/symplify_en.ts` with
   `-target-language en` and edit its `<translation>` values; the loader now installs
   `symplify_en.qm` for `en`/system-English too. The QML `qsTr` sources remain the canonical
