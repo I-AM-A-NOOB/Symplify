@@ -970,6 +970,19 @@ def test_store_backed_rename_to_a_builtin_warns_about_the_new_name():
     assert "SymPy built-in" in warnings[-1][1]
 
 
+def test_reserved_warning_is_derived_from_the_static_name_table():
+    """The warning no longer depends on the persisted English sentence."""
+    from python.names import reserved_name_kind
+    from python.viewmodel.warnings import reserved_warning
+
+    assert reserved_name_kind("pi") == "builtin"
+    assert reserved_name_kind("x") == "plotting"
+    assert reserved_name_kind("a") is None
+    assert reserved_warning("pi", "builtin").startswith("pi is a SymPy built-in")
+    assert reserved_warning("x", "plotting").startswith("x is a plotting variable")
+    assert reserved_warning("a", "") == ""
+
+
 def test_a_scope_error_retries_the_write_once_with_a_snapshot():
     """A worker whose scope cache drifted must not fail the user's edit.
 

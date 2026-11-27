@@ -13,8 +13,26 @@ _BUILTIN = "%1 is a SymPy built-in. You asked for it."
 _PLOTTING = "%1 is a plotting variable. You asked for it."
 
 
+def reserved_warning(name: str, kind: str) -> str:
+    """The translated warning for a reserved-name ``kind`` (``""`` if unknown).
+
+    This is the primary path: the warning is a function of the *name*, so a
+    changed source string or an old persisted sentence cannot orphan it.
+    """
+    template = _BUILTIN if kind == "builtin" else (
+        _PLOTTING if kind == "plotting" else ""
+    )
+    if not template:
+        return ""
+    return QCoreApplication.translate("WarningDialog", template).replace("%1", name)
+
+
 def localize_warning(name: str, warning: str) -> str:
-    """Translate a known reserved-name warning; leave every other string alone."""
+    """Legacy fallback for a persisted warning whose name is no longer reserved.
+
+    Kept for old Store entries whose ``warning`` text came from an earlier
+    catalogue; new code asks :func:`reserved_warning` with the name's kind.
+    """
     if warning == _BUILTIN.replace("%1", name):
         return QCoreApplication.translate("WarningDialog", _BUILTIN).replace("%1", name)
     if warning == _PLOTTING.replace("%1", name):
@@ -22,4 +40,4 @@ def localize_warning(name: str, warning: str) -> str:
     return warning
 
 
-__all__ = ["localize_warning"]
+__all__ = ["localize_warning", "reserved_warning"]

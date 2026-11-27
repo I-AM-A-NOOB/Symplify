@@ -12,8 +12,8 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
 
-from ..names import SYMPY_CONSTANTS, validate_name
-from .plotting import is_plot_variable, plot_variable_warning
+from ..names import SYMPY_CONSTANTS, reserved_name_kind, validate_name
+from .plotting import plot_variable_warning
 
 
 @lru_cache(maxsize=1)
@@ -43,9 +43,10 @@ def reserved_name_warning(name: str) -> str | None:
     calculator's assignment — so the wording and the precedence cannot drift
     apart again.
     """
-    if is_sympy_name(name):
+    kind = reserved_name_kind(name)
+    if kind == "builtin":
         return f"{name} is a SymPy built-in. You asked for it."
-    if is_plot_variable(name):
+    if kind == "plotting":
         return plot_variable_warning(name)
     return None
 

@@ -25,6 +25,7 @@ from PySide6.QtCore import (
 )
 
 from ..latex_render import LatexStyle, render_data_url
+from ..names import reserved_name_kind
 from ..store_client import StoreClient, StoreClientError
 from ..worker_protocol import (
     Assignment,
@@ -40,7 +41,7 @@ from ..worker_protocol import (
     StoreReply,
 )
 from .log_viewmodel import LogViewModel
-from .warnings import localize_warning
+from .warnings import localize_warning, reserved_warning
 
 if TYPE_CHECKING:
     from .search import VariablesFilterModel
@@ -817,8 +818,14 @@ class VariablesModel(QAbstractTableModel):
         self.countChanged.emit()
 
     def _emit_warning(self, entry: StoreEntry) -> None:
-        if entry.warning:
-            warning = localize_warning(entry.name, entry.warning)
+        # The name decides the warning, not the sentence the Compute worker
+        # happened to persist: a changed source string cannot orphan an old
+        # entry. `entry.warning` is only the fallback for an unknown kind.
+        kind = reserved_name_kind(entry.name)
+        warning = reserved_warning(entry.name, kind) if kind else ""
+        if not warning:
+            warning = localize_warning(entry.name, entry.warning) if entry.warning else ""
+        if warning:
             self.warningOccurred.emit(entry.name, warning)
             self._log_warn(warning)
 
@@ -828,13 +835,13 @@ class VariablesModel(QAbstractTableModel):
         A SymPy built-in changes what an expression resolves to; a plotting
         variable changes what the plot reads. Both are stored anyway — the
         warning is the whole of the consequence, as it always was for built-ins.
+        The kind comes from the static name table (`python/names.py`), so this
+        path stays zero-SymPy and zero-model.
         """
-        from ..model.variable import reserved_name_warning
-
-        warning = reserved_name_warning(name)
-        if warning is None:
+        kind = reserved_name_kind(name)
+        if kind is None:
             return
-        warning = localize_warning(name, warning)
+        warning = reserved_warning(name, kind)
         self.warningOccurred.emit(name, warning)
         self._log_warn(warning)
 

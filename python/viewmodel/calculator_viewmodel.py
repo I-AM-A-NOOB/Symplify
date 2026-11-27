@@ -15,13 +15,14 @@ from qmlmathplot import Curve, Plot
 from qmlmathplot.protocol import Program
 
 from ..latex_render import LatexStyle, svg_data_url
+from ..names import reserved_name_kind
 from ..worker_protocol import Assignment, ParsePolicy, ResultView, StoreEntryCandidate
 from .history_viewmodel import HistoryModel
 from .input_mode import InputMode
 from .latex_jobs import LatexJobs
 from .latex_service import LatexRenderService
 from .log_viewmodel import LogViewModel
-from .warnings import localize_warning
+from .warnings import localize_warning, reserved_warning
 
 if TYPE_CHECKING:
     from .variables_viewmodel import VariablesModel
@@ -1087,12 +1088,14 @@ class CalculatorViewModel(QObject):
             self._log.add_warning(f"Failed to save variable: {e}", "Calculator")
             return
 
-        if candidate is not None and self._variables_model is not None \
-                and self._variables_model.is_store_backed():
-            warning = candidate.warning
+        # Derive the warning from the name/kind, not the persisted sentence:
+        # the source string may change and old entries may carry the old one.
+        kind = reserved_name_kind(name)
+        if kind:
+            warning = reserved_warning(name, kind)
+        elif candidate is not None and candidate.warning:
+            warning = localize_warning(name, candidate.warning)
         else:
-            from ..model.variable import reserved_name_warning
-
-            warning = reserved_name_warning(name)
+            warning = ""
         if warning:
-            self.warningOccurred.emit(name, localize_warning(name, warning))
+            self.warningOccurred.emit(name, warning)

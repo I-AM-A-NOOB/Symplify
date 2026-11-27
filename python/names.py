@@ -37,6 +37,7 @@ __all__ = [
     "SYMPY_CONSTANTS",
     "SYMPY_VERSION",
     "is_sympy_name",
+    "reserved_name_kind",
     "validate_name",
 ]
 
@@ -44,6 +45,21 @@ __all__ = [
 def is_sympy_name(name: str) -> bool:
     """True when ``name`` is a SymPy constant or callable (static table)."""
     return name in SYMPY_CONSTANTS or name in SYMPY_CALLABLES
+
+
+def reserved_name_kind(name: str) -> str | None:
+    """Why ``name`` changes what input means: ``"builtin"``, ``"plotting"`` or None.
+
+    The warning is a pure function of the name and this static table, so the UI
+    derives it here instead of trusting a display sentence the Compute worker
+    persisted. That keeps a changed source string from orphaning old entries and
+    avoids importing :mod:`python.model` (and SymPy) into the UI for a warning.
+    """
+    if is_sympy_name(name):
+        return "builtin"
+    if name in PLOTTING_NAMES:
+        return "plotting"
+    return None
 
 
 def validate_name(name: object) -> bool:
