@@ -142,22 +142,32 @@ DEFAULT_STYLES: dict[Style, str] = {
 }
 
 
+def string_ranges(
+    text: str, tokens: Sequence[Token] | None = None
+) -> list[tuple[int, int]]:
+    """``(start, end)`` of every quoted literal in ``text``.
+
+    A caller that already tokenized (``spans``) passes its tokens instead of
+    paying for the second pass.
+    """
+    tokens = tokenize(text) if tokens is None else tokens
+    return [
+        (token.start, token.start + token.length)
+        for token in tokens
+        if token.kind is TokenKind.STRING
+    ]
+
+
 def mask_strings(
     text: str, tokens: Sequence[Token] | None = None
 ) -> str:
     """``text`` with quoted literals blanked to spaces, at the same positions.
 
-    Bracket pairing and indent scanning run over the raw text, where a ``(`` in
-    ``Symbol("(")`` would otherwise steal the call's partner or paint a
-    quotation mark as an indent. A caller that already tokenized (``spans``)
-    passes its tokens instead of paying for the second pass.
+    Bracket pairing runs over the raw text, where a ``(`` in ``Symbol("(")``
+    would otherwise steal the call's partner. A caller that already tokenized
+    (``spans``) passes its tokens instead of paying for the second pass.
     """
-    tokens = tokenize(text) if tokens is None else tokens
-    ranges = [
-        (token.start, token.start + token.length)
-        for token in tokens
-        if token.kind is TokenKind.STRING
-    ]
+    ranges = string_ranges(text, tokens)
     if not ranges:
         return text
     blanked = list(text)

@@ -2194,8 +2194,10 @@ One lexer, one span list, two renderers. Anything that colours code contributes 
 - **Indent rainbow is whitespace tint, not an indent guide.** `indent_rainbow.spans` splits each
   line's leading whitespace into units (a tab is one level; a short hand-typed group is a level of
   its own), and the highlighter paints each unit's background in the bracket colour for that level
-  at `INDENT_ALPHA` (0.10). The string masking is shared with bracket pairing, so a line inside a
-  triple-quoted string contributes nothing; blank lines are skipped. `workspace.indent_rainbow`
+  at `INDENT_ALPHA` (0.10). A line made only of whitespace keeps its level too — in a Lisp-style
+  block that line is still at that depth — while a line inside a triple-quoted string is filtered
+  out by the highlighter (the span producer scans the real text, not the masked one, so string
+  content is not mistaken for an indented blank line). `workspace.indent_rainbow`
   (Settings → Workspace, on by default) is read when a highlighter is attached and re-applied by
   `refreshCodeHighlighting`. There are **no indent guides and no bracket connector lines**: both
   need a QML overlay synchronised with scrolling and wrapping, which is not worth it on an
@@ -2312,9 +2314,12 @@ One lexer, one span list, two renderers. Anything that colours code contributes 
   expression gives `#b5cea8` digits under Dark+ (dark), `#098658` and `#ee0000` under Light+ once the
   UI is switched to Light, and `#d33682` under Solarized.
   **A live theme change does not rebuild the page, so the highlighter is recoloured in place.**
-  `attachCodeHighlighting` registers each highlighter by its `QTextDocument` in
-  `MainViewModel._code_highlighters` (the document owns the highlighter; its `destroyed` signal
-  drops the entry). `CodeHighlighter.set_palette` swaps the styles/bracket colours, clears the
+  `attachCodeHighlighting` gives each highlighter a token, stores it in
+  `MainViewModel._code_highlighters`, and puts the token on the `QTextDocument` as a dynamic
+  property (the document owns the highlighter; the highlighter's `destroyed` signal drops the
+  entry). **Do not key that registry by the document wrapper**: PySide creates a new wrapper for
+  the same C++ document, so a later lookup misses, and hashing the wrapper after deletion raises
+  and leaves stale entries. The token is how `refreshBracketMatch` finds a highlighter. `CodeHighlighter.set_palette` swaps the styles/bracket colours, clears the
   colour-keyed format cache and recomputes; `MainViewModel.refreshCodeHighlighting(dark)` calls it
   for every registered document. `MainWindow` invokes that slot from
   `Theme.currentThemeChanged` (the OS scheme path **and** the Settings path) and from

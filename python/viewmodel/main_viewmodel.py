@@ -217,12 +217,16 @@ class MainViewModel(QObject):
         self._style_cooldown_until = 0.0
         #: The `LatexStyle` currently handed to the renderers (the last one built).
         self._active_latex_style: LatexStyle | None = None
-        #: Attached code highlighters, by their QTextDocument. A theme switch
-        #: changes the palette in place instead of rebuilding the page, so the
-        #: C++ highlighter needs an explicit recolour (see
-        #: `refreshCodeHighlighting`). The document owns the highlighter; the
-        #: destroyed hook only drops the dictionary entry.
-        self._code_highlighters: dict = {}
+        #: Attached code highlighters, by a token stored on their
+        #: ``QTextDocument``. A theme switch changes the palette in place instead
+        #: of rebuilding the page, so the C++ highlighter needs an explicit
+        #: recolour (see `refreshCodeHighlighting`). The token, not the document
+        #: wrapper, is the key: PySide hands out a new wrapper for the same C++
+        #: document, so a dict keyed by the wrapper could not find it again (and
+        #: a destroyed wrapper made the cleanup hook itself raise). The document
+        #: owns the highlighter; the token is how `refreshBracketMatch` finds it.
+        self._code_highlighters: dict[int, object] = {}
+        self._next_highlighter_token = 1
         #: Rich-text markup memo for the read-only labels: `(plain text, dark,
         #: scope revision) -> markup`. A table cell's binding is re-evaluated on
         #: every resize frame while the details panel animates, and each call used
@@ -279,12 +283,12 @@ class MainViewModel(QObject):
         self._calculator_vm.set_parse_policy(policy)
         self._variables_vm.set_parse_policy(policy)
         self._markup_cache.clear()
-        for document, highlighter in list(self._code_highlighters.items()):
+        for token, highlighter in list(self._code_highlighters.items()):
             try:
                 highlighter.refresh()
             except RuntimeError:
                 # The QObject was deleted before its `destroyed` hook ran.
-                self._code_highlighters.pop(document, None)
+                self._code_highlighters.pop(token, None)
 
     def install_log_capture(self) -> None:
         """Take over Qt's and the interpreter's message streams.
@@ -714,9 +718,15 @@ class MainViewModel(QObject):
             policy_provider=self._settings.parse_policy,
             indent_rainbow=self._settings.indentRainbow,
         )
-        self._code_highlighters[document] = highlighter
-        document.destroyed.connect(
-            lambda *_: self._code_highlighters.pop(document, None)
+        token = self._next_highlighter_token
+        self._next_highlighter_token += 1
+        self._code_highlighters[token] = highlighter
+        # The token lives on the C++ document, so a freshly wrapped document
+        # finds it; the cleanup captures the int, never the wrapper that is
+        # already invalid when `destroyed` fires.
+        document.setProperty("symplifyHighlighterToken", token)
+        highlighter.destroyed.connect(
+            lambda *_: self._code_highlighters.pop(token, None)
         )
 
     @Slot(bool)
@@ -730,7 +740,7 @@ class MainViewModel(QObject):
         (and its old palette) in place.
         """
         styles, bracket_colors = self._palette(dark)
-        for document, highlighter in list(self._code_highlighters.items()):
+        for token, highlighter in list(self._code_highlighters.items()):
             try:
                 highlighter.set_indent_rainbow(self._settings.indentRainbow)
                 if not highlighter.set_palette(styles, bracket_colors):
@@ -739,7 +749,7 @@ class MainViewModel(QObject):
                     highlighter.refresh()
             except RuntimeError:
                 # The QObject was deleted before its `destroyed` hook ran.
-                self._code_highlighters.pop(document, None)
+                self._code_highlighters.pop(token, None)
 
     @Slot(QObject)
     def refreshBracketMatch(self, editor: QObject) -> None:
@@ -747,13 +757,17 @@ class MainViewModel(QObject):
 
         Called on ``cursorPositionChanged`` and ``activeFocusChanged``. An
         unfocused editor clears its box, so two panes cannot both claim the
-        active pair; the highlighter is found through the document it painted,
-        the same key `attachCodeHighlighting` registered.
+        active pair; the highlighter is found through the token
+        `attachCodeHighlighting` stored on the document.
         """
         document = editor.property("textDocument")
         if document is None:
             return
-        highlighter = self._code_highlighters.get(document.textDocument())
+        text_document = document.textDocument()
+        token = text_document.property("symplifyHighlighterToken")
+        if token is None:
+            return
+        highlighter = self._code_highlighters.get(int(token))
         if highlighter is None:
             return
         if not editor.property("activeFocus"):

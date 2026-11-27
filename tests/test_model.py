@@ -34,6 +34,7 @@ from python.code_style import (
     Style,
     color_for,
     mask_strings,
+    string_ranges,
     surface,
     theme,
     to_rich_text,
@@ -2049,6 +2050,8 @@ def test_a_string_is_one_token_and_its_contents_are_data():
     ]
     assert "#ff0000" not in to_rich_text('Symbol("x!")', None, None, None, off)
 
+    assert string_ranges('Symbol("x!")') == [(7, 11)]
+
     # Brackets inside a string are not paired with anything outside it.
     marked = [(span.start, span.style, span.layer)
               for span in code_spans('Symbol("(")')]
@@ -2134,7 +2137,8 @@ def test_indent_rainbow_splits_each_line_into_levels():
     ]
     assert indent_spans("\t\tx") == [(0, 1, 0), (1, 1, 1)]
     assert indent_spans("   x") == [(0, 3, 0)]      # a short hand-typed level
-    assert indent_spans("    \nx") == []            # a blank line has no level
+    assert indent_spans("    \nx") == [(0, 4, 0)]   # whitespace-only line keeps its level
+    assert indent_spans("        \nx") == [(0, 4, 0), (4, 4, 1)]
 
 
 def test_editor_pairs_brackets_and_steps_over_the_closer():

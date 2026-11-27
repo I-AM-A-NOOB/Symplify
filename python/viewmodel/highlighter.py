@@ -26,6 +26,7 @@ from ..code_style import (
     color_for,
     mask_strings,
     spans,
+    string_ranges,
 )
 from ..indent_rainbow import spans as indent_spans
 from ..worker_protocol import ParsePolicy
@@ -177,7 +178,14 @@ class CodeHighlighter(QSyntaxHighlighter):
                 )
 
             if self._indent_rainbow:
-                for start, length, level in indent_spans(masked):
+                # Scan the real text, not the masked one: a whitespace-only
+                # line outside a string is a level the user wants to see, while
+                # a line inside a triple-quoted string is data and must stay
+                # untinted. Masking would turn every string line into blanks.
+                ranges = string_ranges(text)
+                for start, length, level in indent_spans(text):
+                    if any(begin <= start < end for begin, end in ranges):
+                        continue
                     base = bracket_color_for_layer(level, self._bracket_colors)
                     formatted.append(
                         (start, length, self._background_format(base))
